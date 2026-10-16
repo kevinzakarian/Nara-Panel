@@ -1,5 +1,6 @@
 import copy
 import json
+import ipaddress
 import os
 import shutil
 import socket
@@ -269,17 +270,87 @@ class Runtime:
                             self.error = str(exc)
 
 
+def cpu_model():
+    try:
+        records = [line.split(':', 1) for line in Path('/proc/cpuinfo').read_text(errors='replace').splitlines() if ':' in line]
+        for key in ('model name', 'Processor'):
+            for name, value in records:
+                if name.strip() == key and value.strip() and not value.strip().isdigit():
+                    return value.strip()
+    except OSError:
+        pass
+    if os.uname().sysname == 'Linux':
+        try:
+            value = subprocess.run(['lscpu', '--json'], capture_output=True, text=True, timeout=2, env={**os.environ, 'LC_ALL':'C'})
+            if value.returncode == 0:
+                for field in json.loads(value.stdout).get('lscpu', []):
+                    if field.get('field') == 'Model name:' and field.get('data'):
+                        return field['data'].strip()
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+            pass
+    if os.uname().sysname == 'Darwin':
+        try:
+            value = subprocess.run(['/usr/sbin/sysctl', '-n', 'machdep.cpu.brand_string'], capture_output=True, text=True, timeout=2)
+            if value.returncode == 0:
+                return value.stdout.strip() or None
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
+
+
+def interface_addresses():
+    """Assigned interface addresses, never inferred from a third-party service."""
+    try:
+        process = subprocess.run(['ip', '-j', 'address', 'show', 'up'], capture_output=True, text=True, timeout=2)
+        if process.returncode:
+            return None, None
+        addresses = []
+        for interface in json.loads(process.stdout):
+            if interface.get('ifname') == 'lo':
+                continue
+            for entry in interface.get('addr_info', []):
+                if set(entry.get('flags', [])) & {'tentative', 'dadfailed', 'deprecated'} or entry.get('preferred_life_time') == 0:
+                    continue
+                address = ipaddress.ip_address(entry['local'])
+                if not (address.is_loopback or address.is_link_local or address.is_multicast or address.is_unspecified):
+                    addresses.append(address)
+        ordered = sorted(set(addresses), key=lambda address: (not address.is_global, address.version, int(address)))
+        return [str(a) for a in ordered if a.version == 4], [str(a) for a in ordered if a.version == 6]
+    except FileNotFoundError:
+        # Older minimal Linux installs may not yet include iproute2.
+        if os.uname().sysname == 'Linux':
+            try:
+                process = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=2)
+                if process.returncode == 0:
+                    addresses = {ipaddress.ip_address(value) for value in process.stdout.split()}
+                    addresses = sorted((a for a in addresses if not (a.is_loopback or a.is_link_local or a.is_multicast or a.is_unspecified)), key=lambda a: (not a.is_global, a.version, int(a)))
+                    return [str(a) for a in addresses if a.version == 4], [str(a) for a in addresses if a.version == 6]
+            except (OSError, subprocess.SubprocessError, ValueError):
+                pass
+        return None, None
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, AttributeError):
+        return None, None
+
+
 class Metrics:
     def __init__(self):
         self.previous_cpu = None
         self.previous_net = None
         self.samples = []
+        self.hardware = {'cpu_model': None, 'ipv4': None, 'ipv6': None}
+        self.hardware_at = None
 
     def read(self, directory):
         result = {"hostname": socket.gethostname(), "platform": os.uname().sysname,
                   "cpu_percent": None, "memory_total": None, "memory_used": None,
                   "uptime": None, "rx_rate": None, "tx_rate": None,
                   "load": list(os.getloadavg()), "cpu_count": os.cpu_count()}
+        now = time.monotonic()
+        if self.hardware_at is None or now - self.hardware_at >= 60:
+            ipv4, ipv6 = interface_addresses()
+            self.hardware = {'cpu_model': cpu_model(), 'ipv4': ipv4, 'ipv6': ipv6}
+            self.hardware_at = now
+        result.update(self.hardware)
         disk = shutil.disk_usage(directory)
         result.update(disk_total=disk.total, disk_used=disk.used)
         try:

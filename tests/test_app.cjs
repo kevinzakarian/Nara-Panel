@@ -10,7 +10,7 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},editInbound};`);
+ w.eval(fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound};`);
  w.TestApp.setup(fixture);
  return {w,dom,close(){w.close()}};
 }
@@ -37,5 +37,16 @@ test('standalone AnyTLS starts from the same official padding preset',()=>{
   const select=f.w.document.querySelector('[name=type]');select.value='anytls';select.dispatchEvent(new f.w.Event('change'));
   assert.ok(f.w.document.querySelector('#native-fields').textContent.includes('Padding Scheme'));
   assert.ok([...f.w.document.querySelectorAll('#native-fields textarea')].some(input=>input.value==='stop=8'));
+ }finally{f.close()}
+});
+
+test('overview keeps CPU model and each address family in its own escaped row',()=>{
+ const f=app();try{
+  const data={metrics:{hostname:'demo',platform:'Linux',cpu_model:'CPU <model>',ipv4:['203.0.113.10'],ipv6:['2001:db8::10','2001:db8::11'],cpu_count:4,cpu_percent:null,uptime:null,load:[0,0,0],disk_total:100,disk_used:10,samples:[]},core:{running:true,version:'sing-box version 1.14.3',active_revision:0},panel_version:'0.4.1',totals:{},events:[]};
+  const root=f.w.document.createElement('div');root.innerHTML=f.w.TestApp.dashboard(data);
+  const rows=Object.fromEntries([...root.querySelectorAll('.info-row')].map(row=>[row.querySelector('span').textContent,row.querySelector('b').textContent]));
+  assert.equal(rows['CPU model'],'CPU <model>');assert.equal(rows.IPv4,'203.0.113.10');assert.equal(rows.IPv6,'2001:db8::102001:db8::11');assert.equal(root.querySelectorAll('model').length,0);
+  data.metrics.ipv6=[];root.innerHTML=f.w.TestApp.dashboard(data);assert.ok(root.textContent.includes('Not assigned'));
+  data.metrics.ipv6=null;root.innerHTML=f.w.TestApp.dashboard(data);assert.ok(root.textContent.includes('Unavailable'));
  }finally{f.close()}
 });

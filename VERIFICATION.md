@@ -276,3 +276,43 @@ The Settings screenshot contains only this demonstration environment.
 **Not verified:** a root installation/upgrade on a real Linux host, production
 systemd broker behavior, firewall reachability, public ACME issuance/renewal or a
 Docker build/runtime. No production server was accessed or changed.
+
+## Build download resilience and server information (0.4.1)
+
+The full release suite passed **162 Python tests without skips**. After refining
+minimal-Linux/ARM identification and cancellation cleanup, **12 targeted build and
+hardware tests passed**, including new hostname fallback, ARM lscpu model lookup,
+and termination of the owned compiler process on interruption. **49 Node.js tests
+passed**, including distinct escaped IPv4/IPv6/CPU-model Overview rows and the
+unavailable/unassigned states. The dashboard API exposes all three metrics under
+both root and custom panel paths.
+
+The actual updated build script completed for the native Darwin target and for
+**Linux amd64** with the upstream standard capabilities plus V2Ray accounting and
+purego on Linux. Its separate dependency resolution, readonly module graph,
+`go mod verify`, reduced-parallelism compilation and Linux Cronet-library copy all
+completed. The Linux ELF and matching library were checked as artifacts; the ELF
+was not executed on this macOS host. An additional **fresh-cache download of the
+exact reported nftables pseudo-version** succeeded through the official Go proxy
+and checksum database. Its module/archive hashes matched the pinned core go.sum.
+This establishes dependency availability here, not connectivity on the user's
+failing servers; the original final error after `go: downloading` was not supplied.
+
+Real subprocess tests simulated transient timeouts followed by recovery, exhausted
+retries, compiler/memory errors, checksum failures and cancellation. Retries retain
+logs/cache and remain bounded; checksum failures stop without retrying or disabling
+verification. Full Linux apt/systemd installation, a real out-of-memory event and
+Docker build/runtime were not executed. Docker now includes the build helper's
+Python dependency and the iproute2 runtime dependency.
+
+Metrics tests used x86/ARM CPU and Linux interface fixtures, including multiple
+addresses, duplicate removal, private/global ordering, loopback/link-local filtering,
+tentative/deprecated IPv6, a missing family, missing tools and a one-minute refresh.
+No public IP lookup service is contacted. Browser inspection used the isolated
+macOS preview and real CPU model, showed its own labeled row, and recorded no
+console warnings/errors. The screenshot correctly shows unavailable Linux address
+discovery on macOS rather than invented IP values. No production server was changed.
+
+Shell/JavaScript syntax, source packaging, version consistency, private build-log
+permissions and archive contents were checked. Credentials/databases and Go caches
+are excluded from the source package.

@@ -6,7 +6,7 @@ An independent English web panel for running **Sing-box on your own Linux server
 
 ## Included
 
-- **Overview:** Linux CPU, RAM, disk, load, uptime, hostname, sampled network traffic, client traffic totals, core status, and recent events. Unavailable measurements are shown as unavailable.
+- **Overview:** Linux CPU, RAM, disk, load, uptime, hostname, assigned IPv4/IPv6 addresses, CPU model in its own labeled row, sampled network traffic, client traffic totals, core status, and recent events. Unavailable measurements are shown as unavailable.
 - **Inbounds:** all 19 Sing-box 1.14.3 types, including Shadowsocks, ShadowTLS, Hysteria, Snell 5/6, Naive, HTTP/SOCKS, TUN, transparent listeners and Cloudflared. Complete versioned forms include nested protocol/TLS/transport/listen options. Existing VLESS, VMess, Trojan, Hysteria2, TUIC and AnyTLS account management remains available. Standalone listeners manage their own credentials. See the [feature review](FEATURE_REVIEW.md).
 - **TLS:** import PEM certificate/key pairs, validate their match and SAN hostname, generate ECDSA self-signed certificates with one action, show expiry, and download the public certificate. Each profile has explicit client **Allow insecure**, SNI suppression, ALPN, TLS versions and handshake timeout.
 - **DNS:** all 15 typed resolvers, complete logical/default rules and actions, races/speculation, predefined replies, optimistic/cache controls and local/remote/inline rule sets.
@@ -21,7 +21,7 @@ The interface defaults to **English and left-to-right**, with a 16 px body/input
 
 ## Requirements
 
-- Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, and CA certificates.
+- Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, CA certificates and iproute2 for interface discovery. Minimal older Linux installs can fall back to `hostname -I`.
 - Sing-box **1.14.3**, built with the **upstream standard capabilities plus `with_v2ray_api`**. Default official release builds do not include V2Ray API. The supplied build script pins the official source commit and uses its Go module checksums. Building requires Go 1.27.1 or a compatible newer toolchain, Git, and Internet access.
 - Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS. The server manager can set up a dedicated HTTPS reverse proxy, or you can use an existing one.
 
@@ -40,6 +40,10 @@ For an account with sudo access, replace the last `bash` with `sudo bash`.
 The launcher **first refreshes apt package lists and upgrades installed system packages**, keeping existing package configuration files when a decision is required. This can restart system services. It does not run a distribution release upgrade, remove packages automatically or reboot the server; a pending-reboot notice appears in the menu. It then opens the English **NARA server manager**. Package-update errors stop preparation with an error rather than being reported as success.
 
 Choose **1 — New installation** for a new server or to reinstall previously retained data. For an existing installation, choose **2 — Upgrade panel only** (keep the core) or **3 — Upgrade panel + rebuild bundled compatible core**. Option 3 builds the pinned core supported by this panel, rather than replacing it with an untested release. The verified, isolated Go toolchain is downloaded only when a build is needed. Building can take several minutes; the existing service continues running during the build.
+
+Core builds now resolve dependencies before compilation and retry temporary download failures up to three times, with a 15-minute limit per download attempt. The default module proxy uses `https://proxy.golang.org|direct`, so transport/server errors can fall back to upstream sources; this follows [Go's documented fallback behavior](https://go.dev/ref/mod#goproxy-protocol). Existing `GOPROXY` overrides are respected. TLS and checksum verification remain enabled; integrity failures stop immediately. Compilation defaults to one package at a time, two Go scheduler threads and `GOGC=50` to reduce peak memory; this does not guarantee a build on every low-memory server.
+
+Manager builds retain verified modules and compilation cache in `/var/cache/nara-panel/`; a failed build can reuse these downloads on the next attempt. Full step diagnostics are saved privately to `/var/cache/nara-panel/build.log`, including download errors and a memory hint when a compiler is killed. The `go: downloading ...` line is normal progress; the following error determines the cause. The cache is local, contains no panel accounts and is retained across upgrades/removal. Manual builds use a private `build.log` next to the output binary unless `NARA_BUILD_LOG` is set. `NARA_BUILD_JOBS` can override the default package parallelism.
 
 Every question has a bold cyan **[INPUT]** marker, with the default in brackets. Password prompts explain that typing is hidden. `NO_COLOR` or a plain terminal disables ANSI colors while preserving the markers. A new installation asks for:
 
@@ -61,7 +65,7 @@ In **Settings → Panel & subscription access**, change all four entry values an
 
 ![Independent panel and subscription settings](screenshots/settings-0.4.jpg)
 
-For a manual source installation on other systemd Linux distributions, install Python/venv, Git, a compatible Go toolchain, OpenSSL and CA certificates first, then run:
+For a manual source installation on other systemd Linux distributions, install Python/venv, Git, a compatible Go toolchain, OpenSSL, CA certificates and iproute2 first, then run:
 
 ```sh
 sudo sh scripts/install.sh
@@ -134,6 +138,12 @@ Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, ful
 Version **0.3.1** adds the interactive server manager, highlighted terminal input, system-package preparation, protected backups/removal and panel HTTPS setup. The short app-only `update.sh` command remains available; it does not perform the system-package upgrade or open the menu.
 
 The panel only reports available updates; it never installs a newer core automatically. Forms target 1.14.3. Review compatibility before independently moving the core to another version.
+
+## Server information
+
+Overview → Service information lists **IPv4**, **IPv6** and **CPU model** in separate label/value rows. Addresses come from the server's active interfaces, refreshed every minute, with duplicates, loopback, link-local and unusable addresses removed. Globally routable addresses appear first; private addresses are also listed. This does not discover an external NAT address through a public lookup service. CPU identification uses `/proc/cpuinfo`, with `lscpu` model fallback for ARM hosts. A missing address family shows **Not assigned**; failed discovery shows **Unavailable**. The macOS development preview can show unavailable Linux interface data without inventing values.
+
+![Overview server information in an isolated macOS preview](screenshots/server-info-0.4.1.jpg)
 
 ## Complete core configuration
 

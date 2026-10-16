@@ -15,7 +15,7 @@ prepare_system() {
     ui_warn 'Upgrading installed system packages. Services may restart; the server will not reboot automatically.'
     apt-get update </dev/null
     DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y </dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip python3 </dev/null
+    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip python3 iproute2 </dev/null
 }
 latest_source() {
     [[ -z "$manager_work" ]] || return 0
@@ -45,7 +45,9 @@ prepare_build() {
 full_install() {
     latest_source
     prepare_build
-    PATH="$manager_work/go/bin:$PATH" GOPATH="$manager_work/gopath" GOCACHE="$manager_work/gocache" NARA_KEEP_ENTRY=1 NARA_MANAGER_LOCK_HELD=1 sh "$latest_dir/scripts/install.sh" </dev/tty
+    # Keep verified dependencies across failed builds/menu retries.
+    install -d -m 700 /var/cache/nara-panel /var/cache/nara-panel/go /var/cache/nara-panel/go-build
+    PATH="$manager_work/go/bin:$PATH" GOPATH=/var/cache/nara-panel/go GOCACHE=/var/cache/nara-panel/go-build NARA_BUILD_LOG=/var/cache/nara-panel/build.log NARA_KEEP_ENTRY=1 NARA_MANAGER_LOCK_HELD=1 sh "$latest_dir/scripts/install.sh" </dev/tty
 }
 backup_installed() {
     # Old versions do not yet include the maintenance module.

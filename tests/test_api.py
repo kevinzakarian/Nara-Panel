@@ -257,6 +257,7 @@ class APITests(unittest.TestCase):
         self.assertTrue(data['updates']['core']['available'])
         self.assertEqual(data['updates']['interval_hours'],24)
         self.assertIn('panel_version',data)
+        self.assertTrue({'cpu_model','ipv4','ipv6'} <= data['metrics'].keys())
 
 
 class WebPathTests(APITests):

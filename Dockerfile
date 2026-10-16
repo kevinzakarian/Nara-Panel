@@ -1,9 +1,11 @@
 FROM golang:1.27.1-bookworm AS core
-COPY scripts/build-core.sh /build-core.sh
+RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/build-core.sh scripts/build-step.py /
 RUN sh /build-core.sh /sing-box
 
 FROM python:3.12-slim-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin nara
 WORKDIR /app
