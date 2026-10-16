@@ -12,6 +12,10 @@ def choice(key, label, values, **kwargs):
     return field(key, label, "select", choices=values, **kwargs)
 
 
+ANYTLS_PADDING = ["stop=8", "0=30-30", "1=100-400",
+    "2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000",
+    "3=9-9,500-1000", "4=500-1000", "5=500-1000", "6=500-1000", "7=500-1000"]
+
 QUIC = [field("idle_timeout", "Idle timeout", hint="For example 30s; blank uses the core default"),
         field("keep_alive_period", "Keep-alive period", hint="For example 15s"),
         field("stream_receive_window", "Stream receive window", "memory", hint="For example 8 MB"),
@@ -43,7 +47,7 @@ SERVER = {
              field("auth_timeout", "Authentication timeout", hint="Default: 3s"),
              field("heartbeat", "Heartbeat interval", hint="Default: 10s"),
              field("zero_rtt_handshake", "Allow 0-RTT handshake", "checkbox", hint="Faster reconnects allow replay risk. Disabled by default.")],
-    "anytls": [field("padding_scheme", "Padding scheme", "lines", hint="One padding rule per line; blank uses the official default.")]
+    "anytls": [field("padding_scheme", "Padding scheme", "lines", default=ANYTLS_PADDING, hint="The official AnyTLS padding is filled in automatically. Keep it unless you need a custom scheme.")]
 }
 CLIENT = {
     "vless": [choice("packet_encoding", "UDP packet encoding", ["", "xudp", "packetaddr"])],
@@ -213,7 +217,10 @@ def validate_destination(dest):
 
 
 def server_options(i):
-    return {k: copy.deepcopy(v) for k, v in i.get("server_options", {}).items() if k not in ("flow", "alter_id")}
+    result = {k: copy.deepcopy(v) for k, v in i.get("server_options", {}).items() if k not in ("flow", "alter_id")}
+    if i.get("type") == "anytls" and not result.get("padding_scheme"):
+        result["padding_scheme"] = ANYTLS_PADDING.copy()
+    return result
 
 
 def client_options(i):

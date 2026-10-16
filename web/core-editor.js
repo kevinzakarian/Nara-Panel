@@ -31,7 +31,7 @@ const CoreSchema=(()=>{
   if('const' in s)return clone(s.const);
   if(s.default!==undefined)return clone(s.default);
   if(s.enum)return clone(s.enum[0]);
-  if(s.type==='object'||s.properties){const v={};for(const k of s.required||[])if(s.properties[k])v[k]=seed(s.properties[k]);for(const [k,p] of Object.entries(s.properties||{}))if('const' in p)v[k]=p.const;return v;}
+  if(s.type==='object'||s.properties){const v={};for(const k of s.required||[])if(s.properties[k])v[k]=seed(s.properties[k]);for(const [k,p] of Object.entries(s.properties||{}))if('const' in p)v[k]=p.const;if(v.type==='anytls'&&s.properties?.padding_scheme&&catalog.defaults?.anytls_padding)v.padding_scheme=clone(catalog.defaults.anytls_padding);return v;}
   return s.type==='array'?[]:s.type==='boolean'?false:['integer','number'].includes(s.type)?0:'';
  }
  function byName(name){return catalog.schema.$defs[name];}

@@ -232,3 +232,47 @@ installation, systemd sandbox/capabilities, account creation/removal, production
 ACME issuance/renewal, and a remote-server deployment were not performed. These
 require a Linux target and, for public issuance, a configured domain and reachable
 TCP 80/443. No user's server settings were changed during development.
+
+## Independent subscription access and entry settings (0.4.0)
+
+The release suite passed **152 Python tests without skips**, followed by an
+additional regression confirming that upgrades from a single-site Caddy 2.4
+installation persist its legacy syntax mode for future entry changes. **48 Node.js
+tests passed**, including protocol selection, managed/standalone AnyTLS padding,
+independently decoded QR payloads and subscription URL construction.
+
+Real HTTP handlers verified independent subscription serving, identical exported
+VPN JSON, traffic headers, revocation, authenticated/CSRF-protected entry changes,
+and rejection of panel/login/admin routes on the subscription port. Actual Caddy
+**2.4.6 and 2.6.2** ran dual-port HTTPS tests against the real panel/subscription
+handlers: both domains and IP/no-SNI cases passed certificate verification. The
+subscription HTTPS port served an actual generated profile and no admin assets.
+The complete feature-enabled Sing-box 1.14.3 core passed the existing real traffic,
+accounting, DNS/routing, auto-apply and rollback integrations, including AnyTLS.
+
+Access broker tests verify four-field validation, revision checks, exclusive private
+requests, occupied/saved inbound ports, port swaps, rollback of environment and
+both URL models, separate HTTPS public/backend ports, maintenance rejection, and
+request/result symlink safety. Maintenance and installer tests also cover previous
+manager behavior and old HTTPS migration. These systemd/installation tests use
+isolated fixtures or command mocks; they do not execute real systemd on Linux.
+
+The actual installer helper ran in a controlling terminal with four empty answers:
+it generated distinct mixed-case eight-letter webPath/subPath values and selected
+10000/10001. Its temporary environment file had mode 0600. Shell/JavaScript syntax,
+source packaging and archive contents were checked.
+
+Browser checks used an isolated local store, demonstration certificate/account and
+the real compatible core. They verified the blank protocol chooser, disabled Save,
+automatically displayed nine-line AnyTLS padding, removed sidebar hostname box,
+and all four Settings fields. Saving changed the actual preview from panel
+2095/AbCdEfGh + subscription 2096/JkLmNoPq to panel 2097/NewPanelAb + subscription
+2098/ClientFeed. The browser reconnected, signed in again, and displayed an official
+Sing-box QR URI containing only the new independent subscription address. The
+preview runner simulated systemctl solely for its own subprocesses; configuration
+and data stayed under /private/tmp. No browser console warnings/errors remained.
+The Settings screenshot contains only this demonstration environment.
+
+**Not verified:** a root installation/upgrade on a real Linux host, production
+systemd broker behavior, firewall reachability, public ACME issuance/renewal or a
+Docker build/runtime. No production server was accessed or changed.

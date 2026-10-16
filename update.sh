@@ -11,6 +11,8 @@ app_dir=/opt/nara-panel
 work_dir=$(mktemp -d)
 rollback_needed=0
 was_running=0
+was_access_running=0
+if systemctl is-active --quiet nara-panel-access.path; then was_access_running=1; fi
 if systemctl is-active --quiet nara-panel; then was_running=1; fi
 cleanup() {
     status=$?
@@ -18,6 +20,22 @@ cleanup() {
     if [[ $status != 0 && $rollback_needed == 1 ]]; then
         echo 'Update failed; restoring the previous application code.' >&2
         systemctl stop nara-panel || true
+        systemctl stop nara-panel-access.path || true
+        if [[ -f "$work_dir/backup/urls.json" ]]; then
+            (cd "$app_dir" && .venv/bin/python -m nara.access restore-urls --snapshot "$work_dir/backup/urls.json") || true
+        fi
+        if [[ -f "$work_dir/backup/panel.env" ]]; then cp -p "$work_dir/backup/panel.env" /etc/nara-panel.env; fi
+        for suffix in path service; do
+            if [[ -f "$work_dir/backup/access.$suffix" ]]; then cp -p "$work_dir/backup/access.$suffix" "/etc/systemd/system/nara-panel-access.$suffix";
+            else rm -f "/etc/systemd/system/nara-panel-access.$suffix"; fi
+        done
+        if [[ $was_access_running == 0 ]]; then systemctl disable nara-panel-access.path || true; fi
+        for item in Caddyfile metadata.json; do
+            if [[ -f "$work_dir/backup/$item" ]]; then cp -p "$work_dir/backup/$item" "/etc/nara-panel/https/current/$item"; fi
+        done
+        systemctl daemon-reload || true
+        if [[ $was_access_running == 1 ]]; then systemctl start nara-panel-access.path || true; fi
+        if [[ -f "$work_dir/backup/Caddyfile" ]]; then systemctl restart nara-panel-https || true; fi
         for item in nara web scripts; do
             rm -rf "$app_dir/$item"
             if [[ -d "$work_dir/backup/$item" ]]; then cp -R "$work_dir/backup/$item" "$app_dir/"; fi
@@ -55,6 +73,15 @@ mkdir "$work_dir/backup"
 cp -R "$app_dir/nara" "$app_dir/web" "$work_dir/backup/"
 if [[ -d "$app_dir/scripts" ]]; then cp -R "$app_dir/scripts" "$work_dir/backup/"; fi
 if [[ -f /usr/local/bin/nara ]]; then cp /usr/local/bin/nara "$work_dir/backup/manager-command"; fi
+if [[ -f /etc/nara-panel.env ]]; then cp -p /etc/nara-panel.env "$work_dir/backup/panel.env"; fi
+for suffix in path service; do
+    if [[ -f "/etc/systemd/system/nara-panel-access.$suffix" ]]; then cp -p "/etc/systemd/system/nara-panel-access.$suffix" "$work_dir/backup/access.$suffix"; fi
+done
+for item in Caddyfile metadata.json; do
+    if [[ -f "/etc/nara-panel/https/current/$item" ]]; then cp -p "/etc/nara-panel/https/current/$item" "$work_dir/backup/"; fi
+done
+# Run the new source's owner-safe snapshot against the existing database.
+(cd "$source_dir" && "$app_dir/.venv/bin/python" -m nara.access snapshot) > "$work_dir/backup/urls.json"
 systemctl stop nara-panel
 rollback_needed=1
 for item in nara web scripts; do
@@ -63,6 +90,11 @@ for item in nara web scripts; do
 done
 install -m 755 "$source_dir/scripts/nara-command.sh" /usr/local/bin/nara
 chmod -R u=rwX,go=rX "$app_dir/nara" "$app_dir/web"
+(cd "$app_dir" && .venv/bin/python -m nara.access migrate)
+install -m 644 "$source_dir/deploy/nara-panel-access.path" /etc/systemd/system/nara-panel-access.path
+install -m 644 "$source_dir/deploy/nara-panel-access.service" /etc/systemd/system/nara-panel-access.service
+systemctl daemon-reload
+systemctl enable --now nara-panel-access.path
 systemctl start nara-panel
 cd "$app_dir"
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
@@ -84,4 +116,9 @@ for attempt in range(30):
 else:
     raise SystemExit('Service did not become ready. Review: journalctl -u nara-panel -n 50')
 PY
+if [[ -f /etc/nara-panel/https/current/metadata.json ]]; then
+    .venv/bin/python -m nara.maintenance restore-https
+fi
+.venv/bin/python -c 'from nara.maintenance import Layout, subscription_health; subscription_health(Layout())'
+echo 'Share refreshed subscription links/QR codes; subscriptions now use their own path and port.'
 rollback_needed=0

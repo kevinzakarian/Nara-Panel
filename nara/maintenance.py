@@ -10,19 +10,21 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 import pwd
 import re
 import shutil
 import socket
 import sqlite3
 import ssl
+import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
 import urllib.request
-from .install_config import normalize_web_path, panel_port, read_env
+from .install_config import normalize_web_path, panel_port, read_env, port_available
 from .runtime import atomic_write
 from .terminal import input_label, styled
 
@@ -116,7 +118,7 @@ def backup(paths):
                     archive.add(staging / "panel.sqlite3", arcname="var/lib/nara-panel/panel.sqlite3")
                 if paths.data.exists():
                     for item in paths.data.iterdir():
-                        if item.name not in ("panel.sqlite3", "panel.sqlite3-wal", "panel.sqlite3-shm", "panel.lock", "core.log", "runtime"):
+                        if item.name not in ("panel.sqlite3", "panel.sqlite3-wal", "panel.sqlite3-shm", "panel.lock", "core.log", "runtime", "access-request.json", "access-result.json") and not item.name.startswith(".access-"):
                             archive.add(item, arcname="var/lib/nara-panel/" + item.name)
                 for item in (paths.env, paths.https, paths.https_data,
                              paths.unit,
@@ -158,7 +160,7 @@ def site_url(host, path):
     return "https://" + ("[" + host + "]" if ":" in host else host) + path + "/"
 
 
-def caddyfile(host, port, path, mode, generation, legacy=False):
+def caddyfile(host, port, path, mode, generation, legacy=False, public_port=443):
     host = hostname(host, automatic=mode == "automatic")
     port = panel_port(port)
     path = normalize_web_path(path)
@@ -179,7 +181,7 @@ def caddyfile(host, port, path, mode, generation, legacy=False):
     # an older server-options syntax. Caddy 2.6+ enable it by default.
     if not legacy:
         lines += ["    servers {", "        protocols h1 h2", "    }"]
-    lines += ["}", "https://" + authority + " {"]
+    lines += ["}", "https://" + authority + (":" + str(public_port) if int(public_port) != 443 else "") + " {"]
     if mode != "automatic":
         lines += ['    tls "' + str(generation / "cert.pem") + '" "' + str(generation / "key.pem") + '"']
     # Preserve the prefix, including all subscription URLs. No access logs/tokens.
@@ -188,6 +190,33 @@ def caddyfile(host, port, path, mode, generation, legacy=False):
     else:
         lines += ["    reverse_proxy 127.0.0.1:" + str(port)]
     return "\n".join(lines + ["}", ""])
+
+
+def proxy_config(host, config, mode, generation, legacy=False):
+    panel = caddyfile(host, config['NARA_PORT'], config['NARA_WEB_PATH'], mode, generation,
+                      legacy=legacy, public_port=int(config.get('NARA_PUBLIC_PANEL_PORT', 443)))
+    subscription = caddyfile(host, config.get('NARA_SUB_PORT', 10001), config.get('NARA_SUB_PATH', '/subscriptions'), mode, generation,
+                             legacy=legacy, public_port=int(config.get('NARA_PUBLIC_SUB_PORT', 8443)))
+    return panel + '\nhttps://' + subscription.partition('https://')[2]
+
+
+def ask_https_ports(config, owned=()):
+    from .access import validate
+    reserved = {80, int(config['NARA_PORT']), int(config.get('NARA_SUB_PORT', 10001)), int(config.get('NARA_STATS_PORT', 10085))}
+    ports = {}
+    for key, label, default in [('NARA_PUBLIC_PANEL_PORT', 'HTTPS panel port', 443), ('NARA_PUBLIC_SUB_PORT', 'HTTPS subscription port', 8443)]:
+        while True:
+            try:
+                port = panel_port(ask(label + ' [' + str(config.get(key, default)) + ']:').strip() or str(config.get(key, default)))
+                if port in reserved or port in ports.values():
+                    raise ValueError('Choose a different port; this one is reserved or already selected')
+                if port not in owned and not port_available(port):
+                    raise ValueError('This HTTPS port is already in use; choose another port')
+                ports[key] = str(port)
+                break
+            except ValueError as exc:
+                print(str(exc))
+    return ports
 
 
 def ask(message):
@@ -213,8 +242,8 @@ def read_pem(path):
     return value
 
 
-def assert_proxy_ports_free():
-    for port in (80, 443):
+def assert_proxy_ports_free(ports=(80, 443)):
+    for port in sorted(set(ports)):
         for family, address in ((socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")):
             try:
                 with socket.socket(family, socket.SOCK_STREAM) as sock:
@@ -269,16 +298,18 @@ WantedBy=multi-user.target
 """.replace("/usr/bin/caddy", shutil.which("caddy") or "/usr/bin/caddy")
 
 
-def verify_https(host, path, certificate=None, timeout=90):
+def verify_https(host, path, certificate=None, timeout=90, port=443):
     context = ssl.create_default_context(cafile=str(certificate) if certificate else None)
     # Test local listener with the real SNI and certificate verification, independent
     # of DNS hairpin/NAT. The CA still validates public DNS and reachability itself.
     deadline = time.monotonic() + timeout
     while True:
         try:
-            with socket.create_connection(("127.0.0.1", 443), timeout=3) as raw:
+            with socket.create_connection(("127.0.0.1", port), timeout=3) as raw:
                 with context.wrap_socket(raw, server_hostname=host) as stream:
                     authority = "[" + host + "]" if ":" in host else host
+                    if port != 443:
+                        authority += ":" + str(port)
                     request = "GET " + path + "/api/health HTTP/1.1\r\nHost: " + authority + "\r\nConnection: close\r\n\r\n"
                     stream.sendall(request.encode("ascii"))
                     if b" 200 " in stream.recv(4096).split(b"\r\n", 1)[0]:
@@ -286,11 +317,120 @@ def verify_https(host, path, certificate=None, timeout=90):
         except (OSError, ValueError):
             pass
         if time.monotonic() >= deadline:
-            raise ValueError("HTTPS or certificate verification failed. Check DNS, TCP 80/443 and journalctl -u nara-panel-https -n 50. Previous settings were restored.")
+            raise ValueError("HTTPS or certificate verification failed. Check DNS, the selected HTTPS port, TCP 80 and journalctl -u nara-panel-https -n 50. Previous settings were restored.")
         time.sleep(2)
 
 
+def needs_database_owner(paths):
+    if os.geteuid() != 0:
+        return False
+    database = (paths.data / 'panel.sqlite3').lstat()
+    owner = paths.data.stat()
+    if not stat.S_ISREG(database.st_mode) or database.st_uid != owner.st_uid:
+        raise ValueError('Invalid panel database ownership or file type')
+    return owner.st_uid != 0
+
+
+def database_as_owner(paths, operation):
+    owner = paths.data.stat()
+    reader, writer = os.pipe()
+    process = os.fork()
+    if process == 0:
+        os.close(reader)
+        try:
+            os.setgroups([]); os.setgid(owner.st_gid); os.setuid(owner.st_uid)
+            result = {'ok': True, 'value': operation()}
+        except Exception as exc:
+            result = {'ok': False, 'error': str(exc)}
+        with os.fdopen(writer, 'w') as output:
+            json.dump(result, output)
+        os._exit(0)
+    os.close(writer)
+    try:
+        with os.fdopen(reader) as source:
+            result = json.load(source)
+    finally:
+        os.waitpid(process, 0)
+    if not result.get('ok'):
+        raise ValueError(result.get('error', 'Database update failed'))
+    return result.get('value')
+
+
+def configured_inbound_ports(paths):
+    """Reserve saved listeners even while installation has stopped their core."""
+    if not (paths.data / 'panel.sqlite3').exists():
+        return set()
+    if needs_database_owner(paths):
+        return set(database_as_owner(paths, lambda: sorted(configured_inbound_ports(paths))))
+    from .store import Store
+    state = Store(paths.data).get('state')
+    return {int(port) for item in state.get('inbounds', [])
+            if item.get('enabled', True)
+            for port in [item.get('config', {}).get('listen_port') if item.get('mode') == 'native' else item.get('port')]
+            if port}
+
+
+def subscription_health(paths):
+    config = settings(paths)
+    probe = dict(config, NARA_PORT=config.get('NARA_SUB_PORT', '10001'), NARA_WEB_PATH=config.get('NARA_SUB_PATH', '/subscriptions'))
+    # Reuse the same bounded health probe without changing the saved environment.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    url = 'http://127.0.0.1:' + probe['NARA_PORT'] + probe['NARA_WEB_PATH'] + '/api/health'
+    for _ in range(30):
+        try:
+            with opener.open(url, timeout=2) as response:
+                if response.status == 200:
+                    return
+        except OSError:
+            pass
+        time.sleep(1)
+    raise ValueError('Subscription listener did not become ready')
+
+
+def update_access_urls(paths, values, config):
+    if needs_database_owner(paths):
+        return database_as_owner(paths, lambda: update_access_urls(paths, values, config))
+    from .store import Store
+    from .access import change_url, public_url
+    store = Store(paths.data)
+    previous = {}
+    with store.connect() as db:
+        for name in ('state', 'active'):
+            row = db.execute('SELECT value FROM kv WHERE key=?', (name,)).fetchone()
+            if not row:
+                continue
+            state = json.loads(row[0])
+            previous[name] = {key: state['settings'].get(key, '') for key in ('public_url', 'subscription_url')}
+            host = config.get('NARA_PUBLIC_HOST')
+            if host:
+                state['settings']['public_url'] = public_url(host, values['panel_port'], values['web_path'], 'https')
+                state['settings']['subscription_url'] = public_url(host, values['subscription_port'], values['sub_path'], 'https')
+            else:
+                if previous[name]['public_url']:
+                    state['settings']['public_url'] = change_url(previous[name]['public_url'], values)
+                if previous[name]['subscription_url']:
+                    source = urlsplit(previous[name]['subscription_url'])
+                    state['settings']['subscription_url'] = public_url(source.hostname, values['subscription_port'], values['sub_path'], source.scheme)
+            db.execute('UPDATE kv SET value=? WHERE key=?', (json.dumps(state), name))
+    return previous
+
+
+def restore_access_urls(paths, previous):
+    if needs_database_owner(paths):
+        return database_as_owner(paths, lambda: restore_access_urls(paths, previous))
+    from .store import Store
+    store = Store(paths.data)
+    with store.connect() as db:
+        for name, urls in previous.items():
+            row = db.execute('SELECT value FROM kv WHERE key=?', (name,)).fetchone()
+            if row:
+                state = json.loads(row[0]); state['settings'].update(urls)
+                db.execute('UPDATE kv SET value=? WHERE key=?', (json.dumps(state), name))
+
+
 def set_public_url(paths, url):
+    if needs_database_owner(paths):
+        return database_as_owner(paths, lambda: set_public_url(paths, url))
     from .store import Store
     store = Store(paths.data)
     previous = {}
@@ -306,6 +446,8 @@ def set_public_url(paths, url):
 
 
 def restore_public_urls(paths, values):
+    if needs_database_owner(paths):
+        return database_as_owner(paths, lambda: restore_public_urls(paths, values))
     from .store import Store
     store = Store(paths.data)
     with store.connect() as db:
@@ -319,7 +461,7 @@ def restore_public_urls(paths, values):
 
 def configure_https(paths, mode):
     config = settings(paths)
-    if int(config["NARA_PORT"]) in (80, 443):
+    if int(config["NARA_PORT"]) in (80, 443) or int(config.get("NARA_SUB_PORT", 10001)) in (80, 443):
         raise ValueError("First move the internal panel port away from 80/443 in /etc/nara-panel.env and restart NARA.")
     print("\nPanel HTTPS uses a dedicated Caddy proxy on TCP 80/443.")
     print("The internal panel will listen only on 127.0.0.1; its port and webPath are preserved.")
@@ -332,6 +474,11 @@ def configure_https(paths, mode):
     host = hostname(ask("Public domain:" if mode == "automatic" else "Domain or IP:"), automatic=mode == "automatic")
     if mode == "automatic":
         socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    owned = {int(config.get('NARA_PUBLIC_PANEL_PORT', 443))} if active('nara-panel-https') else set()
+    if owned and config.get('NARA_PUBLIC_SUB_PORT'):
+        owned.add(int(config['NARA_PUBLIC_SUB_PORT']))
+    config.update(ask_https_ports(config, owned))
+    config.update(NARA_PUBLIC_HOST=host, NARA_SUB_SCHEME='https')
     certificate_pem = private_key_pem = None
     if mode == "import":
         cert_source = Path(ask("Full-chain certificate PEM file (absolute path):")).expanduser()
@@ -359,7 +506,7 @@ def configure_https(paths, mode):
     try:
         if was_proxy:
             run(["systemctl", "stop", "nara-panel-https"])
-        assert_proxy_ports_free()
+        assert_proxy_ports_free((80, int(config['NARA_PUBLIC_PANEL_PORT']), int(config['NARA_PUBLIC_SUB_PORT'])))
         ensure_caddy()
         installed_caddy = run(["caddy", "version"], capture_output=True).stdout
         match = re.search(r"v?(\d+)\.(\d+)\.", installed_caddy)
@@ -381,8 +528,11 @@ def configure_https(paths, mode):
         if mode != "automatic":
             from .server import certificate_info
             certificate_info({"server_name": host, "certificate": (generation / "cert.pem").read_text(), "private_key": (generation / "key.pem").read_text()})
-        atomic_write(generation / "Caddyfile", caddyfile(host, config["NARA_PORT"], config["NARA_WEB_PATH"], mode, generation, legacy=legacy_caddy))
-        atomic_write(generation / "metadata.json", json.dumps({"host": host, "mode": mode, "url": site_url(host, config["NARA_WEB_PATH"])}))
+        atomic_write(generation / "Caddyfile", proxy_config(host, config, mode, generation, legacy=legacy_caddy))
+        from .access import public_url
+        atomic_write(generation / "metadata.json", json.dumps({"host": host, "mode": mode, "legacy": legacy_caddy,
+            "url": public_url(host, config['NARA_PUBLIC_PANEL_PORT'], config['NARA_WEB_PATH'], 'https'),
+            "subscription_url": public_url(host, config['NARA_PUBLIC_SUB_PORT'], config.get('NARA_SUB_PATH', '/subscriptions'), 'https')}))
         for item in [generation, *generation.iterdir()]:
             shutil.chown(item, user="root", group="nara-https")
             item.chmod(0o750 if item.is_dir() else 0o640)
@@ -399,17 +549,21 @@ def configure_https(paths, mode):
         proxy_touched = True
         run(["systemctl", "start", "nara-panel-https"])
         print("Waiting for a verified HTTPS connection (up to 90 seconds)...")
-        verify_https(host, config["NARA_WEB_PATH"], generation / "cert.pem" if mode == "self-signed" else None)
+        verify_https(host, config["NARA_WEB_PATH"], generation / "cert.pem" if mode == "self-signed" else None, port=int(config['NARA_PUBLIC_PANEL_PORT']))
+        verify_https(host, config.get('NARA_SUB_PATH', '/subscriptions'), generation / "cert.pem" if mode == "self-signed" else None, port=int(config['NARA_PUBLIC_SUB_PORT']))
         # Finish root-side SQLite writes while the service is stopped; all
         # journal files are closed before returning the DB to its service user.
         run(["systemctl", "stop", "nara-panel"])
-        old_urls = set_public_url(paths, site_url(host, config["NARA_WEB_PATH"]))
+        from .access import from_env
+        old_urls = update_access_urls(paths, from_env(config), config)
         # Load the updated active model into memory too, so future quota-driven
         # reapplication cannot restore a stale public URL.
         run(["systemctl", "restart", "nara-panel"])
         panel_health(paths)
         run(["systemctl", "enable", "nara-panel-https"])
-        print(styled("HTTPS is ready: " + site_url(host, config["NARA_WEB_PATH"]), color="32"))
+        from .access import public_url
+        print(styled("HTTPS panel: " + public_url(host, config['NARA_PUBLIC_PANEL_PORT'], config['NARA_WEB_PATH'], 'https'), color="32"))
+        print(styled("HTTPS subscriptions: " + public_url(host, config['NARA_PUBLIC_SUB_PORT'], config.get('NARA_SUB_PATH', '/subscriptions'), 'https'), color="32"))
         if mode == "automatic":
             print("Caddy renews the certificate automatically while its service is running.")
         else:
@@ -427,7 +581,7 @@ def configure_https(paths, mode):
             subprocess.run(["systemctl", "disable", "nara-panel-https"], check=False)
         if old_urls is not None:
             run(["systemctl", "stop", "nara-panel"])
-            restore_public_urls(paths, old_urls)
+            restore_access_urls(paths, old_urls)
         atomic_write(paths.env, old_env)
         current.unlink(missing_ok=True)
         if old_target:
@@ -455,6 +609,8 @@ def https_status(paths):
         print("Panel HTTPS has not been configured through NARA. An external proxy may be configured separately.")
         return
     data = json.loads(metadata.read_text())
+    if data.get("subscription_url"):
+        print("Subscription URL base: " + data["subscription_url"])
     print("HTTPS URL: " + data["url"] + "\nCertificate mode: " + data["mode"])
     print("HTTPS service: " + ("running" if active("nara-panel-https") else "stopped"))
     certificate = paths.https / "current/cert.pem"
@@ -483,13 +639,42 @@ def restore_https_service(paths):
     if paths.https_data.exists():
         for item in [paths.https_data, *paths.https_data.rglob("*")]:
             shutil.chown(item, user="nara-https", group="nara-https")
+    config = settings(paths)
+    data = json.loads(metadata.read_text())
+    installed_version = run(['caddy', 'version'], capture_output=True).stdout
+    version_match = re.search(r'v?(\d+)\.(\d+)\.', installed_version)
+    if not version_match or tuple(map(int, version_match.groups())) < (2, 4):
+        raise ValueError('Caddy 2.4 or later is required')
+    data['legacy'] = tuple(map(int, version_match.groups())) < (2, 6)
+    if not config.get('NARA_PUBLIC_SUB_PORT'):
+        owned = {urlsplit(data['url']).port or 443} if data.get('url') else {443}
+        if data.get('subscription_url'):
+            owned.add(urlsplit(data['subscription_url']).port or 443)
+        config.update(ask_https_ports(config, owned))
+    config.update(NARA_PUBLIC_HOST=data['host'], NARA_SUB_SCHEME='https')
+    atomic_write(paths.https / 'current/Caddyfile', proxy_config(data['host'], config, data['mode'], (paths.https / 'current').resolve(), data.get('legacy', False)))
+    shutil.chown(paths.https / 'current/Caddyfile', user='root', group='nara-https')
+    (paths.https / 'current/Caddyfile').chmod(0o640)
+    write_env(paths.env, config)
+    run(['systemctl', 'restart', 'nara-panel'])
+    panel_health(paths)
+    subscription_health(paths)
     run(["caddy", "validate", "--config", str(paths.https / "current/Caddyfile"), "--adapter", "caddyfile"], stdout=subprocess.DEVNULL)
     atomic_write(paths.unit, https_service(paths))
     paths.unit.chmod(0o644)
     run(["systemctl", "daemon-reload"])
-    run(["systemctl", "enable", "--now", "nara-panel-https"])
-    data = json.loads(metadata.read_text())
-    verify_https(data["host"], settings(paths)["NARA_WEB_PATH"], paths.https / "current/cert.pem" if data["mode"] == "self-signed" else None)
+    run(["systemctl", "enable", "nara-panel-https"])
+    run(["systemctl", "restart", "nara-panel-https"])
+    verify_https(data["host"], config['NARA_WEB_PATH'], paths.https / "current/cert.pem" if data["mode"] == "self-signed" else None, port=int(config['NARA_PUBLIC_PANEL_PORT']))
+    verify_https(data["host"], config.get('NARA_SUB_PATH', '/subscriptions'), paths.https / "current/cert.pem" if data["mode"] == "self-signed" else None, port=int(config['NARA_PUBLIC_SUB_PORT']))
+    run(['systemctl', 'stop', 'nara-panel'])
+    from .access import from_env, public_url
+    update_access_urls(paths, from_env(config), config)
+    atomic_write(metadata, json.dumps({**data, 'url': public_url(data['host'], config['NARA_PUBLIC_PANEL_PORT'], config['NARA_WEB_PATH'], 'https'), 'subscription_url': public_url(data['host'], config['NARA_PUBLIC_SUB_PORT'], config.get('NARA_SUB_PATH', '/subscriptions'), 'https')}))
+    shutil.chown(metadata, user='root', group='nara-https'); metadata.chmod(0o640)
+    run(['systemctl', 'start', 'nara-panel'])
+    print('HTTPS panel: ' + public_url(data['host'], config['NARA_PUBLIC_PANEL_PORT'], config['NARA_WEB_PATH'], 'https'))
+    print('HTTPS subscriptions: ' + public_url(data['host'], config['NARA_PUBLIC_SUB_PORT'], config.get('NARA_SUB_PATH', '/subscriptions'), 'https'))
 
 
 def versions(paths):
@@ -509,6 +694,8 @@ def status(paths):
     print("Internal panel: http://" + config.get("NARA_BIND", "0.0.0.0") + ":" + config["NARA_PORT"] + config["NARA_WEB_PATH"] + "/")
     if not (paths.https / "current/metadata.json").exists():
         print("Direct URL: http://YOUR_SERVER_IP:" + config["NARA_PORT"] + config["NARA_WEB_PATH"] + "/")
+    if not (paths.https / "current/metadata.json").exists():
+        print("Subscription URL base: http://YOUR_SERVER_IP:" + config.get("NARA_SUB_PORT", "10001") + config.get("NARA_SUB_PATH", "/subscriptions") + "/")
     https_status(paths)
     print("Entry settings: /etc/nara-panel.env\nPrivate data: /var/lib/nara-panel")
 
@@ -517,11 +704,11 @@ def uninstall(paths, mode):
     # The shell has already required an exact typed confirmation.
     if mode == "1":
         backup(paths)
-    for unit in ("nara-panel-https", "nara-panel"):
+    for unit in ("nara-panel-access.path", "nara-panel-access.service", "nara-panel-https", "nara-panel"):
         subprocess.run(["systemctl", "disable", "--now", unit], check=False)
         if active(unit):
             raise ValueError("Could not stop " + unit + "; no application files were removed")
-    for item in (paths.unit, paths.root / "etc/systemd/system/nara-panel.service", paths.root / "usr/local/bin/nara"):
+    for item in (paths.unit, paths.root / "etc/systemd/system/nara-panel-access.path", paths.root / "etc/systemd/system/nara-panel-access.service", paths.root / "etc/systemd/system/nara-panel.service", paths.root / "usr/local/bin/nara"):
         item.unlink(missing_ok=True)
     if paths.app.exists():
         shutil.rmtree(paths.app)

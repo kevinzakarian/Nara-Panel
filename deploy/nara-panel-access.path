@@ -1,0 +1,7 @@
+[Unit]
+Description=Watch NARA entry-settings requests
+[Path]
+PathExists=/var/lib/nara-panel/access-request.json
+Unit=nara-panel-access.service
+[Install]
+WantedBy=multi-user.target

@@ -131,13 +131,15 @@ class MaintenanceTests(unittest.TestCase):
     def https_mocks(self, fail=False):
         stack = contextlib.ExitStack()
         self.addCleanup(stack.close)
-        stack.enter_context(mock.patch.object(m, 'ask', return_value='panel.example.com'))
+        stack.enter_context(mock.patch.object(m, 'ask', side_effect=lambda label: '' if 'port [' in label else 'panel.example.com'))
         stack.enter_context(mock.patch.object(m.socket, 'getaddrinfo', return_value=[('fixture',)]))
         stack.enter_context(mock.patch.object(m, 'active', return_value=True))
         stack.enter_context(mock.patch.object(m, 'assert_proxy_ports_free'))
+        stack.enter_context(mock.patch.object(m, 'port_available', return_value=True))
         stack.enter_context(mock.patch.object(m, 'ensure_caddy'))
         stack.enter_context(mock.patch.object(m.shutil, 'chown'))
         stack.enter_context(mock.patch.object(m, 'panel_health', return_value={'ok': True}))
+        stack.enter_context(mock.patch.object(m, 'subscription_health'))
         stack.enter_context(mock.patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)))
         stack.enter_context(mock.patch.object(m, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='v2.6.2')))
         verifier = stack.enter_context(mock.patch.object(m, 'verify_https', side_effect=ValueError('fixture issuance failure') if fail else None))
@@ -198,7 +200,22 @@ class MaintenanceTests(unittest.TestCase):
         self.https_mocks()
         m.restore_https_service(self.paths)
         self.assertIn('User=nara-https', self.paths.unit.read_text())
-        self.assertEqual((self.paths.https / 'current/Caddyfile').read_text(), 'retained configuration')
+        self.assertIn('https://panel.example.com', (self.paths.https / 'current/Caddyfile').read_text())
+        self.assertIn(':8443', (self.paths.https / 'current/Caddyfile').read_text())
+
+    def test_old_caddy_upgrade_persists_legacy_mode_for_later_entry_changes(self):
+        self.paths.https.mkdir(parents=True)
+        generation = self.paths.https / 'generation-old-caddy'
+        generation.mkdir()
+        (generation / 'Caddyfile').write_text('old single site')
+        (generation / 'metadata.json').write_text(json.dumps({'host':'panel.example.com', 'mode':'automatic', 'url':'https://panel.example.com/SecretPath/'}))
+        (self.paths.https / 'current').symlink_to(generation.name)
+        self.https_mocks()
+        with mock.patch.object(m, 'run', side_effect=lambda command, **kwargs: subprocess.CompletedProcess(command, 0, stdout='v2.4.6')):
+            m.restore_https_service(self.paths)
+        self.assertTrue(json.loads((generation / 'metadata.json').read_text())['legacy'])
+        self.assertNotIn('protocols h1 h2', (generation / 'Caddyfile').read_text())
+        self.assertIn(':8443', (generation / 'Caddyfile').read_text())
 
     def test_caddy_package_is_temporarily_masked_without_touching_existing_service(self):
         with mock.patch.object(m.shutil, 'which', return_value=None), mock.patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1)), mock.patch.object(m, 'run') as command:
@@ -375,6 +392,8 @@ class InstallerRollbackTests(unittest.TestCase):
                 (source / item / 'new-marker').write_text('new code')
             (source / 'requirements.txt').write_text('new dependencies')
             (source / 'deploy/nara-panel.service').write_text('new service')
+            (source / 'deploy/nara-panel-access.path').write_text('fixture path unit')
+            (source / 'deploy/nara-panel-access.service').write_text('fixture oneshot unit')
             (source / 'scripts/nara-command.sh').write_text('#!/bin/sh\nexit 0\n')
             (source / 'scripts/terminal.sh').write_text(Path('scripts/terminal.sh').read_text())
             env = root / 'etc/nara-panel.env'
@@ -513,3 +532,63 @@ class RealCaddyProxyTests(unittest.TestCase):
                             process.wait(timeout=5)
                             server.shutdown()
                             server.server_close()
+
+    def test_two_https_ports_keep_subscription_and_administration_separate(self):
+        import http.client
+        import time
+        from nara.server import make_handler
+        from nara.runtime import Runtime
+        from nara.store import password_hash
+        from tests.helpers import example_state, free_port
+        for binary in CADDIES:
+            with self.subTest(binary=binary), tempfile.TemporaryDirectory() as directory:
+                directory = Path(directory)
+                legacy = 'v2.4.' in subprocess.check_output([binary, 'version'], text=True)
+                cert, key = directory / 'cert.pem', directory / 'key.pem'
+                subprocess.run(['openssl','req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256','-nodes','-days','1','-subj','/CN=panel.example.com','-addext','subjectAltName=DNS:panel.example.com','-keyout',str(key),'-out',str(cert)],check=True,capture_output=True)
+                store = Store(directory / 'store')
+                state = example_state(); store.set('state',state)
+                runtime = Runtime(store,'/nonexistent'); runtime.active = state
+                servers = [ThreadingHTTPServer(('127.0.0.1',0), make_handler(store,runtime,Path('web'),web_path=path,role=role)) for path,role in [('/PrivatePanel','panel'),('/Downloads','subscription')]]
+                for server in servers:
+                    threading.Thread(target=server.serve_forever,daemon=True).start()
+                panel_port, sub_port = free_port(), free_port()
+                config={'NARA_PORT':str(servers[0].server_port),'NARA_SUB_PORT':str(servers[1].server_port),'NARA_WEB_PATH':'/PrivatePanel','NARA_SUB_PATH':'/Downloads','NARA_PUBLIC_PANEL_PORT':str(panel_port),'NARA_PUBLIC_SUB_PORT':str(sub_port)}
+                text=m.proxy_config('panel.example.com',config,'self-signed',directory,legacy=legacy).replace('    admin off','    admin off\n    auto_https disable_redirects')
+                for port in (panel_port,sub_port):
+                    text=text.replace('https://panel.example.com:'+str(port)+' {','https://panel.example.com:'+str(port)+' {\n    bind 127.0.0.1')
+                file=directory/'Caddyfile';file.write_text(text)
+                environ={**os.environ,'XDG_DATA_HOME':str(directory/'xdg-data'),'XDG_CONFIG_HOME':str(directory/'xdg-config')}
+                context=ssl.create_default_context(cafile=str(cert))
+                connection_factory=socket.create_connection
+                class Connection(http.client.HTTPSConnection):
+                    def connect(self):
+                        self.sock=context.wrap_socket(connection_factory(('127.0.0.1',self.port),timeout=3),server_hostname='panel.example.com')
+                def request(port,path,method='GET'):
+                    connection=Connection('panel.example.com',port,timeout=3,context=context)
+                    connection.request(method,path)
+                    response=connection.getresponse();data=response.read();result=response.status,data
+                    connection.close();return result
+                with open(directory/'caddy.log','w') as log:
+                    process=subprocess.Popen([binary,'run','--config',str(file),'--adapter','caddyfile'],stdout=log,stderr=log,env=environ)
+                    try:
+                        deadline=time.monotonic()+10
+                        while True:
+                            try:
+                                if request(panel_port,'/PrivatePanel/api/health')[0]==200: break
+                            except OSError: pass
+                            if time.monotonic()>deadline or process.poll() is not None:
+                                self.fail((directory/'caddy.log').read_text())
+                            time.sleep(.1)
+                        self.assertEqual(request(panel_port,'/PrivatePanel/')[0],200)
+                        self.assertEqual(request(panel_port,'/Downloads/'+state['clients'][0]['token'])[0],404)
+                        status,profile=request(sub_port,'/Downloads/'+state['clients'][0]['token'])
+                        self.assertEqual(status,200)
+                        self.assertIn('outbounds',json.loads(profile))
+                        for path in ('/PrivatePanel/','/Downloads/','/Downloads/api/login','/Downloads/api/state','/Downloads/app.js'):
+                            self.assertEqual(request(sub_port,path)[0],404,path)
+                            self.assertEqual(request(sub_port,path,'POST')[0],404,path)
+                    finally:
+                        process.terminate();process.wait(timeout=5)
+                        for server in servers:
+                            server.shutdown();server.server_close()

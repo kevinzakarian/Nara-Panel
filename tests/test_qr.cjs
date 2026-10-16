@@ -32,79 +32,62 @@ function decode(svg) {
 }
 
 const token = 'DemoToken_ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789';
-for (const [label, publicURL, expectedBase] of [
- ['custom webPath', 'https://panel.example.com/AbCdEfGh/', 'https://panel.example.com/AbCdEfGh'],
- ['origin-only settings', 'https://panel.example.com', 'https://panel.example.com/AbCdEfGh'],
- ['IPv6 with port', 'https://[2001:db8::1]:10443/AbCdEfGh', 'https://[2001:db8::1]:10443/AbCdEfGh'],
- ['HTTP with IP, port and webPath', 'http://203.0.113.42:10000/AbCdEfGh/', 'http://203.0.113.42:10000/AbCdEfGh'],
- ['HTTP origin-only settings', 'http://panel.example.com:10000', 'http://panel.example.com:10000/AbCdEfGh'],
- ['HTTP IPv6 with port', 'http://[2001:db8::1]:10000/AbCdEfGh/', 'http://[2001:db8::1]:10000/AbCdEfGh'],
- ['long public URL', 'https://panel.example.com/' + 'a'.repeat(180) + '/', 'https://panel.example.com/' + 'a'.repeat(180)]
+for (const [label, subscriptionURL, expectedBase] of [
+ ['HTTPS custom subPath', 'https://subscriptions.example.com:8443/DownloadPath/', 'https://subscriptions.example.com:8443/DownloadPath'],
+ ['HTTPS origin-only', 'https://subscriptions.example.com:8443', 'https://subscriptions.example.com:8443/subscriptions'],
+ ['IPv6 HTTPS', 'https://[2001:db8::1]:10444/Subscriptions', 'https://[2001:db8::1]:10444/Subscriptions'],
+ ['HTTP IP and port', 'http://203.0.113.42:10001/DownloadPath/', 'http://203.0.113.42:10001/DownloadPath'],
+ ['HTTP origin-only', 'http://subscriptions.example.com:10001', 'http://subscriptions.example.com:10001/subscriptions'],
+ ['IPv6 HTTP', 'http://[2001:db8::1]:10001/DownloadPath/', 'http://[2001:db8::1]:10001/DownloadPath'],
+ ['long custom subPath', 'https://subscriptions.example.com:8443/' + 'a'.repeat(180) + '/', 'https://subscriptions.example.com:8443/' + 'a'.repeat(180)]
 ]) {
- test(`sharing UI encodes the exact subscription link: ${label}`, () => {
-  context.publicURL = publicURL;
-  context.client = { id: 'demo-client', token };
-  const markup = vm.runInContext("state={settings:{public_url:publicURL}};subscriptionShare(client,'json')", context);
-  assert.equal(decode(markup), expectedBase + '/sub/' + token);
+ test(`sharing UI encodes the independent subscription link: ${label}`, () => {
+  context.publicURL=subscriptionURL;context.client={id:'demo-client',token};
+  const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com/PrivatePanel/',subscription_url:publicURL}};subscriptionShare(client,'json')",context);
+  assert.equal(decode(markup),expectedBase+'/'+token);
+  assert.ok(!decode(markup).includes('PrivatePanel'));
   assert.ok(markup.includes('Download QR'));
  });
- test(`official app QR preserves the remote profile URL and name: ${label}`, () => {
-  context.publicURL=publicURL;
-  context.client={id:'demo-client',token,name:'کاربر A & B / + #? 你好'};
-  const markup=vm.runInContext('state={settings:{public_url:publicURL}};subscriptionShare(client)',context);
-  const payload=decode(markup),uri=new URL(payload);
-  assert.equal(uri.protocol,'sing-box:');
-  assert.equal(uri.host,'import-remote-profile');
-  assert.equal(uri.searchParams.get('url'),expectedBase+'/sub/'+token);
+ test(`official app QR preserves independent URL and profile name: ${label}`,()=>{
+  context.publicURL=subscriptionURL;context.client={id:'demo-client',token,name:'کاربر A & B / + #? 你好'};
+  const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com/PrivatePanel/',subscription_url:publicURL}};subscriptionShare(client)",context);
+  const uri=new URL(decode(markup));
+  assert.equal(uri.protocol,'sing-box:');assert.equal(uri.host,'import-remote-profile');
+  assert.equal(uri.searchParams.get('url'),expectedBase+'/'+token);
   assert.equal(decodeURIComponent(uri.hash.slice(1)),context.client.name);
-  assert.equal(uri.searchParams.size,1,'encoded URL must remain a single parameter');
-  assert.ok(markup.includes('value="sing-box" selected'));
-  assert.ok(markup.includes('JSON subscription URL'));
+  assert.equal(uri.searchParams.size,1);
  });
 }
-
-test('legacy root path and rotated token generate fresh QR codes', () => {
- context.location.href = 'https://panel.example.com/#clients';
- context.publicURL = 'https://panel.example.com';
- for (const suffix of ['old', 'rotated']) {
-  context.client = { id: 'demo-client', token: token + suffix };
-  const markup = vm.runInContext("state={settings:{public_url:publicURL}};subscriptionShare(client,'json')", context);
-  assert.equal(decode(markup), 'https://panel.example.com/sub/' + token + suffix);
- }
- context.location.href = 'https://panel.example.com/AbCdEfGh/#clients';
-});
-
-for(const currentURL of [
- 'http://203.0.113.42:10000/AbCdEfGh/#clients',
- 'https://panel.example.com/AbCdEfGh/#clients',
- 'http://[2001:db8::1]:10000/AbCdEfGh/#clients',
- 'http://203.0.113.42:10000/#clients',
- 'http://panel.example.com:10000/AbCdEfGh/index.html?preview=1#clients'
-]) {
- test(`blank public URL produces a QR from the current address: ${currentURL}`, () => {
-  context.location.href=currentURL;
-  context.client={id:'demo-client',token};
-  try {
-   const markup=vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client,'json')",context);
-   assert.equal(decode(markup),new URL('.',currentURL).href+'sub/'+token);
-   assert.ok(markup.includes('Copy link'));
-   assert.ok(markup.includes('Download QR'));
-   assert.ok(!markup.includes('Set the panel'));
-  } finally {context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
- });
-}
-
-test('configured HTTPS public URL takes precedence over the current HTTP address', () => {
- context.location.href='http://203.0.113.42:10000/AbCdEfGh/#clients';
- try {
+test('panel root and rotated tokens never expose the panel URL in subscriptions',()=>{
+ context.location.href='https://panel.example.com/#clients';
+ for(const suffix of ['old','rotated']){
+  context.client={id:'demo-client',token:token+suffix};
   const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com'}};subscriptionShare(client,'json')",context);
-  assert.equal(decode(markup),'https://panel.example.com/AbCdEfGh/sub/'+token);
- } finally {context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
+  assert.equal(decode(markup),'http://panel.example.com:10001/subscriptions/'+token+suffix);
+ }
+ context.location.href='https://panel.example.com/AbCdEfGh/#clients';
+});
+for(const currentURL of ['http://203.0.113.42:10000/PrivatePanel/#clients','https://panel.example.com/PrivatePanel/#clients','http://[2001:db8::1]:10000/PrivatePanel/#clients','http://203.0.113.42:10000/#clients','http://panel.example.com:10000/PrivatePanel/index.html?preview=1#clients']){
+ test(`default subscription address uses its own port/path: ${currentURL}`,()=>{
+  context.location.href=currentURL;context.client={id:'demo-client',token};
+  try{
+   const markup=vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client,'json')",context);
+   assert.equal(decode(markup),'http://'+new URL(currentURL).hostname+':10001/subscriptions/'+token);
+   assert.ok(!decode(markup).includes('PrivatePanel'));
+  }finally{context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
+ });
+}
+test('managed HTTPS subscription has its own public HTTPS port and subPath',()=>{
+ context.client={id:'demo-client',token};
+ try{
+  vm.runInContext("accessSettings={public_host:'panel.example.com',subscription_scheme:'https',subscription_port:8443,sub_path:'/DownloadPath'};state={settings:{public_url:'https://panel.example.com/PrivatePanel'}}",context);
+  assert.equal(context.subscriptionURL(context.client),'https://panel.example.com:8443/DownloadPath/'+token);
+ }finally{vm.runInContext("accessSettings={subscription_scheme:'http',subscription_port:10001,sub_path:'/subscriptions'}",context);}
 });
 
 test('over-capacity links retain copy access with a helpful message', () => {
  context.publicURL = 'https://panel.example.com/' + 'a'.repeat(4000);
- const markup = vm.runInContext("state={settings:{public_url:publicURL}};subscriptionShare(client,'json')", context);
+ const markup = vm.runInContext("state={settings:{subscription_url:publicURL}};subscriptionShare(client,'json')", context);
  assert.ok(markup.includes('too long for a QR code'));
  assert.ok(markup.includes('Copy link'));
  assert.ok(!markup.includes('Download QR'));
@@ -126,7 +109,7 @@ for(const succeeds of [true,false]) {
    querySelector(){return {open:true,append(node){assert.equal(node,input);}};},
    execCommand(command){
     assert.equal(command,'copy');assert.ok(selected);
-    assert.equal(input.value,new URL('.',current).href+'sub/'+token);
+    assert.equal(input.value,'http://203.0.113.42:10001/subscriptions/'+token);
     return succeeds;
    }
   };
@@ -194,7 +177,7 @@ test('changing format replaces only the sharing section and restores selector fo
  context.document={querySelector(){return {querySelector(){return {focus(){focused=true;}};}};}};
  try {
   context.changeSubscriptionFormat(selector);
-  assert.equal(decode(markup),'https://panel.example.com/AbCdEfGh/sub/'+token);
+  assert.equal(decode(markup),'http://panel.example.com:10001/subscriptions/'+token);
   assert.ok(markup.includes('value="json" selected'));
   assert.ok(focused);
  } finally {delete context.document;}

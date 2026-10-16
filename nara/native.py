@@ -47,7 +47,8 @@ def types(definition):
 
 
 def payload():
-    return {"version": VERSION, "schema": SCHEMA, "help": HELP, "collections": COLLECTIONS,
+    from .options import ANYTLS_PADDING
+    return {"defaults": {"anytls_padding": ANYTLS_PADDING}, "version": VERSION, "schema": SCHEMA, "help": HELP, "collections": COLLECTIONS,
             "types": {k: types(v) for k, v in COLLECTIONS.items()}, "labels": LABELS}
 
 

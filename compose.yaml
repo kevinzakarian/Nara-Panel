@@ -1,13 +1,16 @@
 services:
   nara:
     build: .
-    image: nara-panel:0.3.1
+    image: nara-panel:0.4.0
     init: true
     restart: unless-stopped
     environment:
       NARA_SECURE_COOKIE: "1"
+      NARA_SUB_PORT: "10001"
+      NARA_SUB_PATH: "/subscriptions"
     ports:
       - "127.0.0.1:10000:10000"
+      - "127.0.0.1:10001:10001"
       # Add an entry for every inbound.
       - "8443:8443/tcp"
       - "8444:8444/udp"

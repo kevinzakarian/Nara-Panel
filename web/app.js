@@ -31,6 +31,7 @@ const rowBtn = (title, action, symbol, id, collection='') => `<button title="${e
 const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',routing:'Routing',core:'Core features',settings:'Settings'};
 const descriptions = {dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',routing:'Control destinations, matching rules, and outbound connections.',core:'Endpoints, services, certificates and the remaining core features.',settings:'Server preferences and administrator account security.'};
 let optionSchema,coreCatalog;
+let accessSettings={sub_path:'/subscriptions',subscription_port:10001,subscription_scheme:'http',managed:false},accessChangePending=false;
 let routingTab='route_rules',coreTab='endpoints';
 const protocolLabel=type=>coreCatalog?.labels[type]||CoreSchema.title(type);
 let state, dashboard, csrf = '', page = 'dashboard', dnsTab = 'dns_servers', search = '', filter = 'all', pageNumber = 1;
@@ -67,8 +68,8 @@ async function boot() {
 async function load(silent=false) {
  if(refreshPending){await refreshPending;if(silent)return;}
  refreshPending=(async()=>{
-  [state,dashboard]=await Promise.all([api('state'),api('dashboard')]);
-  $('#sidebar-host').textContent=dashboard.metrics.hostname;$$('.panel-version').forEach(el=>el.textContent='v'+dashboard.panel_version);
+  [state,dashboard,accessSettings]=await Promise.all([api('state'),api('dashboard'),api('access')]);
+  $$('.panel-version').forEach(el=>el.textContent='v'+dashboard.panel_version);
   $('#sidebar-core').textContent=dashboard.core.running?'Core is running':'Core is stopped';
   $('.core-label .status-dot').classList.toggle('on',dashboard.core.running);
   $('#updated').textContent='Updated at '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
@@ -135,8 +136,28 @@ function renderClients() {
  const pages=Math.max(1,Math.ceil(filtered.length/10));pageNumber=Math.min(pageNumber,pages);
  return heading(btn('New client','new-client','plus','primary'))+pendingBanner()+`<div class="toolbar"><div class="search">${icon('search')}<input id="client-search" placeholder="Search clients…" value="${e(search)}" aria-label="Search clients"></div><select id="client-filter" aria-label="Filter clients"><option value="all" ${filter==='all'?'selected':''}>All clients</option><option value="active" ${filter==='active'?'selected':''}>Active clients</option><option value="inactive" ${filter==='inactive'?'selected':''}>Disabled & limited</option></select><span class="count">${num(filtered.length)} clients</span></div><section class="card">${clientTable(filtered.slice((pageNumber-1)*10,pageNumber*10))}<div class="table-foot"><span>${num(filtered.length)} clients · page ${num(pageNumber)} of ${num(pages)}</span><div class="pagination"><button data-action="page" data-id="${Math.max(1,pageNumber-1)}" aria-label="Previous page">→</button><button class="active">${num(pageNumber)}</button><button data-action="page" data-id="${Math.min(pages,pageNumber+1)}" aria-label="Next page">←</button></div></div></section>`;
 }
+function renderAccessSettings(){
+ const a=accessSettings;
+ return `<section class="card section-gap"><div class="card-header"><div><h2>Panel & subscription access</h2><p>Separate addresses, separate ports</p></div>${icon('lock')}</div><form id="access-form" class="card-body"><fieldset class="entry-fields" ${a.managed?'':'disabled'}><div class="form-grid">${field('Panel webPath','web_path',a.web_path||'','text','For the sign-in page and administration only.')}${field('Panel port','panel_port',a.panel_port||10000,'number')}${field('Subscription subPath','sub_path',a.sub_path,'text','Public subscription links use this path without the panel webPath.')}${field('Subscription port','subscription_port',a.subscription_port,'number')}</div><p class="note">Saving restarts the panel and reconnects you at the new address. Keep the new ports open in your firewall. Changing subPath or its port changes subscription URLs; share the updated link or QR with clients.</p><button class="btn primary" type="submit">${icon('check')}Save access settings</button></fieldset>${a.managed?'':'<p class="note">Run the Linux installer or upgrade to enable these controls. Docker/manual services use their own port mappings and environment settings.</p>'}<div id="access-progress" role="status"></div></form></section>`;
+}
+async function saveAccess(form){
+ const data=new FormData(form),values={web_path:data.get('web_path'),panel_port:Number(data.get('panel_port')),sub_path:data.get('sub_path'),subscription_port:Number(data.get('subscription_port'))};
+ const result=await api('access',{values,revision:accessSettings.revision,current_url:location.href});
+ accessChangePending=true;
+ const progress=$('#access-progress');progress.innerHTML=`<div class="hint-box section-gap">Updating access settings. You may need to sign in again.<br>New panel: <a class="text-link" href="${e(result.url)}">${e(result.url)}</a><br>Previous panel: <a class="text-link" href="${e(location.href)}">${e(location.href)}</a></div>`;
+ let lost=0;
+ for(let attempt=0;attempt<120;attempt++){
+  await new Promise(resolve=>setTimeout(resolve,500));
+  let status;
+  try{status=await api('access-status/'+result.id);lost=0;}
+  catch{if(++lost>=10){location.assign(result.url);return;}continue;}
+  if(status.status==='failed'){accessChangePending=false;throw new Error(status.error||'Could not update access settings. Previous settings were restored.');}
+  if(status.status==='complete'){location.assign(result.url);return;}
+ }
+ accessChangePending=false;throw new Error('Still waiting for the system helper. Check the management menu logs before changing the address again.');
+}
 function renderSettings() {
- return heading()+pendingBanner()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">HTTP or HTTPS. Leave blank to use this panel's current address and path.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}<p class="note">Manage DNS cache, rules and resolver options in the DNS section.</p><label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section></div></div>`;
+ return heading()+pendingBanner()+renderAccessSettings()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">Panel address for your own reference and public host detection. Subscriptions use their separate address below.</small></label><label>Public subscription URL (optional)<input name="subscription_url" dir="ltr" placeholder="https://subscriptions.example.com:8443/YourSubPath/" value="${e(state.settings.subscription_url||'')}"><small class="field-hint">For an external reverse proxy. Leave blank to use the independent subscription port and subPath.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}<p class="note">Manage DNS cache, rules and resolver options in the DNS section.</p><label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section></div></div>`;
 }
 function field(label,name,value='',type='text',hint='',extra='') {return `<label ${extra}>${label}<input name="${name}" type="${type}" value="${e(value)}" ${type!=='checkbox'?'dir="auto"':''}>${hint?`<small class="field-hint">${hint}</small>`:''}</label>`;}
 function selectField(label,name,options,value='',extra=''){return `<label ${extra}>${label}<select name="${name}">${options.map(([v,t])=>`<option value="${e(v)}" ${v===value?'selected':''}>${e(t)}</option>`).join('')}</select></label>`;}
@@ -148,9 +169,10 @@ function openModal(title,subtitle,content,submit=null,submitLabel='Save') {
 }
 async function saveRecord(collection,record) {const result=await api('save',{revision:state.revision,collection,record});await load();toast(result.restarted?'Saved and applied. The core is running.':'Saved and applied.');}
 function editInbound(item={}) {
- const protocol=item.type||'vless';
- openModal(item.id?'Edit inbound':'New inbound','Changes are checked and applied automatically when you save.',`<div class="form-grid">${field('Name / tag','tag',item.tag||'', 'text','Letters, numbers, hyphens, and underscores')}${selectField('Protocol','type',coreCatalog.types.inbounds.map(x=>[x,protocolLabel(x)]),protocol)}${field('Port','port',item.port||443,'number')}${field('Public port (optional)','public_port',item.public_port||'','number','For port mappings; blank uses the listen port')}${field('Listen IP','listen',item.listen||'::','text',':: for both IPv4 and IPv6')}${selectField('TLS profile','tls_id',[['','No TLS'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||'')}${selectField('Transport','transport',['tcp','ws','grpc','http','httpupgrade','quic'].map(t=>[t,t==='tcp'?'TCP / default':t.toUpperCase()]),item.transport||'tcp')}${field('Path / service name','path',item.path||'/','text','For WebSocket, HTTP, HTTPUpgrade, or gRPC')}<label class="check-field full"><input name="enabled" type="checkbox" ${checked(item.enabled!==false)}>Enable this inbound</label></div><div id="protocol-fields"></div><div id="transport-fields"></div>${optionSection('Listener settings',optionSchema.listen,item.listen_options||{},'listen')}<div id="multiplex-fields"></div>`,async form=>{
+ const protocol=item.type||'';
+ openModal(item.id?'Edit inbound':'New inbound','Changes are checked and applied automatically when you save.',`<div class="form-grid">${field('Name / tag','tag',item.tag||'', 'text','Letters, numbers, hyphens, and underscores')}${selectField('Protocol','type',[['','Choose a protocol'],...coreCatalog.types.inbounds.map(x=>[x,protocolLabel(x)])],protocol)}${field('Port','port',item.port||443,'number')}${field('Public port (optional)','public_port',item.public_port||'','number','For port mappings; blank uses the listen port')}${field('Listen IP','listen',item.listen||'::','text',':: for both IPv4 and IPv6')}${selectField('TLS profile','tls_id',[['','No TLS'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||'')}${selectField('Transport','transport',['tcp','ws','grpc','http','httpupgrade','quic'].map(t=>[t,t==='tcp'?'TCP / default':t.toUpperCase()]),item.transport||'tcp')}${field('Path / service name','path',item.path||'/','text','For WebSocket, HTTP, HTTPUpgrade, or gRPC')}<label class="check-field full"><input name="enabled" type="checkbox" ${checked(item.enabled!==false)}>Enable this inbound</label></div><div id="protocol-fields"></div><div id="transport-fields"></div>${optionSection('Listener settings',optionSchema.listen,item.listen_options||{},'listen')}<div id="multiplex-fields"></div>`,async form=>{
   const d=Object.fromEntries(new FormData(form)),p=d.type;
+  if(!p)throw new Error('Choose a protocol first.');
   const serverFields=[...optionSchema.server[p],...(['hysteria2','tuic'].includes(p)?optionSchema.quic:[])];
   await saveRecord('inbounds',{id:item.id,mode:'managed',tag:d.tag,type:p,extra_options:extraServer?.value()||{},extra_client_options:extraClient?.value()||{},port:Number(d.port),public_port:Number(d.public_port)||0,listen:d.listen,tls_id:d.tls_id,transport:d.transport||'tcp',path:d.path,enabled:form.elements.enabled.checked,
    server_options:readOptions(form,'server',serverFields),client_options:readOptions(form,'client',optionSchema.client[p]),listen_options:readOptions(form,'listen',optionSchema.listen),multiplex:readOptions(form,'multiplex',optionSchema.multiplex),transport_options:readOptions(form,'transport',optionSchema.transport[d.transport||'tcp'])});
@@ -165,7 +187,10 @@ function editInbound(item={}) {
  }
  function updateProtocol() {
   const p=protocolInput.value;
-  if(!optionSchema.server[p]){const def=CoreSchema.protocolSchema('Inbound',p),config=CoreSchema.seed(def);config.tag=form.elements.tag.value;if(def.properties.listen)config.listen=form.elements.listen.value;if(def.properties.listen_port)config.listen_port=Number(form.elements.port.value);return editCoreRecord('inbounds',{...item,mode:'native'},config);}
+  protocolInput.required=true;
+  form.querySelector('[type=submit]').disabled=!p;
+  if(!p){$('#protocol-fields').innerHTML='<p class="note">Choose a protocol to see its settings.</p>';$('#transport-fields').innerHTML='';$('#multiplex-fields').innerHTML='';$('#advanced-inbound-options')?.remove();return;}
+  if(item.mode==='native'||!optionSchema.server[p]){const def=CoreSchema.protocolSchema('Inbound',p),config=CoreSchema.seed(def);if(p==='anytls')config.padding_scheme=optionSchema.server.anytls[0].default;config.tag=form.elements.tag.value;if(def.properties.listen)config.listen=form.elements.listen.value;if(def.properties.listen_port)config.listen_port=Number(form.elements.port.value);return editCoreRecord('inbounds',{...item,mode:'native'},config);}
   const values=p===item.type?item.server_options||{}:{},client=p===item.type?item.client_options||{}:{};
   const quic=['hysteria2','tuic'].includes(p),restricted=quic||p==='anytls';
   if(restricted)transportInput.value='tcp';
@@ -286,6 +311,7 @@ function editCoreRecord(collection,item={},preset){
  }
  if(['inbounds','outbounds','dns_servers','rule_sets','endpoints','services','certificate_providers','http_clients','network_namespaces'].includes(collection)&&!Object.hasOwn(config,'tag'))config.tag='';
  const inbound=collection==='inbounds';
+ if(inbound&&config.type==='anytls'&&!Object.hasOwn(config,'padding_scheme'))config.padding_scheme=structuredClone(optionSchema.server.anytls[0].default);
  let editor;
  openModal((item.id?'Edit ':'New ')+(coreLabels[collection]||'inbound'),`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,`${inbound?'<div class="hint-box">Standalone listener: authentication is configured here. Panel accounts, subscriptions, quotas and expiry do not apply to this listener.</div>':''}${inbound&&optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):''}${field('Display name (optional)','display_name',item.label||'')}${inbound?selectField('TLS profile (optional)','native_tls_id',[['','Custom TLS / no profile'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||''):''}<label class="check-field"><input type="checkbox" name="native_enabled" ${checked(item.enabled!==false)}>Enable this item</label>${inbound?`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label><p class="note">Public listeners need authentication unless this option is explicitly selected.</p>`:''}<div class="schema-editor" id="native-fields"></div><p class="note">Choose “Add option” inside any group to access every available field. Arrays and logical groups support multiple items. Blank optional fields can be removed. Stored private key values are kept unless replaced.</p><details class="option-section"><summary>JSON view</summary><p class="note schema-note">Load the current form into JSON, or import JSON into the form.</p><div class="schema-note inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false"></textarea></details>`,async form=>{
   const c=editor.value();
@@ -310,11 +336,18 @@ function editCoreOptions(key){
 }
 
 function subscriptionURL(client) {
- const current=new URL('.',location.href);
- const base=state.settings.public_url?.trim()?new URL(state.settings.public_url):current;
- if(base.pathname==='/') base.pathname=current.pathname;
- return base.href.replace(/\/$/,'')+'/sub/'+client.token;
+ const custom=state.settings.subscription_url?.trim();
+ let base;
+ if(custom){base=new URL(custom);if(base.pathname==='/')base.pathname=accessSettings.sub_path+'/';}
+ else{
+  const current=new URL(location.href),panel=state.settings.public_url?.trim()?new URL(state.settings.public_url):current;
+  const host=(accessSettings.public_host||panel.hostname).replace(/^\[|\]$/g,'');
+  base=new URL((accessSettings.subscription_scheme||'http')+'://'+(host.includes(':')?'['+host+']':host));
+  base.port=String(accessSettings.subscription_port);base.pathname=accessSettings.sub_path+'/';
+ }
+ return base.href.replace(/\/$/,'')+'/'+encodeURIComponent(client.token);
 }
+
 function subscriptionPayload(client,format='sing-box') {
  const url=subscriptionURL(client);
  if(format==='json')return url;
@@ -391,7 +424,7 @@ async function handle(action,target) {
  if(action==='core-options')return editCoreOptions(id);
  if(action==='core-tab'){if(collection==='dns')dnsTab=id;else if(collection==='routing')routingTab=id;else coreTab=id;return render();}
  if(action==='core-move'){await api('reorder-rules',{collection,id,revision:state.revision});await load();return;}
- if(action==='standalone-inbound')return editCoreRecord('inbounds',{}, {type:'shadowsocks',tag:'',listen:'::',listen_port:443});
+ if(action==='standalone-inbound')return editInbound({mode:'native'});
  if(action==='managed-inbound')return editInbound({type:id});
  if(action==='dns-tab'){dnsTab=id;return render();}
  if(action==='page'){pageNumber=Number(id);return render();}
@@ -417,11 +450,12 @@ async function handle(action,target) {
 }
 document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;event.preventDefault();target.disabled=true;try{await handle(target.dataset.action,target);}catch(err){toast(err.message,true);}finally{target.disabled=false;}});
 document.addEventListener('submit',async event=>{
- const form=event.target;if(!['modal-form','login-form','settings-form'].includes(form.id))return;event.preventDefault();const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Saving…';}
+ const form=event.target;if(!['modal-form','login-form','settings-form','access-form'].includes(form.id))return;event.preventDefault();const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Saving…';}
  try {
   if(form.id==='login-form'){const result=await api('login',Object.fromEntries(new FormData(form)));csrf=result.csrf;form.elements.password.value='';$('#login-error').textContent='';await boot();}
   else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';await modalSubmit(form);$('#modal').close();}
-  else if(form.id==='settings-form'){const f=new FormData(form);const d={server_address:f.get('server_address'),public_url:f.get('public_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:state.revision,settings:d});await load();toast('Settings saved and applied.');}
+  else if(form.id==='access-form'){await saveAccess(form);}
+  else if(form.id==='settings-form'){const f=new FormData(form);const d={server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:state.revision,settings:d});await load();toast('Settings saved and applied.');}
  }catch(err){if(form.id==='modal-form')$('#form-error').textContent=err.message;else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=false;submit.textContent=label;}}
 });
 document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});
@@ -431,6 +465,6 @@ $('#refresh').innerHTML=icon('refresh');$('#refresh').addEventListener('click',a
 $('#logout').addEventListener('click',async()=>{try{await api('logout',{});showLogin();}catch(err){toast(err.message,true);}});
 $('#mobile-menu').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));
 document.addEventListener('click',event=>{if($('.sidebar').classList.contains('open')&&!event.target.closest('.sidebar,#mobile-menu'))$('.sidebar').classList.remove('open');});
-setInterval(()=>{if(csrf&&!document.hidden&&!$('#modal').open)load(true).catch(err=>toast(err.message,true));},5000);
+setInterval(()=>{if(csrf&&!accessChangePending&&!document.hidden&&!$('#modal').open)load(true).catch(err=>toast(err.message,true));},5000);
 $('#content').innerHTML='<div class="loading"><span class="logo">N</span>Loading your server…</div>';
 boot();

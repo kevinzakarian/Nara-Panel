@@ -14,6 +14,7 @@ An independent English web panel for running **Sing-box on your own Linux server
 - **Core features:** five endpoint types, ten service types, certificate providers, HTTP clients, namespaces, logging, NTP, certificate trust and experimental cache/Clash API settings.
 - **Updates:** daily, persisted, read-only checks for panel and stable upstream core releases, shown above a compact version strip in Overview.
 - **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated QR codes in official Sing-box remote-profile and direct JSON URL formats, with PNG download.
+- **Access settings:** separate panel webPath/port and subscription subPath/port, prompted during installation and editable together in Settings on managed Linux installs. Subscription ports serve profiles only; no login page or admin API.
 - **Operations:** SQLite persistence, admin sign-in, password change, logout, server-side sessions, CSRF checks, sign-in throttling, automatic validation/application on save, managed restarts, attempted rollback after startup failure, and systemd installation. Saved and active settings are committed together; invalid changes preserve the previous settings.
 
 The interface defaults to **English and left-to-right**, with a 16 px body/input baseline and larger readable labels and captions. [راهنمای نصب فارسی](INSTALL.fa.md).
@@ -44,13 +45,21 @@ Every question has a bold cyan **[INPUT]** marker, with the default in brackets.
 
 1. **webPath** — enter a single path segment such as `MyPanel`. Press **Enter** for a cryptographically random **8-letter path containing both uppercase and lowercase letters**, e.g. `/aBcDefGh/`.
 2. **Panel port** — press **Enter** for **10000**, or enter another available port. Invalid, reserved, and occupied ports are rejected.
-3. **Administrator password** — choose and confirm at least 12 characters. The username is `admin`.
+3. **subPath** — a different subscription path. Press **Enter** for another mixed-case random **8-letter path**.
+4. **Subscription port** — press **Enter** for **10001** (10002 if the panel uses 10001). It must differ from panel and statistics ports and saved inbound listeners.
+5. **Administrator password** — choose and confirm at least 12 characters. The username is `admin`.
 
-The panel is then reachable at `http://YOUR_SERVER_IP:PORT/webPath/`. The final URL is printed after a readiness check; allow the selected TCP port in your firewall. No administrator password is bundled. The installer does not change firewall rules.
+The panel is then reachable at `http://YOUR_SERVER_IP:PANEL_PORT/webPath/`; profiles use `http://YOUR_SERVER_IP:SUB_PORT/subPath/TOKEN`. Both address bases are printed after readiness checks. Allow both selected TCP ports in your firewall. No administrator password is bundled. The installer does not change firewall rules.
 
-Entry settings are stored with mode 0600 in `/etc/nara-panel.env`. Menu upgrades preserve the existing path/port, administrator, accounts, HTTPS and data without asking for replacement entry values. Failed full upgrades attempt to restore the previous application, virtual environment, core, service and entry settings; a private data backup is created before menu upgrades. A customized path scopes the UI, assets, API, subscription links, and session cookies; it supplements administrator authentication.
+Entry settings are stored with mode 0600 in `/etc/nara-panel.env`. Menu upgrades preserve existing entry values, administrator, accounts and data. The first upgrade from 0.3.1 or earlier asks for the new subscription path/port; later upgrades keep them. Existing managed HTTPS also asks for its separate public subscription port when first migrated. Failed full upgrades attempt to restore the previous application, virtual environment, core, service and entry settings; a private data backup is created before menu upgrades. The panel webPath scopes the UI, assets, administration API and session cookies. Subscriptions use their own subPath and listener. Paths supplement administrator authentication.
 
-For public HTTPS, use **4 — Panel HTTPS / Certificate** in the manager (see below), or configure your own reverse proxy using `deploy/Caddyfile.example`, **preserve the full webPath**, set `NARA_BIND=127.0.0.1` and `NARA_SECURE_COOKIE=1` in `/etc/nara-panel.env`, and restart the service. An existing proxy must forward the chosen internal panel port. The optional Public panel URL setting accepts HTTP or HTTPS, including the webPath; an origin-only value uses the current webPath. If the field is blank, subscription links and QR codes use the current browser address, port and path.
+For public HTTPS, use **4 — Panel HTTPS / Certificate** in the manager (see below). For your own reverse proxy, preserve the full webPath and subPath in **two separately exposed ports**, forward each to its matching backend, set `NARA_BIND=127.0.0.1` and `NARA_SECURE_COOKIE=1`, and restart the service. Public panel URL is optional and is used for panel reference/hostname detection. Public subscription URL is a separate optional override for an external proxy; include its actual port and subPath. Without it, links use the browser/public hostname, independent subscription port and subPath, including on HTTP. A local SSH tunnel requires a public hostname reachable by clients.
+
+In **Settings → Panel & subscription access**, change all four entry values and click **Save access settings**. The installed root broker accepts only these validated fields, checks ports, restarts the service and attempts rollback if readiness fails. The browser reconnects to the new panel address; changing webPath can require signing in again. Under managed HTTPS, these port fields refer to **public HTTPS ports**; backend ports stay separate and on loopback. Open the new ports yourself. An external reverse proxy or Docker port mapping must be updated outside the panel; its listener/mapping is not managed by this broker.
+
+**Subscription URLs change when subPath or its port changes, including the first 0.4.0 upgrade. Share the new link/QR and replace the remote-profile address in clients. Old `/webPath/sub/TOKEN` links stop working. Account credentials, quotas and usage remain intact.**
+
+![Independent panel and subscription settings](screenshots/settings-0.4.jpg)
 
 For a manual source installation on other systemd Linux distributions, install Python/venv, Git, a compatible Go toolchain, OpenSSL and CA certificates first, then run:
 
@@ -62,7 +71,7 @@ The local installer asks the same entry questions and builds a missing core. You
 
 ## Installed server manager
 
-After installing or upgrading to 0.3.1, run:
+After installing or upgrading to 0.4.0, run:
 
 ```sh
 sudo nara
@@ -90,13 +99,13 @@ Uninstall requires typing an exact confirmation. Both removal modes retain pre-e
 
 ### Panel HTTPS certificates
 
-The manager uses Caddy from the distribution's apt repositories and its own `nara-panel-https.service`, `/etc/nara-panel/https/` and `/var/lib/nara-panel-https/`. It does not overwrite `/etc/caddy/Caddyfile` or an existing Caddy/Nginx/Apache service. TCP **80 and 443 must be free**; the internal panel port must differ from both. If those ports are already in use, use your existing reverse proxy. UDP 443 remains available for QUIC proxy inbounds. Firewall rules are not changed automatically.
+The manager uses Caddy from the distribution's apt repositories and its own `nara-panel-https.service`, `/etc/nara-panel/https/` and `/var/lib/nara-panel-https/`. It does not overwrite `/etc/caddy/Caddyfile` or an existing Caddy/Nginx/Apache service. The manager asks for public panel/subscription HTTPS ports, defaulting to **443 / 8443**. These must be different, available, and separate from internal panel/subscription/statistics ports and TCP 80. **TCP 80 must also be free** for certificate challenges and redirects. If those ports are already in use, use your existing reverse proxy. UDP 443 remains available for QUIC proxy inbounds. Firewall rules are not changed automatically.
 
-- **Automatic domain certificate:** first point every A/AAAA record to this server and allow inbound TCP 80/443. Caddy obtains a trusted certificate and renews it automatically while the dedicated service runs. The domain is shared with public certificate authorities/transparency logs, as expected for public certificates. See [Caddy's requirements and renewal behavior](https://caddyserver.com/docs/automatic-https).
+- **Automatic domain certificate:** first point every A/AAAA record to this server and allow inbound TCP 80 and both selected HTTPS ports. Caddy obtains a trusted certificate and renews it automatically while the dedicated service runs. The domain is shared with public certificate authorities/transparency logs, as expected for public certificates. See [Caddy's requirements and renewal behavior](https://caddyserver.com/docs/automatic-https).
 - **Self-signed domain/IP:** creates an ECDSA certificate with the correct SAN, valid for one year. Devices must explicitly trust its public certificate. The manager does not disable verification or install a local CA into the server trust store. Regenerate before expiry.
 - **Import PEM:** reads local absolute paths to a full-chain certificate and matching unencrypted private key, validates hostname/IP, key pairing and expiry, then copies them into the protected HTTPS generation. Re-import after renewal; external source files are not watched.
 
-The proxy preserves the complete webPath and subscription routes. Setup binds the internal panel to `127.0.0.1`, enables Secure cookies and verifies a real HTTPS health request with SNI/hostname validation. Only after verification does it update the Public panel URL. Failure restores the previous entry settings and managed proxy. Panel HTTPS is independent of the certificates attached to Sing-box inbounds.
+The proxy exposes two sites with their own public ports and preserves the complete webPath/subPath. Setup binds both internal listeners to `127.0.0.1`, enables Secure cookies and verifies both HTTPS endpoints with SNI/hostname validation. Only after verification does it update both public URLs. Failure restores the previous entry settings and managed proxy. Panel HTTPS is independent of the certificates attached to Sing-box inbounds.
 
 ## Docker alternative
 
@@ -106,7 +115,7 @@ docker compose run --rm nara python -m nara init
 docker compose up -d
 ```
 
-The container runs unprivileged with a persistent named volume. Set `NARA_WEB_PATH=/YourChosenPath` in its environment if you want a prefix; container setup does not run the interactive Linux installer. Use inbound ports **1024 or above inside the container**. Update Compose port mappings for every inbound. For example, container port 8443 can be published as host port 443; set the inbound's **Public port** to 443 so exports use the correct endpoint. The example publishes TCP 8443 and UDP 8444 on the same numbered host ports; add other mappings as needed. HTTPS reverse proxy setup is separate; `NARA_SECURE_COOKIE=1` expects HTTPS. For initial HTTP tunnel access only, temporarily override it to `0`.
+The container runs unprivileged with a persistent named volume. Set `NARA_WEB_PATH=/YourPanelPath`, `NARA_SUB_PATH=/YourSubscriptionPath`, and distinct `NARA_PORT`/`NARA_SUB_PORT` values in its environment; publish both ports through your proxy. GUI entry controls are disabled for container/manual services; container setup does not run the interactive Linux installer. Use inbound ports **1024 or above inside the container**. Update Compose port mappings for every inbound. For example, container port 8443 can be published as host port 443; set the inbound's **Public port** to 443 so exports use the correct endpoint. The example publishes TCP 8443 and UDP 8444 on the same numbered host ports; add other mappings as needed. HTTPS reverse proxy setup is separate; `NARA_SECURE_COOKIE=1` expects HTTPS. For initial HTTP tunnel access only, temporarily override it to `0`.
 
 ## Updating an installed panel
 
@@ -118,6 +127,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.4.0** adds independent subscription entry points, four-field entry settings, automatic AnyTLS padding defaults, an unselected protocol chooser and a simpler sidebar. Upgrading from earlier versions asks for missing subscription settings. Existing compatible 1.14.3 cores can be retained with manager option 2.
+
 Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, full DNS forms and daily release checks. Existing data is migrated without removing accounts or settings. The app-only updater keeps your current core binary. **For all new build-dependent features, open the one-line manager above and choose option 3**, which rebuilds the complete compatible core and preserves your accounts and entry settings. Docker users should rebuild.
 
 Version **0.3.1** adds the interactive server manager, highlighted terminal input, system-package preparation, protected backups/removal and panel HTTPS setup. The short app-only `update.sh` command remains available; it does not perform the system-package upgrade or open the menu.
@@ -126,7 +137,7 @@ The panel only reports available updates; it never installs a newer core automat
 
 ## Complete core configuration
 
-In **Inbounds**, use **New inbound** for the existing panel-managed protocols. Choosing another type opens its standalone editor; **Standalone inbound** exposes every type directly. Standalone listeners do not use panel client quotas, expiry, traffic totals or subscriptions. Their users/keys are configured in the listener itself.
+In **Inbounds**, use **New inbound** for the existing panel-managed protocols. AnyTLS starts with the official nine-line padding scheme; keep it unless you need a custom scheme. Choosing another type opens its standalone editor; **Standalone inbound** exposes every type directly. Standalone listeners do not use panel client quotas, expiry, traffic totals or subscriptions. Their users/keys are configured in the listener itself.
 
 Use **Add option** within any object to add a field, including nested TLS/QUIC settings, arrays and maps. Version/action selectors switch the appropriate schema. The JSON view can load and review an entire record. Private keys are hidden in general state responses and retained when omitted during editing. Save checks references, rejects outbound cycles, validates with the core and applies automatically.
 
@@ -142,7 +153,7 @@ The daily update check runs independently of the browser and core, uses fixed pu
 3. In **Inbounds**, create an inbound with a unique port and attach the certificate.
 4. In **Clients**, create a client, assign inbounds, and choose allowance/expiry.
 5. Every **Save** automatically validates and activates the configuration using the installed core. There is no separate Apply step. Failed validation preserves the working core and previous settings; a startup failure triggers a rollback attempt. Connection changes can briefly disconnect clients.
-6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. When the public panel URL is blank, the current panel address, port and webPath are used automatically. Client JSON includes an IPv4/IPv6 TUN for VPN mode in the official Sing-box apps, a loopback mixed proxy on port 2080, and a selector of assigned outbounds. The app manages the VPN interface and requests any required operating-system permission.
+6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. When the public subscription URL is blank, the detected public/browser hostname and independent subscription port/subPath are used automatically. Client JSON includes an IPv4/IPv6 TUN for VPN mode in the official Sing-box apps, a loopback mixed proxy on port 2080, and a selector of assigned outbounds. The app manages the VPN interface and requests any required operating-system permission.
 
 **After updating from 0.2.2 or earlier, refresh the remote profile in the Sing-box app before reconnecting.** Previously downloaded/local JSON files must be downloaded and imported again. Changing the panel does not update an already imported local file.
 
@@ -150,7 +161,7 @@ Client DNS uses Cloudflare DoH through the selected proxy; a direct 1.1.1.1 UDP 
 
 By default, self-signed client exports include the public certificate as a trusted certificate. Selecting **Allow insecure (client)** explicitly disables certificate verification in that profile’s client exports; it is disabled by default and never added to the server TLS configuration. Public panel HTTPS and inbound TLS are configured independently.
 
-QR codes contain the private subscription URL, including the account token and webPath. If you access the panel through a local tunnel, set the optional Public panel URL to an address reachable by your clients. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. **Sing-box app (recommended)** is the default and encodes the [official remote-profile import URI](https://sing-box.sagernet.org/clients/general/#remote), including the account name. Choose **JSON subscription URL** for clients that accept a direct full Sing-box JSON URL, or for manually adding a remote profile. Copy link and Download QR follow the selected format. This does not provide Clash YAML or protocol-link/Base64 subscriptions. Rotating the subscription link produces a new QR code when reopened.
+QR codes contain the private subscription URL, including the account token and subPath. If you access the panel through a local tunnel, set the optional Public subscription URL to its independent address reachable by your clients. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. **Sing-box app (recommended)** is the default and encodes the [official remote-profile import URI](https://sing-box.sagernet.org/clients/general/#remote), including the account name. Choose **JSON subscription URL** for clients that accept a direct full Sing-box JSON URL, or for manually adding a remote profile. Copy link and Download QR follow the selected format. This does not provide Clash YAML or protocol-link/Base64 subscriptions. Rotating the subscription link produces a new QR code when reopened.
 
 ![Subscription QR preview with a demonstration account](screenshots/subscription-qr-formats.png)
 
@@ -174,7 +185,7 @@ python3 -m venv .venv
 .venv/bin/python -m nara serve --binary "$PWD/dist/sing-box"
 ```
 
-Open http://127.0.0.1:10000. To test a custom prefix, add `--web-path /AbCdEfGh` and visit http://127.0.0.1:10000/AbCdEfGh/. Linux `/proc` metrics remain unavailable on macOS; the panel does not fill them with demonstration values. Local previews use isolated data; the project ships without accounts or sample client credentials.
+Open http://127.0.0.1:10000. Subscriptions use http://127.0.0.1:10001/subscriptions/TOKEN by default. Change them with `--sub-port` and `--sub-path`. To test a custom prefix, add `--web-path /AbCdEfGh` and visit http://127.0.0.1:10000/AbCdEfGh/. Linux `/proc` metrics remain unavailable on macOS; the panel does not fill them with demonstration values. Local previews use isolated data; the project ships without accounts or sample client credentials.
 
 ```sh
 .venv/bin/python -m unittest discover -s tests -t . -v

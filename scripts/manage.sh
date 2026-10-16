@@ -140,7 +140,7 @@ manager_main() {
                 6) require_installed; systemctl restart nara-panel; manager_python health; ui_success 'Panel service restarted. The core follows its saved start/stop state.' ;;
                 7) require_installed; systemctl stop nara-panel; ui_success 'Panel and core stopped. HTTPS proxy, if configured, remains running.' ;;
                 8) require_installed; systemctl start nara-panel; manager_python health; ui_success 'Panel service started. The core follows its saved start/stop state.' ;;
-                9) require_installed; journalctl -u nara-panel -u nara-panel-https -n 60 --no-pager ;;
+                9) require_installed; journalctl -u nara-panel -u nara-panel-https -u nara-panel-access -n 60 --no-pager ;;
                 10) require_installed; manager_python backup ;; 11) reset_password ;; 12) uninstall_panel ;;
                 *) ui_error 'Choose a number from the menu.'; exit 1 ;;
             esac

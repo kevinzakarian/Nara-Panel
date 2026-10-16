@@ -15,6 +15,7 @@ class AutoApplyTests(unittest.TestCase):
     web_path = ""
     request = test_api.APITests.request
     login = test_api.APITests.login
+    subscription_request = test_api.APITests.subscription_request
 
     def setUp(self):
         test_api.APITests.setUp(self)
@@ -93,7 +94,7 @@ class AutoApplyTests(unittest.TestCase):
             self.assertEqual(self.runtime.process.pid, process)
             self.assertEqual(self.runtime.active, self.store.get("state"))
         old_token = state["clients"][0]["token"]
-        self.assertEqual(self.request("/sub/" + old_token)[0], 404)
+        self.assertEqual(self.subscription_request(old_token)[0], 404)
 
     def test_invalid_unassigned_inbound_is_not_saved(self):
         state = self.store.get("state")
@@ -132,7 +133,7 @@ class AutoApplyTests(unittest.TestCase):
         result = self.save(state, "tls", profile)
         self.assertEqual(result[0], 200, result[1])
         token = state["clients"][0]["token"]
-        result = self.request("/sub/" + token)
+        result = self.subscription_request(token)
         self.assertEqual(result[0], 200, result[1])
         self.assertTrue(result[1]["outbounds"][1]["tls"]["insecure"])
         import json

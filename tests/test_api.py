@@ -32,9 +32,14 @@ class APITests(unittest.TestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.store, self.runtime, Path("web"), web_path=self.web_path))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
+        self.subserver = ThreadingHTTPServer(('127.0.0.1', 0), make_handler(self.store, self.runtime, Path('web'), web_path='/Downloads', role='subscription'))
+        self.subthread = threading.Thread(target=self.subserver.serve_forever, daemon=True)
+        self.subthread.start()
         self.cookie = self.csrf = ""
 
     def tearDown(self):
+        self.subserver.shutdown()
+        self.subserver.server_close()
         self.server.shutdown()
         self.server.server_close()
         self.temp.cleanup()
@@ -55,6 +60,15 @@ class APITests(unittest.TestCase):
         except ValueError:
             pass
         return status, data, response_headers
+
+    def subscription_request(self, token, method='GET'):
+        connection = http.client.HTTPConnection(*self.subserver.server_address, timeout=10)
+        connection.request(method, '/Downloads/' + token, headers={'Cookie': self.cookie})
+        response = connection.getresponse()
+        data = response.read()
+        result = response.status, json.loads(data), dict(response.getheaders())
+        connection.close()
+        return result
 
     def login(self):
         status, data, headers = self.request("/api/login", {"username": "admin", "password": "test-password-123"})
@@ -107,6 +121,22 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.request("/api/delete", {"revision": 2, "collection": "inbounds", "id": inbound["id"]})[0], 400)
         self.assertEqual(len(self.store.get("state")["inbounds"]), 1)
 
+    def test_subscription_port_never_serves_panel_or_admin_api(self):
+        for path in ('', 'api/state', 'api/login', 'app.js', 'index.html'):
+            with self.subTest(path=path):
+                self.assertEqual(self.subscription_request(path)[0], 404)
+                self.assertEqual(self.subscription_request(path, 'POST')[0], 404)
+        self.assertEqual(self.request('/sub/some-token')[0], 404)
+        self.assertEqual(self.request('/Downloads/some-token')[0], 404)
+
+    def test_access_settings_require_authentication(self):
+        self.assertEqual(self.request('/api/access')[0], 401)
+        self.login()
+        status, info, _ = self.request('/api/access')
+        self.assertEqual(status, 200)
+        self.assertEqual(info['subscription_port'], 10001)
+        self.assertNotEqual(info['sub_path'], info['web_path'])
+
     def test_private_key_not_exposed_in_state(self):
         self.login()
         response = self.request("/api/self-signed", {"revision": 0, "server_name": "127.0.0.1", "days": 1})
@@ -142,7 +172,7 @@ class APITests(unittest.TestCase):
         self.runtime.active = copy.deepcopy(state)
         token = state["clients"][0]["token"]
         self.store.add_traffic([("user1", "upload", 100), ("user1", "download", 200)])
-        status, config, headers = self.request("/sub/" + token)
+        status, config, headers = self.subscription_request(token)
         self.assertEqual(status, 200)
         self.assertIn("upload=100; download=200", headers["Subscription-Userinfo"])
         self.assertTrue(any(i["type"] == "tun" for i in config["inbounds"]))
@@ -150,7 +180,7 @@ class APITests(unittest.TestCase):
         self.assertNotIn("private_key", str(config))
         state["clients"][0]["enabled"] = False
         self.store.set("state", state)
-        self.assertEqual(self.request("/sub/" + token)[0], 404)
+        self.assertEqual(self.subscription_request(token)[0], 404)
 
     def test_download_and_subscription_serve_the_same_vpn_profile(self):
         self.login()
@@ -159,7 +189,7 @@ class APITests(unittest.TestCase):
         self.runtime.active = copy.deepcopy(state)
         client = state["clients"][0]
         export_status, exported, _ = self.request("/api/export/" + client["id"])
-        sub_status, subscribed, _ = self.request("/sub/" + client["token"])
+        sub_status, subscribed, _ = self.subscription_request(client["token"])
         self.assertEqual((export_status, sub_status), (200, 200))
         self.assertEqual(exported, subscribed)
         self.assertTrue(any(i["type"] == "tun" for i in exported["inbounds"]))
@@ -257,3 +287,27 @@ class WebPathTests(APITests):
         status, _, headers = self.request("/api/logout", {})
         self.assertEqual(status, 200)
         self.assertIn("Path=/AbCdEfGh/", headers["Set-Cookie"])
+
+class AccessChangeAPITests(unittest.TestCase):
+    setUp = APITests.setUp
+    tearDown = APITests.tearDown
+    request = APITests.request
+    login = APITests.login
+    web_path = ""
+    def test_entry_change_checks_csrf_revision_and_host_before_queueing(self):
+        from nara.access import Access
+        config={'NARA_PORT':str(self.server.server_port),'NARA_SUB_PORT':str(self.subserver.server_port),'NARA_WEB_PATH':'/PanelOnly','NARA_SUB_PATH':'/Downloads','NARA_ACCESS_MANAGED':'1'}
+        access=Access(self.store.directory,config)
+        # Keep this fixture's actual panel at / while the entry metadata describes
+        # the next Linux deployment's configured webPath.
+        self.server.RequestHandlerClass=make_handler(self.store,self.runtime,Path('web'),access=access)
+        self.login()
+        payload={'values':{'panel_port':15000,'subscription_port':15001,'web_path':'/NewPanel','sub_path':'/NewDownloads'},'revision':access.info()['revision'],'current_url':'http://127.0.0.1:'+str(self.server.server_port)+'/'}
+        self.assertEqual(self.request('/api/access',payload,{'X-CSRF-Token':'wrong'})[0],403)
+        self.assertEqual(self.request('/api/access',{**payload,'revision':'stale'})[0],400)
+        self.assertEqual(self.request('/api/access',{**payload,'current_url':'https://unrelated.example/'})[0],400)
+        result=self.request('/api/access',payload)
+        self.assertEqual(result[0],202,result[1])
+        self.assertEqual(result[1]['url'],'http://127.0.0.1:15000/NewPanel/')
+        self.assertTrue((self.store.directory/'access-request.json').exists())
+        self.assertEqual(self.request('/api/access-status/'+result[1]['id'])[1]['status'],'pending')

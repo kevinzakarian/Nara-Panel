@@ -16,7 +16,7 @@ def initial_state():
     return {**{k: [] for k in native.EXTRA_COLLECTIONS}, "core_options": {}, "revision": 0, "inbounds": [], "tls": [], "dns_rules": [], "rule_sets": [],
             "clients": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
             "server": "1.1.1.1", "port": 53}],
-            "settings": {"server_address": "", "public_url": "", "dns_final": "bootstrap",
+            "settings": {"server_address": "", "public_url": "", "subscription_url": "", "dns_final": "bootstrap",
                          "block_private": True}}
 
 
@@ -179,7 +179,7 @@ def validate(state):
             raise ValueError("Invalid UUID")
         require(isinstance(c.get("password"), str) and 12 <= len(c["password"]) <= 256, "Client password must contain at least 12 characters")
         require(bool(re.fullmatch(r"[A-Za-z0-9_-]{32,128}", c.get("token", ""))), "Invalid subscription token")
-    for k in ("server_address", "public_url"):
+    for k in ("server_address", "public_url", "subscription_url"):
         value = state["settings"].get(k, "")
         require(isinstance(value, str), "Invalid settings")
         if value and k == "server_address":
@@ -188,7 +188,7 @@ def validate(state):
             u = urlsplit(value)
             require(u.scheme in ("http", "https") and u.hostname and u.username is None and u.password is None
                     and not u.query and not u.fragment and (u.port is None or 1 <= u.port <= 65535),
-                    "Public panel URL must use HTTP or HTTPS without credentials, a query, or a fragment")
+                    "Public URL must use HTTP or HTTPS without credentials, a query, or a fragment")
     require(type(state["settings"].get("block_private")) is bool, "Invalid private network setting")
     require(isinstance(state.get("core_options", {}), dict), "Invalid core options")
     require(set(state.get("core_options", {})) <= {"log", "dns", "ntp", "certificate", "route", "experimental"}, "Unsupported core options section")

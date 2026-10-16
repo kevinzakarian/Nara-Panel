@@ -17,6 +17,6 @@ COPY web ./web
 RUN mkdir /data && chown nara:nara /data
 ENV NARA_DATA=/data NARA_BIND=0.0.0.0 NARA_PORT=10000 PYTHONDONTWRITEBYTECODE=1
 USER nara
-EXPOSE 10000
+EXPOSE 10000 10001
 VOLUME ["/data"]
 CMD ["python", "-m", "nara", "serve"]

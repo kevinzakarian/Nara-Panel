@@ -17,12 +17,19 @@ def main():
     parser.add_argument("--bind", default=os.environ.get("NARA_BIND", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("NARA_PORT", "10000")))
     parser.add_argument("--web-path", default=os.environ.get("NARA_WEB_PATH", ""))
+    parser.add_argument("--sub-port", type=int, default=int(os.environ.get("NARA_SUB_PORT", "10001")))
+    parser.add_argument("--sub-path", default=os.environ.get("NARA_SUB_PATH", "/subscriptions"))
     parser.add_argument("--stats-port", type=int, default=int(os.environ.get("NARA_STATS_PORT", "10085")))
     parser.add_argument("--binary", default=os.environ.get("NARA_CORE", "sing-box"))
     parser.add_argument("--username", default="admin")
     args = parser.parse_args()
     try:
         args.web_path = normalize_web_path(args.web_path)
+        args.sub_path = normalize_web_path(args.sub_path)
+        if not args.sub_path or args.sub_path == args.web_path:
+            raise ValueError("Panel webPath and subscription subPath must be different")
+        if not 1 <= args.sub_port <= 65535 or args.sub_port in (args.port, args.stats_port):
+            raise ValueError("Panel, subscription and statistics ports must be different and between 1 and 65535")
         if not 1 <= args.port <= 65535 or not 1 <= args.stats_port <= 65535 or args.port == args.stats_port:
             raise ValueError("Panel and statistics ports must be different and between 1 and 65535")
     except ValueError as exc:
@@ -56,7 +63,8 @@ def main():
         def stop(signum, frame):
             raise KeyboardInterrupt
         signal.signal(signal.SIGTERM, stop)
-        serve(store, runtime, args.bind, args.port, os.environ.get("NARA_SECURE_COOKIE") == "1", args.web_path)
+        access_config = {**os.environ, "NARA_PORT": args.port, "NARA_SUB_PORT": args.sub_port, "NARA_WEB_PATH": args.web_path, "NARA_SUB_PATH": args.sub_path}
+        serve(store, runtime, args.bind, args.port, os.environ.get("NARA_SECURE_COOKIE") == "1", args.web_path, args.sub_port, args.sub_path, access_config)
         lock_file.close()
 
 

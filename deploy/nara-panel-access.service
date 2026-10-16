@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply validated NARA panel and subscription entry settings
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/nara-panel
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/nara-panel/.venv/bin/python -m nara.access apply
+TimeoutStartSec=900
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true

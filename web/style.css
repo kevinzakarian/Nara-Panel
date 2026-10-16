@@ -107,3 +107,5 @@ dialog { width:min(780px,calc(100% - 32px)); }
 #extra-server-options,#extra-client-options { padding:16px; }
 .brand b .panel-version,.login-brand b .panel-version { font:14px/1.4 ui-monospace,monospace; letter-spacing:0; margin-top:6px; }
 @media(max-width:700px) { .version-strip { gap:12px; }.update-banner>small { margin-left:0; }.schema-object,.schema-array { padding:8px; }.schema-property { gap:4px; } }
+
+.entry-fields{border:0;padding:0;margin:0;min-width:0}.entry-fields:disabled{opacity:.65}.entry-fields .note{margin:16px 0}.entry-fields input{width:100%}

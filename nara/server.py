@@ -85,7 +85,9 @@ def self_signed(data):
                 "kind": "self_signed", "certificate": cert.read_text(), "private_key": key.read_text()}
 
 
-def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
+def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role="panel", access=None):
+    from .access import Access
+    access = access or Access(store.directory, {"NARA_WEB_PATH": web_path})
     base_path = normalize_web_path(web_path)
     cookie_path = base_path + "/"
     metrics = Metrics()
@@ -174,8 +176,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                 return self.send(404, {"error": "Not found"})
             if path == "/api/health":
                 return self.send(200, {"ok": True, "version": __version__})
-            if path.startswith("/sub/"):
-                token = path[5:]
+            if role == "subscription" and path.startswith("/") and path.count("/") == 1 and len(path) > 1:
+                token = path[1:]
                 state = store.get("state")
                 client = next((c for c in state["clients"] if hmac.compare_digest(c["token"], token)), None)
                 active = runtime.active
@@ -187,12 +189,18 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                 from .config import expiry
                 info = "upload={}; download={}; total={}; expire={}".format(usage.get("upload", 0), usage.get("download", 0), live_client["quota_bytes"], int(expiry(live_client.get("expires_at"))))
                 return self.send(200, result, headers={"Subscription-Userinfo": info, "Profile-Update-Interval": "6"})
+            if role == "subscription":
+                return self.send(404, {"error": "Not found"})
             if path.startswith("/api/"):
                 session = self.auth()
                 if not session:
                     return
                 if path == "/api/session":
                     return self.send(200, {"csrf": session["csrf"], "username": store.get("admin")["username"]})
+                if path == "/api/access":
+                    return self.send(200, access.info())
+                if path.startswith("/api/access-status/"):
+                    return self.send(200, access.status(path.rsplit("/", 1)[-1]))
                 if path == "/api/options":
                     return self.send(200, options.schema())
                 if path == "/api/core-schema":
@@ -226,6 +234,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
             self.send(404, {"error": "Not found"})
 
         def do_POST(self):
+            if role != "panel":
+                return self.send(404, {"error": "Not found"})
             try:
                 self.same_origin()
                 self.post()
@@ -270,6 +280,12 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
+            if path == "/api/access":
+                require(isinstance(data.get("current_url"), str), "Panel address is required")
+                parsed = urlsplit(data["current_url"])
+                require(parsed.netloc == self.headers.get("Host"), "Panel address must match this request")
+                result = access.request(data.get("values"), data.get("revision"), data["current_url"])
+                return self.send(202, result)
             if path == "/api/logout":
                 store.logout(self.cookie_token())
                 return self.send(200, {"ok": True}, headers={"Set-Cookie": "nara_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=" + cookie_path + ("; Secure" if secure_cookie else "")})
@@ -388,21 +404,30 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
     return Handler
 
 
-def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web_path=""):
+def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web_path="", sub_port=10001, sub_path="/subscriptions", access_config=None):
+    from .access import Access
+    access = Access(store.directory, access_config or {"NARA_WEB_PATH": web_path, "NARA_PORT": port, "NARA_SUB_PATH": sub_path, "NARA_SUB_PORT": sub_port})
     web_dir = Path(__file__).resolve().parent.parent / "web"
-    handler = make_handler(store, runtime, web_dir, secure_cookie, web_path)
-    server = ThreadingHTTPServer((bind, port), handler)
-    server.daemon_threads = True
-    thread = threading.Thread(target=runtime.worker, daemon=True)
-    thread.start()
+    server = ThreadingHTTPServer((bind, port), make_handler(store, runtime, web_dir, secure_cookie, web_path, access=access))
+    try:
+        subscription = ThreadingHTTPServer((bind, sub_port), make_handler(store, runtime, web_dir, False, sub_path, role="subscription", access=access))
+    except Exception:
+        server.server_close()
+        raise
+    server.daemon_threads = subscription.daemon_threads = True
+    threading.Thread(target=subscription.serve_forever, kwargs={"poll_interval": .5}, daemon=True).start()
+    threading.Thread(target=runtime.worker, daemon=True).start()
     updates = UpdateChecker(store)
     threading.Thread(target=updates.worker, daemon=True).start()
     print("NARA panel: http://" + bind + ":" + str(port) + normalize_web_path(web_path) + "/", flush=True)
+    print("Subscriptions: http://" + bind + ":" + str(sub_port) + normalize_web_path(sub_path) + "/", flush=True)
     try:
         server.serve_forever(poll_interval=.5)
     except KeyboardInterrupt:
         pass
     finally:
+        subscription.shutdown()
+        subscription.server_close()
         runtime.shutdown.set()
         updates.shutdown.set()
         with runtime.lock:

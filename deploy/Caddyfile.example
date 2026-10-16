@@ -1,6 +1,20 @@
-panel.example.com {
-    # Caddy obtains and renews the public panel HTTPS certificate.
+# External proxy example for Caddy 2.6+; match your environment ports and paths.
+# Older distribution Caddy versions are handled by the NARA manager automatically.
+{
+    servers {
+        protocols h1 h2
+    }
+}
+
+https://panel.example.com:443 {
+    # Preserve webPath; the application rejects paths outside its prefix.
     reverse_proxy 127.0.0.1:10000
+    header Strict-Transport-Security "max-age=31536000"
+}
+
+https://panel.example.com:8443 {
+    # Separate listener: profiles use subPath and never expose admin routes.
+    reverse_proxy 127.0.0.1:10001
     header Strict-Transport-Security "max-age=31536000"
     # Keep access logs disabled: subscription URLs contain bearer tokens.
 }
