@@ -32,6 +32,26 @@ class AutoApplyTests(unittest.TestCase):
         self.runtime.apply(state, save=True)
         return state
 
+    def test_complete_dns_and_routing_save_without_apply_and_invalid_route_rolls_back(self):
+        state = self.seed()
+        result = self.request('/api/core-options', {'revision': state['revision'], 'section': 'dns',
+                              'options': {'timeout': '3s', 'cache_capacity': 2048}, 'default_resolver': 'bootstrap'})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        rule = {'action': 'reject', 'domain_suffix': ['blocked.example.com']}
+        result = self.save(state, 'route_rules', {'config': rule})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        import json
+        config = json.loads((self.runtime.generation/'config.json').read_text())
+        self.assertEqual(config['dns']['cache_capacity'], 2048)
+        self.assertEqual(config['route']['rules'][-1], rule)
+        result = self.save(state, 'route_rules', {'config': {'domain_suffix': ['example.com'], 'action': 'route', 'outbound': 'missing-outbound'}})
+        self.assertEqual(result[0], 400, result[1])
+        self.assertEqual(self.store.get('state'), state)
+        self.assertEqual(self.runtime.active, state)
+        self.assertTrue(self.runtime.running)
+
     def save(self, state, collection, record):
         return self.request("/api/save", {"revision": state["revision"], "collection": collection, "record": record})
 

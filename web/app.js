@@ -8,6 +8,7 @@ const paths = {
  tls:'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z M9 12l2 2 4-4',
  dns:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M3 12h18 M12 3c5 5 5 13 0 18 M12 3c-5 5-5 13 0 18',
  clients:'M16 21v-3a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v3 M9 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M20 21v-3a4 4 0 0 0-3-3.9 M16 3.1a4 4 0 0 1 0 7.8',
+ routing:'M4 4h6v6H4z M14 14h6v6h-6z M7 10v7h7 M17 14V7h-7',core:'M8 3h8v5h5v8h-5v5H8v-5H3V8h5z',
  settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M9 3l-1 3-3 1-2 3 2 2-1 3 3 3 3-1 2 2 3-2 1-3 3-1 1-3-2-2 1-3-3-2z',
  refresh:'M20 7v5h-5 M4 17v-5h5 M5 7a8 8 0 0 1 13-2l2 2 M4 17l2 2a8 8 0 0 0 13-2',
  plus:'M12 5v14 M5 12h14', arrow:'M19 12H5 M10 7l-5 5 5 5', close:'M6 6l12 12 M6 18 18 6',
@@ -27,9 +28,11 @@ const paths = {
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.code}"/></svg>`;
 const btn = (text, action, symbol = 'plus', cls = '', attrs = '') => `<button class="btn ${cls}" data-action="${action}" ${attrs}>${icon(symbol)}${text}</button>`;
 const rowBtn = (title, action, symbol, id, collection='') => `<button title="${e(title)}" aria-label="${e(title)}" data-action="${action}" data-id="${e(id)}" data-collection="${collection}">${icon(symbol)}</button>`;
-const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',settings:'Settings'};
-const descriptions = {dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',settings:'Server preferences and administrator account security.'};
-let optionSchema;
+const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',routing:'Routing',core:'Core features',settings:'Settings'};
+const descriptions = {dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',routing:'Control destinations, matching rules, and outbound connections.',core:'Endpoints, services, certificates and the remaining core features.',settings:'Server preferences and administrator account security.'};
+let optionSchema,coreCatalog;
+let routingTab='route_rules',coreTab='endpoints';
+const protocolLabel=type=>coreCatalog?.labels[type]||CoreSchema.title(type);
 let state, dashboard, csrf = '', page = 'dashboard', dnsTab = 'dns_servers', search = '', filter = 'all', pageNumber = 1;
 let refreshPending = null, modalSubmit = null, previewConfig = null;
 const size = (n, decimals = 1) => {
@@ -58,14 +61,14 @@ async function api(path, body) {
 function toast(message, error=false) { const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toasts').append(node);setTimeout(()=>node.remove(),6500); }
 function showLogin() { $('#login').hidden=false;$('#app').hidden=true;csrf=''; }
 async function boot() {
- try { const session=await api('session');optionSchema=await api('options');csrf=session.csrf;$('#admin-name').textContent=session.username;await load();$('#login').hidden=true;$('#app').hidden=false; }
+ try { const session=await api('session');[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema')]);CoreSchema.configure(coreCatalog);csrf=session.csrf;$('#admin-name').textContent=session.username;await load();$('#login').hidden=true;$('#app').hidden=false; }
  catch(err) { showLogin();if (err.message !== 'Please sign in first') $('#login-error').textContent=err.message; }
 }
 async function load(silent=false) {
  if(refreshPending){await refreshPending;if(silent)return;}
  refreshPending=(async()=>{
   [state,dashboard]=await Promise.all([api('state'),api('dashboard')]);
-  $('#sidebar-host').textContent=dashboard.metrics.hostname;
+  $('#sidebar-host').textContent=dashboard.metrics.hostname;$$('.panel-version').forEach(el=>el.textContent='v'+dashboard.panel_version);
   $('#sidebar-core').textContent=dashboard.core.running?'Core is running':'Core is stopped';
   $('.core-label .status-dot').classList.toggle('on',dashboard.core.running);
   $('#updated').textContent='Updated at '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
@@ -85,15 +88,15 @@ function render() {
  if (!state || !dashboard) return;
  page=Object.hasOwn(titles,location.hash.slice(1))?location.hash.slice(1):'dashboard';
  renderNav();$('#crumb').textContent=titles[page];document.title=titles[page]+' · NARA';
- $('#content').innerHTML=({dashboard:renderDashboard,inbounds:renderInbounds,tls:renderTLS,dns:renderDNS,clients:renderClients,settings:renderSettings}[page])();
+ $('#content').innerHTML=({dashboard:renderDashboard,inbounds:renderInbounds,tls:renderTLS,dns:renderDNS,routing:renderRouting,core:renderCore,clients:renderClients,settings:renderSettings}[page])();
 }
 function metric(label,value,symbol,color,foot) {return `<article class="stat-card"><div class="stat-head">${label}<span class="stat-symbol ${color}">${icon(symbol)}</span></div><div class="stat-number">${value}</div><div class="stat-foot">${foot}</div></article>`;}
 function renderDashboard() {
  const m=dashboard.metrics,c=dashboard.core,active=state.clients.filter(x=>status(x)[0]==='Active').length;
  const allUsage=Object.values(dashboard.totals).reduce((sum,t)=>sum+t.upload+t.download,0);
- const runningInbounds=state.inbounds.filter(i=>i.enabled&&state.clients.some(x=>status(x)[0]==='Active'&&x.inbound_ids.includes(i.id))).length;
+ const runningInbounds=state.inbounds.filter(i=>i.enabled&&(i.mode==='native'||state.clients.some(x=>status(x)[0]==='Active'&&x.inbound_ids.includes(i.id)))).length;
  return heading(btn('Server config','config','code')+(dashboard.core.running?'':btn('Start core','apply','power','primary')))+
- `<section class="hero"><div class="hero-copy"><span class="eyebrow">NARA / YOUR SERVER, YOUR RULES</span><h2>${c.running?'Your server is ready to connect.':'Your network. Your rules.'}</h2><p>${c.running?'Everything you need to manage connections, clients, and server resources.':'Create a certificate, add an inbound, and connect your first client.'}</p></div><div class="hero-status">${icon('inbounds')}<div><b>${c.running?'Sing-box Running':'Sing-box Stopped'}</b><small>${e(c.version || 'CORE NOT INSTALLED')}</small></div></div></section>`+
+ updateBanner()+`<section class="version-strip"><span><b>NARA</b> <span class="mono">v${e(dashboard.panel_version)}</span></span><span><b>Sing-box</b> <span class="mono">${e((c.version||'Not installed').replace('sing-box version ',''))}</span></span>${badge(c.running?'Running':'Stopped',c.running?'green':'')}</section>`+
  (c.error?`<div class="hint-box error">${e(c.error)}</div>`:'')+
  (c.stats_error?`<div class="hint-box error">${e(c.stats_error)}</div>`:'')+
  `<div class="stats-grid">${metric('Active clients',num(active)+` <small>/ ${num(state.clients.length)}</small>`,'clients','green',`<b>${num(state.clients.length-active)}</b> disabled or limited accounts`)}${metric('Total client traffic',e(size(allUsage)),'traffic','blue',c.last_stats?'Last collected: '+time(c.last_stats):'Waiting for core traffic statistics')}${metric('Ready inbounds',num(runningInbounds)+` <small>/ ${num(state.inbounds.length)}</small>`,'inbounds','purple',c.running?'Enabled with eligible clients':'Save settings or start the core')}${metric('Server uptime',m.uptime===null?'—':`${Math.floor(m.uptime/86400)} <small>days</small> ${Math.floor(m.uptime%86400/3600)} <small>hours</small>`,'clock','',e(m.hostname))}</div>`+
@@ -112,25 +115,17 @@ function chart(samples) {
  return `<svg viewBox="0 0 600 110" preserveAspectRatio="none" role="img" aria-label="Server upload and download traffic"><defs><linearGradient id="trafficFill" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#e8ad86" stop-opacity=".22"/><stop offset="1" stop-color="#e8ad86" stop-opacity="0"/></linearGradient></defs>${[10,40,75,109].map(y=>`<path d="M0 ${y}H600" stroke="#f0f3f4" fill="none"/>`).join('')}<path d="${path('rx')} L600,110 L0,110Z" fill="url(#trafficFill)"/><path d="${path('rx')}" stroke="#e0a17c" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"/><path d="${path('tx')}" stroke="#8bb6a7" stroke-width="1.8" fill="none" vector-effect="non-scaling-stroke"/></svg><div class="chart-labels"><span>${time(samples[0].at)}</span><span>${time(samples.at(-1).at)}</span></div>`;
 }
 function renderInbounds() {
- return heading(btn('New inbound','new-inbound','plus','primary'))+pendingBanner()+`<section class="card"><div class="card-header"><div><h2>Connection endpoints</h2><p>VLESS · VMess · Trojan · Hysteria2 · TUIC · AnyTLS</p></div>${badge(num(state.inbounds.length)+' Inbound')}</div>${state.inbounds.length?`<div class="table-wrap"><table><thead><tr><th>Name / tag</th><th>Protocol</th><th>Listen address</th><th>TLS</th><th>Clients</th><th>Status</th><th>Actions</th></tr></thead><tbody>${state.inbounds.map(i=>`<tr><td><b class="mono">${e(i.tag)}</b><small class="path-cell">${e(['hysteria2','tuic'].includes(i.type)||i.transport==='quic'?'QUIC / UDP':i.transport?.toUpperCase()||'TCP')} ${!['hysteria2','tuic','anytls'].includes(i.type)&&!['tcp','quic'].includes(i.transport||'tcp')?e(i.path||''):''}</small></td><td>${badge(i.type.toUpperCase(),'blue')}</td><td class="mono">${e(i.listen)}:${i.port}</td><td>${i.tls_id?`<span class="tls-tag">${icon('lock')}${e(state.tls.find(t=>t.id===i.tls_id)?.server_name||'')}</span>`:badge('No TLS','orange')}</td><td>${num(state.clients.filter(c=>c.inbound_ids.includes(i.id)).length)}</td><td>${badge(i.enabled?'Active':'Disabled',i.enabled?'green':'')}</td><td><div class="row-actions">${rowBtn('Edit','edit','edit',i.id,'inbounds')}${rowBtn('Delete','delete','trash',i.id,'inbounds')}</div></td></tr>`).join('')}</tbody></table></div>`:empty('Add your first inbound','Choose a protocol, port, and certificate. Clients connect to your server through this inbound.','new-inbound','Add Inbound','inbounds')}</section>`+
- `<div class="hint-box section-gap">Open UDP ports for Hysteria2, TUIC, and QUIC transport; open TCP ports for other connections in your server firewall. Inbounds without eligible clients will not start.</div>`;
+ return heading(btn('Standalone inbound','standalone-inbound','inbounds')+btn('New inbound','new-inbound','plus','primary'))+pendingBanner()+`<section class="card"><div class="card-header"><div><h2>Connection endpoints</h2><p>All Sing-box 1.14.3 inbound protocols · panel accounts or standalone listeners</p></div>${badge(num(state.inbounds.length)+' Inbound')}</div>${state.inbounds.length?`<div class="table-wrap"><table><thead><tr><th>Name / tag</th><th>Protocol</th><th>Listen address</th><th>TLS</th><th>Clients</th><th>Status</th><th>Actions</th></tr></thead><tbody>${state.inbounds.map(i=>`<tr><td><b class="mono">${e(i.tag)}</b><small class="path-cell">${e(['hysteria2','tuic'].includes(i.type)||i.transport==='quic'?'QUIC / UDP':i.transport?.toUpperCase()||'TCP')} ${!['hysteria2','tuic','anytls'].includes(i.type)&&!['tcp','quic'].includes(i.transport||'tcp')?e(i.path||''):''}</small></td><td>${badge(protocolLabel(i.type),'blue')}${i.mode==='native'?'<small class="path-cell">Standalone</small>':''}</td><td class="mono">${e(i.listen||'—')}${i.port?':'+i.port:''}</td><td>${i.tls_id?`<span class="tls-tag">${icon('lock')}${e(state.tls.find(t=>t.id===i.tls_id)?.server_name||'')}</span>`:badge('No TLS','orange')}</td><td>${num(state.clients.filter(c=>c.inbound_ids.includes(i.id)).length)}</td><td>${badge(i.enabled?'Active':'Disabled',i.enabled?'green':'')}</td><td><div class="row-actions">${rowBtn('Edit','edit','edit',i.id,'inbounds')}${rowBtn('Delete','delete','trash',i.id,'inbounds')}</div></td></tr>`).join('')}</tbody></table></div>`:empty('Add your first inbound','Choose a protocol, port, and certificate. Clients connect to your server through this inbound.','new-inbound','Add Inbound','inbounds')}</section>`+
+ `<div class="hint-box section-gap">Open UDP ports for Hysteria2, TUIC, and QUIC transport; open TCP ports for other connections in your server firewall. Panel-managed inbounds start only with eligible clients. Standalone listeners manage authentication in their own settings and do not use panel account quotas.</div>`;
 }
 function renderTLS() {
  return heading(btn('Import certificate','import-tls','download')+btn('Generate self-signed','self-signed','plus','primary'))+pendingBanner()+
  `<div class="hint-box">Generate a certificate in one click. Each TLS profile controls verification, ALPN, and TLS versions in client exports.</div>`+
  (state.tls.length?`<div class="cards-grid">${state.tls.map(t=>`<article class="card certificate-card"><div class="cert-icon">${icon('tls')}</div><h3>${e(t.name||t.server_name)}</h3><span class="mono">${e(t.server_name)}</span><div class="cert-details"><span>Certificate type ${badge(t.kind==='self_signed'?'Self-signed':'Imported',t.kind==='self_signed'?'orange':'green')}</span><span>Client verification ${badge(t.insecure?'Allow insecure':'Verified',t.insecure?'orange':'green')}</span><span>Expires <b>${date(t.expires)}</b></span><span>Assigned to <b>${num(state.inbounds.filter(i=>i.tls_id===t.id).length)} Inbound</b></span></div><div class="cert-footer">${badge(t.expires>Date.now()/1000?'Valid':'Expired',t.expires>Date.now()/1000?'green':'red')}<div class="row-actions">${rowBtn('Download certificate','download-cert','download',t.id)}${rowBtn('Edit certificate','edit','edit',t.id,'tls')}${rowBtn('Delete','delete','trash',t.id,'tls')}</div></div></article>`).join('')}</div>`:`<section class="card">${empty('Start with a secure connection','Import your own certificate or generate a self-signed certificate in one click.','self-signed','Generate certificate','tls')}</section>`);
 }
-function renderDNS() {
- const labels={dns_servers:'Resolvers',dns_rules:'DNS rules',rule_sets:'Rule sets'};
- return heading(btn('Add '+({dns_servers:'Resolver',dns_rules:'Rule',rule_sets:'Rule Set'}[dnsTab]),'new-dns','plus','primary'))+pendingBanner()+
- `<div class="tabs">${Object.entries(labels).map(([key,label])=>`<button class="tab ${dnsTab===key?'active':''}" data-action="dns-tab" data-id="${key}">${label} ${badge(num(state[key].length))}</button>`).join('')}</div>`+
- `<section class="card"><div class="card-header"><div><h2>${labels[dnsTab]}</h2><p>${dnsTab==='dns_servers'?'Default DNS: '+e(state.settings.dns_final):dnsTab==='dns_rules'?'Rules are evaluated in order, from top to bottom.':'Reusable domain lists for DNS rules'}</p></div>${icon('dns')}</div>${dnsTable()}</section>`;
-}
-function dnsTable() {
- const rows=state[dnsTab];if (!rows.length) return empty('Nothing here yet','Combine resolvers and domain lists with your own matching rules.','new-dns','Add new item','dns');
- const headers=dnsTab==='dns_servers'?['Tag','Type','Server','Port','Bootstrap','Actions']:dnsTab==='dns_rules'?['Match type','Values','Action','Resolver','Order / actions']:['Tag','Type','Source','Format','Actions'];
- return `<div class="table-wrap"><table><thead><tr>${headers.map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${rows.map((r,index)=>`<tr>${dnsTab==='dns_servers'?`<td class="mono">${e(r.tag)} ${state.settings.dns_final===r.tag?badge('Default','green'):''}</td><td>${badge(r.type.toUpperCase(),'blue')}</td><td class="mono">${e(r.server||'System')}</td><td class="mono">${r.port||'—'}</td><td class="mono">${e(r.domain_resolver||'—')}</td>`:dnsTab==='dns_rules'?`<td class="mono">${e(r.match)}</td><td class="mono truncate" title="${e(r.values.join(', '))}">${e(r.values.join(', '))}</td><td>${badge(r.action,r.action==='reject'?'red':'green')}</td><td class="mono">${e(r.server||'—')}</td>`:`<td class="mono">${e(r.tag)}</td><td>${badge(r.type,'blue')}</td><td class="mono truncate" title="${e(r.url||'')}">${e(r.url||num(r.rules?.length)+' inline rules')}</td><td>${e(r.format||'JSON')}</td>`}<td><div class="row-actions">${dnsTab==='dns_rules'?`<span class="muted">${num(index+1)}</span>${rowBtn('Move up','move-rule','arrow',r.id)}`:''}${rowBtn('Edit','edit','edit',r.id,dnsTab)}${rowBtn('Delete','delete','trash',r.id,dnsTab)}</div></td></tr>`).join('')}</tbody></table></div>`;
-}
+function renderDNS() {return renderCoreWorkspace('dns',['dns_servers','dns_rules','rule_sets','dns_options'],dnsTab);}
+function renderRouting() {return renderCoreWorkspace('routing',['route_rules','outbounds','rule_sets','route_options'],routingTab);}
+function renderCore() {return renderCoreWorkspace('core',['endpoints','services','certificate_providers','http_clients','network_namespaces','log','ntp','certificate','experimental'],coreTab);}
 function clientTable(clients,compact=false) {
  if (!clients.length) return empty('No clients to display','Create an account, assign inbounds, and set a traffic allowance and expiry date.','new-client','Create client','clients');
  return `<div class="table-wrap"><table><thead><tr><th>Client</th><th>Status</th><th>Usage / allowance</th><th>Expires</th>${compact?'':'<th>Inbounds</th>'}<th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr><td><div class="name-cell"><span class="client-avatar">${e(c.name.slice(0,2).toUpperCase())}</span><div><b>${e(c.name)}</b><small>${e(c.note||c.id.slice(0,8))}</small></div></div></td><td>${badge(...status(c))}</td><td><div class="usage"><small>${e(size(total(c)))} / ${c.quota_bytes?e(size(c.quota_bytes)):'∞'}</small><progress max="100" value="${c.quota_bytes?Math.min(100,total(c)/c.quota_bytes*100):0}" aria-label="Client usage"></progress></div></td><td>${date(c.expires_at)}</td>${compact?'':`<td>${c.inbound_ids.map(id=>badge(state.inbounds.find(i=>i.id===id)?.tag||id,'blue')).join(' ')}</td>`}<td><div class="row-actions">${rowBtn('Details & subscription','client-details','eye',c.id)}${rowBtn('Subscription QR code','subscription-qr','qr',c.id)}${rowBtn('Edit','edit','edit',c.id,'clients')}${rowBtn('Download config','export','download',c.id)}${compact?'':rowBtn('Delete','delete','trash',c.id,'clients')}</div></td></tr>`).join('')}</tbody></table></div>`;
@@ -141,7 +136,7 @@ function renderClients() {
  return heading(btn('New client','new-client','plus','primary'))+pendingBanner()+`<div class="toolbar"><div class="search">${icon('search')}<input id="client-search" placeholder="Search clients…" value="${e(search)}" aria-label="Search clients"></div><select id="client-filter" aria-label="Filter clients"><option value="all" ${filter==='all'?'selected':''}>All clients</option><option value="active" ${filter==='active'?'selected':''}>Active clients</option><option value="inactive" ${filter==='inactive'?'selected':''}>Disabled & limited</option></select><span class="count">${num(filtered.length)} clients</span></div><section class="card">${clientTable(filtered.slice((pageNumber-1)*10,pageNumber*10))}<div class="table-foot"><span>${num(filtered.length)} clients · page ${num(pageNumber)} of ${num(pages)}</span><div class="pagination"><button data-action="page" data-id="${Math.max(1,pageNumber-1)}" aria-label="Previous page">→</button><button class="active">${num(pageNumber)}</button><button data-action="page" data-id="${Math.min(pages,pageNumber+1)}" aria-label="Next page">←</button></div></div></section>`;
 }
 function renderSettings() {
- return heading()+pendingBanner()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">HTTP or HTTPS. Leave blank to use this panel's current address and path.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}${optionSection('DNS cache and address preferences',optionSchema.dns,state.settings.dns_options||{},'dns')}<label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section></div></div>`;
+ return heading()+pendingBanner()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">HTTP or HTTPS. Leave blank to use this panel's current address and path.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}<p class="note">Manage DNS cache, rules and resolver options in the DNS section.</p><label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section></div></div>`;
 }
 function field(label,name,value='',type='text',hint='',extra='') {return `<label ${extra}>${label}<input name="${name}" type="${type}" value="${e(value)}" ${type!=='checkbox'?'dir="auto"':''}>${hint?`<small class="field-hint">${hint}</small>`:''}</label>`;}
 function selectField(label,name,options,value='',extra=''){return `<label ${extra}>${label}<select name="${name}">${options.map(([v,t])=>`<option value="${e(v)}" ${v===value?'selected':''}>${e(t)}</option>`).join('')}</select></label>`;}
@@ -154,12 +149,13 @@ function openModal(title,subtitle,content,submit=null,submitLabel='Save') {
 async function saveRecord(collection,record) {const result=await api('save',{revision:state.revision,collection,record});await load();toast(result.restarted?'Saved and applied. The core is running.':'Saved and applied.');}
 function editInbound(item={}) {
  const protocol=item.type||'vless';
- openModal(item.id?'Edit inbound':'New inbound','Changes are checked and applied automatically when you save.',`<div class="form-grid">${field('Name / tag','tag',item.tag||'', 'text','Letters, numbers, hyphens, and underscores')}${selectField('Protocol','type',['vless','vmess','trojan','hysteria2','tuic','anytls'].map(x=>[x,x.toUpperCase()]),protocol)}${field('Port','port',item.port||443,'number')}${field('Public port (optional)','public_port',item.public_port||'','number','For port mappings; blank uses the listen port')}${field('Listen IP','listen',item.listen||'::','text',':: for both IPv4 and IPv6')}${selectField('TLS profile','tls_id',[['','No TLS'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||'')}${selectField('Transport','transport',['tcp','ws','grpc','http','httpupgrade','quic'].map(t=>[t,t==='tcp'?'TCP / default':t.toUpperCase()]),item.transport||'tcp')}${field('Path / service name','path',item.path||'/','text','For WebSocket, HTTP, HTTPUpgrade, or gRPC')}<label class="check-field full"><input name="enabled" type="checkbox" ${checked(item.enabled!==false)}>Enable this inbound</label></div><div id="protocol-fields"></div><div id="transport-fields"></div>${optionSection('Listener settings',optionSchema.listen,item.listen_options||{},'listen')}<div id="multiplex-fields"></div>`,async form=>{
+ openModal(item.id?'Edit inbound':'New inbound','Changes are checked and applied automatically when you save.',`<div class="form-grid">${field('Name / tag','tag',item.tag||'', 'text','Letters, numbers, hyphens, and underscores')}${selectField('Protocol','type',coreCatalog.types.inbounds.map(x=>[x,protocolLabel(x)]),protocol)}${field('Port','port',item.port||443,'number')}${field('Public port (optional)','public_port',item.public_port||'','number','For port mappings; blank uses the listen port')}${field('Listen IP','listen',item.listen||'::','text',':: for both IPv4 and IPv6')}${selectField('TLS profile','tls_id',[['','No TLS'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||'')}${selectField('Transport','transport',['tcp','ws','grpc','http','httpupgrade','quic'].map(t=>[t,t==='tcp'?'TCP / default':t.toUpperCase()]),item.transport||'tcp')}${field('Path / service name','path',item.path||'/','text','For WebSocket, HTTP, HTTPUpgrade, or gRPC')}<label class="check-field full"><input name="enabled" type="checkbox" ${checked(item.enabled!==false)}>Enable this inbound</label></div><div id="protocol-fields"></div><div id="transport-fields"></div>${optionSection('Listener settings',optionSchema.listen,item.listen_options||{},'listen')}<div id="multiplex-fields"></div>`,async form=>{
   const d=Object.fromEntries(new FormData(form)),p=d.type;
   const serverFields=[...optionSchema.server[p],...(['hysteria2','tuic'].includes(p)?optionSchema.quic:[])];
-  await saveRecord('inbounds',{id:item.id,tag:d.tag,type:p,port:Number(d.port),public_port:Number(d.public_port)||0,listen:d.listen,tls_id:d.tls_id,transport:d.transport||'tcp',path:d.path,enabled:form.elements.enabled.checked,
+  await saveRecord('inbounds',{id:item.id,mode:'managed',tag:d.tag,type:p,extra_options:extraServer?.value()||{},extra_client_options:extraClient?.value()||{},port:Number(d.port),public_port:Number(d.public_port)||0,listen:d.listen,tls_id:d.tls_id,transport:d.transport||'tcp',path:d.path,enabled:form.elements.enabled.checked,
    server_options:readOptions(form,'server',serverFields),client_options:readOptions(form,'client',optionSchema.client[p]),listen_options:readOptions(form,'listen',optionSchema.listen),multiplex:readOptions(form,'multiplex',optionSchema.multiplex),transport_options:readOptions(form,'transport',optionSchema.transport[d.transport||'tcp'])});
  });
+ let extraServer,extraClient;
  const form=$('#modal-form'),protocolInput=form.elements.type,transportInput=form.elements.transport;
  function updateTransport() {
   const kind=transportInput.value;
@@ -168,22 +164,30 @@ function editInbound(item={}) {
   syncOptionFields(form);
  }
  function updateProtocol() {
-  const p=protocolInput.value,values=p===item.type?item.server_options||{}:{},client=p===item.type?item.client_options||{}:{};
+  const p=protocolInput.value;
+  if(!optionSchema.server[p]){const def=CoreSchema.protocolSchema('Inbound',p),config=CoreSchema.seed(def);config.tag=form.elements.tag.value;if(def.properties.listen)config.listen=form.elements.listen.value;if(def.properties.listen_port)config.listen_port=Number(form.elements.port.value);return editCoreRecord('inbounds',{...item,mode:'native'},config);}
+  const values=p===item.type?item.server_options||{}:{},client=p===item.type?item.client_options||{}:{};
   const quic=['hysteria2','tuic'].includes(p),restricted=quic||p==='anytls';
   if(restricted)transportInput.value='tcp';
   transportInput.disabled=restricted;transportInput.closest('label').hidden=restricted;
-  $('#protocol-fields').innerHTML=optionSection(p.toUpperCase()+' settings',optionSchema.server[p],values,'server',true)+optionSection('Client connection settings',optionSchema.client[p],client,'client')+(quic?optionSection('QUIC connection settings',optionSchema.quic,values,'server'):'');
+  $('#protocol-fields').innerHTML=optionSection(protocolLabel(p)+' settings',optionSchema.server[p],values,'server',true)+optionSection('Client connection settings',optionSchema.client[p],client,'client')+(quic?optionSection('QUIC connection settings',optionSchema.quic,values,'server'):'');
   $('#multiplex-fields').innerHTML=restricted?'':optionSection('Multiplex settings',optionSchema.multiplex,p===item.type?item.multiplex||{}:{},'multiplex');
   // Disabled selects do not enter FormData; the submit path defaults to TCP.
   updateTransport();
+  $('#advanced-inbound-options')?.remove();
+  const advanced=document.createElement('div');advanced.id='advanced-inbound-options';advanced.innerHTML='<details class="option-section"><summary>All server options</summary><p class="note schema-note">Additional options override the matching field above. Identity and panel account credentials remain managed.</p><div id="extra-server-options"></div></details><details class="option-section"><summary>All client options</summary><div id="extra-client-options"></div></details>';$('.modal-content',form).append(advanced);
+  const server=CoreSchema.protocolSchema('Inbound',p),clientSchema=CoreSchema.protocolSchema('Outbound',p);
+  const filtered=(schema,omit)=>({type:'object',properties:Object.fromEntries(Object.entries(schema.properties||{}).filter(([key])=>!omit.includes(key)))});
+  extraServer=CoreSchema.mount($('#extra-server-options'),filtered(server,['type','tag','listen','listen_port','users']),p===item.type?item.extra_options||{}:{},{scope:'inbound/'+p,references:coreReferences()});
+  extraClient=CoreSchema.mount($('#extra-client-options'),filtered(clientSchema,['type','tag','server','server_port','uuid','password']),p===item.type?item.extra_client_options||{}:{},{scope:'outbound/'+p,references:coreReferences()});
  }
  protocolInput.addEventListener('change',updateProtocol);transportInput.addEventListener('change',updateTransport);
  form.addEventListener('change',()=>syncOptionFields(form));updateProtocol();
 }
 function editClient(item={}) {
- if (!state.inbounds.length) {toast('Create an inbound first.',true);location.hash='inbounds';return;}
+ if (!state.inbounds.some(i=>i.mode!=='native')) {toast('Create an inbound first.',true);location.hash='inbounds';return;}
  const localExpiry=item.expires_at?new Date(new Date(item.expires_at).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):'';
- openModal(item.id?'Edit client':'New client','Passwords, UUIDs, and subscription tokens are generated securely.',`<div class="form-grid">${field('Client name','name',item.name||'')}${field('Note','note',item.note||'')}${field('Traffic allowance (GiB)','quota',item.quota_bytes?item.quota_bytes/1024**3:0,'number','0 means unlimited')}${field('Expiry date and time','expires',localExpiry,'datetime-local','Leave blank for no expiry. Uses your browser\'s local time.')}<div class="field full"><span>Assigned inbounds</span><div class="checkbox-list">${state.inbounds.map(i=>`<label><input type="checkbox" name="inbound" value="${e(i.id)}" ${checked(item.inbound_ids?.includes(i.id))}>${e(i.tag)}</label>`).join('')}</div></div><label class="check-field full"><input type="checkbox" name="enabled" ${checked(item.enabled!==false)}>Enable this account</label></div>`,async form=>{
+ openModal(item.id?'Edit client':'New client','Passwords, UUIDs, and subscription tokens are generated securely.',`<div class="form-grid">${field('Client name','name',item.name||'')}${field('Note','note',item.note||'')}${field('Traffic allowance (GiB)','quota',item.quota_bytes?item.quota_bytes/1024**3:0,'number','0 means unlimited')}${field('Expiry date and time','expires',localExpiry,'datetime-local','Leave blank for no expiry. Uses your browser\'s local time.')}<div class="field full"><span>Assigned inbounds</span><div class="checkbox-list">${state.inbounds.filter(i=>i.mode!=='native').map(i=>`<label><input type="checkbox" name="inbound" value="${e(i.id)}" ${checked(item.inbound_ids?.includes(i.id))}>${e(i.tag)}</label>`).join('')}</div></div><label class="check-field full"><input type="checkbox" name="enabled" ${checked(item.enabled!==false)}>Enable this account</label></div>`,async form=>{
   const f=new FormData(form);const quota=Number(f.get('quota'));if(!Number.isFinite(quota)||quota<0)throw new Error('Invalid traffic allowance');
   await saveRecord('clients',{id:item.id,name:f.get('name'),note:f.get('note'),quota_bytes:Math.round(quota*1024**3),expires_at:f.get('expires')?new Date(f.get('expires')).toISOString():'',inbound_ids:f.getAll('inbound'),enabled:form.elements.enabled.checked});
  });
@@ -228,6 +232,83 @@ function editDNS(collection,item={}) {
  }
 }
 function download(name,content,type='application/json') {const blob=new Blob([typeof content==='string'?content:JSON.stringify(content,null,2)],{type});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),3000);}
+const coreLabels={dns_servers:'Resolvers',dns_rules:'DNS rules',rule_sets:'Rule sets',dns_options:'DNS settings',route_rules:'Routing rules',outbounds:'Outbounds',route_options:'Routing settings',endpoints:'Endpoints',services:'Services',certificate_providers:'Certificate providers',http_clients:'HTTP clients',network_namespaces:'Network namespaces',log:'Logging',ntp:'NTP',certificate:'Certificate trust',experimental:'Cache and APIs'};
+function updateBanner(){
+ const updates=dashboard.updates;
+ if(!updates)return '';
+ return `<section class="update-banner" aria-label="Daily update checks">${['panel','core'].map(key=>{
+  const item=updates[key],name=key==='panel'?'NARA':'Sing-box';
+  if(item.available)return `<span>${badge('Update available','orange')} <b>${name} ${e(item.latest)}</b> <a class="text-link" href="${e(item.url)}" target="_blank" rel="noopener noreferrer">View update ↗</a></span>`;
+  return `<span><b>${name}</b> ${e(item.error?'Update check unavailable':item.known?'Up to date':'Waiting for first check')}${item.checked_at?` <small>Checked ${e(date(item.checked_at))} ${e(time(item.checked_at))}</small>`:''}</span>`;
+ }).join('')}<small>Checks automatically every 24 hours</small></section>`;
+}
+function legacyCoreConfig(collection,row){
+ if(!Object.keys(row).length)return {};
+ if(row.config)return structuredClone(row.config);
+ if(collection==='dns_servers'){
+  const obj={type:row.type,tag:row.tag};
+  for(const key of ['server','domain_resolver','path'])if(row[key])obj[key]=row[key];
+  if(row.port&&row.type!=='local')obj.server_port=row.port;
+  if(['tls','https','quic','h3'].includes(row.type))obj.tls={enabled:true,...(row.server_name?{server_name:row.server_name}:{})};
+  return obj;
+ }
+ if(collection==='dns_rules')return {[row.match]:row.values,action:row.action,...(row.action==='route'?{server:row.server}:{}),...row.options};
+ if(collection==='rule_sets')return Object.fromEntries(Object.entries(row).filter(([k])=>['type','tag','url','format','rules','update_interval','path'].includes(k)));
+ return {};
+}
+function renderCoreWorkspace(surface,tabs,selected){
+ const options=!coreCatalog.collections[selected];
+ const actions=options?btn('Edit '+coreLabels[selected],'core-options','edit','primary',`data-id="${selected}"`):btn('Add '+coreLabels[selected],'core-new','plus','primary',`data-collection="${selected}"`);
+ return heading(actions)+pendingBanner()+`<div class="tabs core-tabs">${tabs.map(key=>`<button class="tab ${key===selected?'active':''}" data-action="core-tab" data-collection="${surface}" data-id="${key}">${coreLabels[key]}${Array.isArray(state[key])?' '+badge(num(state[key].length)):''}</button>`).join('')}</div>`+
+ (options?`<section class="card"><div class="card-header"><div><h2>${coreLabels[selected]}</h2><p>Full Sing-box ${e(coreCatalog.version)} options</p></div></div><div class="card-body"><p class="note">${selected==='dns_options'?'Configure caching, optimistic responses, query timeouts, address preference, client subnet and the default resolver.':selected==='route_options'?'Set the default outbound, domain resolver, interfaces, network selection and process or neighbor discovery.':selected==='experimental'?'Configure the cache, Clash API and debugging. The panel manages its private V2Ray accounting API.':'Configure every option supported by this version of the core.'}</p><div class="inline-buttons">${actions}</div></div></section>`:renderCoreTable(selected))+
+ (surface==='routing'&&state.settings.block_private?'<div class="hint-box section-gap">Private destination blocking is evaluated before your routing rules. Change “Block private networks” in Settings if you want to route to local destinations.</div>':'')+
+ (surface==='core'?`<div class="hint-box section-gap">${dashboard.core.tags?.length?'<b>Installed core capabilities:</b> '+e(dashboard.core.tags.join(', '))+'<br>':''}Some features require a core built with the corresponding capability, local files, external credentials or Linux network privileges. Save validates configuration and starts the service before committing changes.</div>`:'');
+}
+function renderCoreTable(collection){
+ const rows=state[collection]||[];
+ return `<section class="card"><div class="card-header"><div><h2>${coreLabels[collection]}</h2><p>${['dns_rules','route_rules'].includes(collection)?'Evaluated in order, from top to bottom. Logical rules support nested AND / OR groups.':'All options come from the official Sing-box 1.14.3 schema.'}</p></div></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Name / order</th><th>Type / action</th><th>Configuration</th><th>Actions</th></tr></thead><tbody>${rows.map((row,index)=>{const c=legacyCoreConfig(collection,row);return `<tr><td><b>${e(row.label||c.tag||'Rule '+(index+1))}</b>${row.enabled===false?badge('Disabled'):''}${collection==='dns_servers'&&c.tag===state.settings.dns_final?badge('Default','green'):''}</td><td>${badge(protocolLabel(c.type||c.action||'default'),'blue')}</td><td>${e(Object.keys(c).filter(k=>!['tag','type'].includes(k)).map(CoreSchema.title).join(' · '))}</td><td><div class="row-actions">${['dns_rules','route_rules','rule_sets'].includes(collection)&&index?rowBtn('Move up','core-move','arrow',row.id,collection):''}${rowBtn('Edit','core-edit','edit',row.id,collection)}${rowBtn('Delete','delete','trash',row.id,collection)}</div></td></tr>`;}).join('')}</tbody></table></div>`:empty('No '+coreLabels[collection].toLowerCase()+' yet','Add an item to configure its complete options.','core-new','Add item')}</section>`;
+}
+function coreReferences(){
+ const tags=rows=>rows.map(row=>row.tag).filter(Boolean);
+ return {inbound:tags([...state.inbounds,...state.endpoints]),outbound:[...new Set(['direct',...tags([...state.outbounds,...state.endpoints])])],dns_server:tags(state.dns_servers),rule_set:tags(state.rule_sets),network_namespace:tags(state.network_namespaces),http_client:tags(state.http_clients),certificate_provider:tags(state.certificate_providers)};
+}
+function editCoreRecord(collection,item={},preset){
+ if(!coreCatalog.collections[collection])return editCoreOptions(collection);
+ const schema=CoreSchema.byName(coreCatalog.collections[collection]);
+ let config=preset||legacyCoreConfig(collection,item);
+ if(!Object.keys(config).length){
+  config=CoreSchema.seed(schema);
+  if(collection==='dns_servers')config={type:'https',tag:'',server:'1.1.1.1'};
+  if(collection==='dns_rules')config={domain_suffix:[],action:'route',server:state.settings.dns_final};
+  if(collection==='route_rules')config={domain_suffix:[],action:'route',outbound:'direct'};
+  if(collection==='outbounds')config={type:'direct',tag:''};
+  if(collection==='rule_sets')config={type:'inline',tag:'',rules:[]};
+ }
+ if(['inbounds','outbounds','dns_servers','rule_sets','endpoints','services','certificate_providers','http_clients','network_namespaces'].includes(collection)&&!Object.hasOwn(config,'tag'))config.tag='';
+ const inbound=collection==='inbounds';
+ let editor;
+ openModal((item.id?'Edit ':'New ')+(coreLabels[collection]||'inbound'),`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,`${inbound?'<div class="hint-box">Standalone listener: authentication is configured here. Panel accounts, subscriptions, quotas and expiry do not apply to this listener.</div>':''}${inbound&&optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):''}${field('Display name (optional)','display_name',item.label||'')}${inbound?selectField('TLS profile (optional)','native_tls_id',[['','Custom TLS / no profile'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||''):''}<label class="check-field"><input type="checkbox" name="native_enabled" ${checked(item.enabled!==false)}>Enable this item</label>${inbound?`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label><p class="note">Public listeners need authentication unless this option is explicitly selected.</p>`:''}<div class="schema-editor" id="native-fields"></div><p class="note">Choose “Add option” inside any group to access every available field. Arrays and logical groups support multiple items. Blank optional fields can be removed. Stored private key values are kept unless replaced.</p><details class="option-section"><summary>JSON view</summary><p class="note schema-note">Load the current form into JSON, or import JSON into the form.</p><div class="schema-note inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false"></textarea></details>`,async form=>{
+  const c=editor.value();
+  await saveRecord(collection,{id:item.id,mode:'native',label:form.elements.display_name.value,enabled:form.elements.native_enabled.checked,config:c,tag:c.tag||'',type:c.type||'',...(inbound?{port:c.listen_port||0,listen:c.listen||'',tls_id:form.elements.native_tls_id.value,allow_unauthenticated:form.elements.allow_unauthenticated.checked}:{})});
+ });
+ editor=CoreSchema.mount($('#native-fields'),schema,config,{collection,references:coreReferences()});
+ $('#native-json').value=JSON.stringify(config,null,2);
+ $('#core-to-json').addEventListener('click',()=>{$('#native-json').value=JSON.stringify(editor.value(),null,2)});
+ $('#core-from-json').addEventListener('click',()=>{try{const next=JSON.parse($('#native-json').value);if(!next||Array.isArray(next)||typeof next!=='object')throw Error();editor.set(next);toast('JSON loaded into form. Save to apply.');}catch{toast('Enter a valid JSON object.',true);}});
+}
+function editCoreOptions(key){
+ const section=key.replace('_options',''),omit=section==='dns'?['servers','rules','final']:section==='route'?['rules','rule_set']:section==='experimental'?['v2ray_api']:[];
+ const original=CoreSchema.choose(coreCatalog.schema.properties[section],{}),schema={...original,properties:Object.fromEntries(Object.entries(original.properties||{}).filter(([k])=>!omit.includes(k)))};
+ let values=state.core_options[section]||{};
+ if(section==='dns'){values={...state.settings.dns_options,...values};delete values.independent_cache;}
+ if(section==='route')values={final:'direct',default_domain_resolver:state.settings.dns_final,...values};
+ let editor;
+ openModal(coreLabels[key]||CoreSchema.title(section),'Saving validates and applies changes automatically.',`${section==='dns'?`<div class="form-grid">${selectField('Default resolver','default_resolver',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}</div>`:''}<div id="native-fields" class="schema-editor"></div>`,async form=>{
+  await api('core-options',{revision:state.revision,section,options:editor.value(),...(section==='dns'?{default_resolver:form.elements.default_resolver.value}:{})});await load();toast('Saved and applied.');
+ });
+ editor=CoreSchema.mount($('#native-fields'),schema,values,{scope:section,references:coreReferences()});
+}
+
 function subscriptionURL(client) {
  const current=new URL('.',location.href);
  const base=state.settings.public_url?.trim()?new URL(state.settings.public_url):current;
@@ -304,10 +385,17 @@ async function handle(action,target) {
  if(action==='new-client')return editClient();
  if(action==='self-signed')return createSelfSigned();
  if(action==='import-tls')return editTLS();
- if(action==='new-dns')return editDNS(dnsTab);
+ if(action==='new-dns')return editCoreRecord(dnsTab);
+ if(action==='core-new')return editCoreRecord(collection||(page==='dns'?dnsTab:page==='routing'?routingTab:coreTab));
+ if(action==='core-edit')return editCoreRecord(collection,state[collection].find(x=>x.id===id));
+ if(action==='core-options')return editCoreOptions(id);
+ if(action==='core-tab'){if(collection==='dns')dnsTab=id;else if(collection==='routing')routingTab=id;else coreTab=id;return render();}
+ if(action==='core-move'){await api('reorder-rules',{collection,id,revision:state.revision});await load();return;}
+ if(action==='standalone-inbound')return editCoreRecord('inbounds',{}, {type:'shadowsocks',tag:'',listen:'::',listen_port:443});
+ if(action==='managed-inbound')return editInbound({type:id});
  if(action==='dns-tab'){dnsTab=id;return render();}
  if(action==='page'){pageNumber=Number(id);return render();}
- if(action==='edit') {const item=state[collection].find(x=>x.id===id);return collection==='clients'?editClient(item):collection==='inbounds'?editInbound(item):collection==='tls'?editTLS(item):editDNS(collection,item);}
+ if(action==='edit') {const item=state[collection].find(x=>x.id===id);return collection==='clients'?editClient(item):collection==='inbounds'?(item.mode==='native'?editCoreRecord(collection,item):editInbound(item)):collection==='tls'?editTLS(item):editCoreRecord(collection,item);}
  if(action==='delete')return confirmAction('Delete item','Delete this item? Remove its references from other settings first.',async()=>{await api('delete',{revision:state.revision,collection,id});await load();toast('Deleted and applied.');},'Delete');
  if(action==='apply'){await api('apply',{revision:state.revision});await load();toast('The core is running.');return;}
  if(action==='stop')return confirmAction('Stop Sing-box','All client connections will disconnect. The core will stay stopped until you start it from the panel.',async()=>{await api('stop',{});await load();toast('Core stopped.');},'Stop');
@@ -333,7 +421,7 @@ document.addEventListener('submit',async event=>{
  try {
   if(form.id==='login-form'){const result=await api('login',Object.fromEntries(new FormData(form)));csrf=result.csrf;form.elements.password.value='';$('#login-error').textContent='';await boot();}
   else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';await modalSubmit(form);$('#modal').close();}
-  else if(form.id==='settings-form'){const f=new FormData(form);const d={server_address:f.get('server_address'),public_url:f.get('public_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:readOptions(form,'dns',optionSchema.dns)};await api('settings',{revision:state.revision,settings:d});await load();toast('Settings saved and applied.');}
+  else if(form.id==='settings-form'){const f=new FormData(form);const d={server_address:f.get('server_address'),public_url:f.get('public_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:state.revision,settings:d});await load();toast('Settings saved and applied.');}
  }catch(err){if(form.id==='modal-form')$('#form-error').textContent=err.message;else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=false;submit.textContent=label;}}
 });
 document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});

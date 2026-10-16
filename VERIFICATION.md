@@ -132,3 +132,59 @@ Native Android/macOS graphical-app VPN activation and remote Linux update were
 not performed. Existing remote profiles must be refreshed; local JSON files must
 be downloaded and imported again. Python compilation, JavaScript syntax and source
 packaging were checked.
+
+## Full 1.14.3 configuration workspace (0.3.0)
+
+The complete Python 3.12.14 suite passed **105 tests without skips** against a
+newly built full-capability Sing-box **1.14.3**. Two subsequent targeted real-core
+tests passed for advanced TLS override trust and native DNS/route UDP answering.
+Native composition/reference tests were rerun after default-type alias and
+cycle-validation refinements. **45 Node.js tests passed**, comprising the existing
+28 independently decoded QR tests and 17 schema-form DOM tests with jsdom.
+
+The bundled schema comes from the pinned 1.14.3 binary. Field help was generated
+from **121 English configuration documents** at the same source revision. Tests
+check all 19 inbound names, all 15 DNS types and every top-level configuration
+section. DOM tests preserve nested arrays/maps, false/zero values, logical rules,
+Snell versions and private-key data; they exercise add/remove, action switching,
+new-record defaults, inline/local/remote rule-set choices and prototype-safe map
+keys. General API state redaction and secret retention are tested separately.
+
+Actual loopback transfers passed for the six original managed protocols and the
+new standalone HTTP, Mixed, SOCKS, Shadowsocks, Hysteria and Snell 5/6 cases. A
+native Direct UDP listener plus routing hijack and a Hosts/DNS rule returned the
+expected reserved example address over a real UDP socket. Existing TLS verification,
+quota/expiry enforcement, traffic persistence and rollback tests passed. Invalid
+outbound references preserve both the saved model and running core. Unknown
+references, outbound cycles and recursive rule-set cycles are rejected before core
+activation. No host TUN, firewall, routes, system proxy or system DNS were changed.
+
+API tests cover authenticated schema access, root/custom-webPath assets, full DNS
+records and settings/default selection, routing order/revision guards, key redaction
+and preservation, and cached dashboard update status. Daily-check tests cover
+persisted 24-hour caching, independent component failures, preserving previous
+results, stable-version comparison, prerelease rejection and response bounds. The
+live upstream release metadata contained 168 assets and 285,031 bytes, confirming
+that the response limit must exceed 256 KiB; the implementation permits 2 MB.
+
+Browser verification on the isolated demonstration store created and auto-applied
+a Shadowsocks listener, an ordered routing rejection, a Hosts resolver/map, a DNS
+routing rule and a global DNS timeout. Saved and active revisions matched. The
+endpoint and service type menus expose their respective schema variants. Mobile
+inspection at **390 × 844** showed a **390 px** document, **352 px** dialog and
+**16 px** input text. Desktop inspection used **1280 × 800**. Screenshots contain
+only the demonstration store. The compact version/update strips replace the hero,
+and the logo shows the full panel version.
+
+The full standard-capability Darwin core was built and exercised locally. A Linux
+amd64 core including Naive outbound/purego was cross-compiled successfully. The
+matching pinned `libcronet.so` and license are installed beside the Linux binary;
+ELF inspection confirmed standard glibc/libgcc dependencies. Linux execution,
+Docker image execution, ARM64 compilation, privileged TUN/namespace/device behavior,
+ACME issuance, Tor integration and live third-party endpoint/service accounts were
+not tested. Their complete configuration fields are exposed, and host/account
+requirements are documented rather than simulated. Native standalone listeners
+intentionally do not receive panel-account quotas or subscription export.
+
+JavaScript syntax, Python compilation, shell syntax, whitespace checks and source
+packaging were checked. Node/jsdom/jsQR remain development-only dependencies.

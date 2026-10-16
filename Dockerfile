@@ -10,6 +10,8 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=core /sing-box /usr/local/bin/sing-box
+COPY --from=core /libcronet.so /usr/local/bin/libcronet.so
+COPY --from=core /libcronet.LICENSE /usr/local/bin/libcronet.LICENSE
 COPY nara ./nara
 COPY web ./web
 RUN mkdir /data && chown nara:nara /data

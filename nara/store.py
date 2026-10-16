@@ -49,7 +49,11 @@ class Store:
     def get(self, key, default=None):
         with self.connect() as db:
             row = db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
-            return json.loads(row[0]) if row else default
+            value = json.loads(row[0]) if row else default
+            if key in ("state", "active") and isinstance(value, dict):
+                for name, initial in initial_state().items():
+                    value.setdefault(name, initial)
+            return value
 
     def set(self, key, value):
         with self.connect() as db:

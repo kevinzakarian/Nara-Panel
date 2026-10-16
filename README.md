@@ -1,15 +1,18 @@
 # NARA Panel
 
-An English web panel for running **Sing-box on your own Linux server**. Inspired by the NARA OpenWrt project's orange skin, local configuration generation, and validation-before-activation workflow. This is a separate server application; it does not modify the OpenWrt project.
+An independent English web panel for running **Sing-box on your own Linux server**. Inspired by the NARA OpenWrt project's orange skin, local configuration generation, and validation-before-activation workflow. This is a separate server application; it does not modify the OpenWrt project.
 
-![NARA Panel desktop overview](screenshots/overview-desktop.png)
+![NARA Panel desktop overview](screenshots/overview-0.3.png)
 
 ## Included
 
 - **Overview:** Linux CPU, RAM, disk, load, uptime, hostname, sampled network traffic, client traffic totals, core status, and recent events. Unavailable measurements are shown as unavailable.
-- **Inbounds:** VLESS/Vision, VMess, Trojan, Hysteria2 with Salamander/Gecko obfuscation, TUIC and AnyTLS. Protocol-specific forms cover bandwidth, congestion control, padding, fallback, connection tuning and client exports. TCP, WebSocket, gRPC, HTTP, HTTPUpgrade and QUIC transports where supported; multiplex and listener settings. See the [feature review](FEATURE_REVIEW.md) for the exact scope.
+- **Inbounds:** all 19 Sing-box 1.14.3 types, including Shadowsocks, ShadowTLS, Hysteria, Snell 5/6, Naive, HTTP/SOCKS, TUN, transparent listeners and Cloudflared. Complete versioned forms include nested protocol/TLS/transport/listen options. Existing VLESS, VMess, Trojan, Hysteria2, TUIC and AnyTLS account management remains available. Standalone listeners manage their own credentials. See the [feature review](FEATURE_REVIEW.md).
 - **TLS:** import PEM certificate/key pairs, validate their match and SAN hostname, generate ECDSA self-signed certificates with one action, show expiry, and download the public certificate. Each profile has explicit client **Allow insecure**, SNI suppression, ALPN, TLS versions and handshake timeout.
-- **DNS:** UDP/TCP/DoT/DoH/DoQ/HTTP3/local resolvers, bootstrap validation, cache controls and IP preferences. Ordered domain/suffix/keyword/regex/query-type/rule-set rules, inversion, TTL and cache options; inline JSON and remote HTTPS source/SRS rule sets with update intervals.
+- **DNS:** all 15 typed resolvers, complete logical/default rules and actions, races/speculation, predefined replies, optimistic/cache controls and local/remote/inline rule sets.
+- **Routing:** ordered rules, logical groups, all match/action fields, 20 outbound types, interface/domain defaults and shared rule sets.
+- **Core features:** five endpoint types, ten service types, certificate providers, HTTP clients, namespaces, logging, NTP, certificate trust and experimental cache/Clash API settings.
+- **Updates:** daily, persisted, read-only checks for panel and stable upstream core releases, shown above a compact version strip in Overview.
 - **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated QR codes in official Sing-box remote-profile and direct JSON URL formats, with PNG download.
 - **Operations:** SQLite persistence, admin sign-in, password change, logout, server-side sessions, CSRF checks, sign-in throttling, automatic validation/application on save, managed restarts, attempted rollback after startup failure, and systemd installation. Saved and active settings are committed together; invalid changes preserve the previous settings.
 
@@ -18,10 +21,10 @@ The interface defaults to **English and left-to-right**, with a 16 px body/input
 ## Requirements
 
 - Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, and CA certificates.
-- Sing-box **1.14.3**, built with **`with_quic,with_v2ray_api`**. Default official release builds do not include V2Ray API. The supplied build script pins the official source commit and uses its Go module checksums. Building requires Go 1.27.1 or a compatible newer toolchain, Git, and Internet access.
+- Sing-box **1.14.3**, built with the **upstream standard capabilities plus `with_v2ray_api`**. Default official release builds do not include V2Ray API. The supplied build script pins the official source commit and uses its Go module checksums. Building requires Go 1.27.1 or a compatible newer toolchain, Git, and Internet access.
 - Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS; an HTTPS reverse proxy can be configured separately.
 
-The panel owns its Sing-box child process and configuration. Give it separate ports from any existing installation. It does not edit host firewall rules, routes, system DNS, or another Sing-box service.
+The panel owns its Sing-box child process and configuration. Give it separate ports from any existing installation. The installer leaves host firewall, routes, DNS and other Sing-box services untouched. Native TUN/transparent/network-namespace features can change networking when you explicitly configure them and provide the required capabilities; see [host requirements](FEATURE_REVIEW.md#builds-and-host-requirements).
 
 ## One-line Linux installation
 
@@ -33,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/insta
 
 For an account with sudo access, replace the last `bash` with `sudo bash`.
 
-The installer downloads the source, installs system dependencies, verifies an isolated Go toolchain against its official SHA-256, builds the pinned Sing-box source with client statistics, and creates the systemd service. Building can take several minutes. It asks for:
+The installer downloads the source, installs system dependencies, verifies an isolated Go toolchain against its official SHA-256, builds the pinned Sing-box source with standard capabilities and client statistics, and creates the systemd service. Building can take several minutes. It asks for:
 
 1. **webPath** — enter a single path segment such as `MyPanel`. Press **Enter** for a cryptographically random **8-letter path containing both uppercase and lowercase letters**, e.g. `/aBcDefGh/`.
 2. **Panel port** — press **Enter** for **10000**, or enter another available port. Invalid, reserved, and occupied ports are rejected.
@@ -73,7 +76,20 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
-Version **0.2.3** supplies a complete VPN profile for the official Sing-box apps: IPv4/IPv6 TUN, DNS capture, DNS-over-HTTPS through the selected proxy, direct server-hostname bootstrap and interface detection to avoid routing loops. It also enables informative client logs. The official-app QR format and direct JSON URL choice from 0.2.2 are included. HTTP support and the automatic apply, typography, TLS and protocol editors from earlier versions are included. No Python dependency changes or core rebuild are required for this panel update.
+Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, full DNS forms and daily release checks. Existing data is migrated without removing accounts or settings. The app-only updater keeps your current core binary. **For all new build-dependent features, rerun the full one-line installer above**, which builds the complete core and preserves your accounts and entry settings. Press Enter to retain the offered existing path/port. Docker users should rebuild.
+
+The panel only reports available updates; it never installs a newer core automatically. Forms target 1.14.3. Review compatibility before independently moving the core to another version.
+
+## Complete core configuration
+
+In **Inbounds**, use **New inbound** for the existing panel-managed protocols. Choosing another type opens its standalone editor; **Standalone inbound** exposes every type directly. Standalone listeners do not use panel client quotas, expiry, traffic totals or subscriptions. Their users/keys are configured in the listener itself.
+
+Use **Add option** within any object to add a field, including nested TLS/QUIC settings, arrays and maps. Version/action selectors switch the appropriate schema. The JSON view can load and review an entire record. Private keys are hidden in general state responses and retained when omitted during editing. Save checks references, rejects outbound cycles, validates with the core and applies automatically.
+
+**DNS** contains all resolver types, DNS rules, shared rule sets and global DNS settings. **Routing** contains rules, outbounds and routing defaults. **Core features** contains endpoints, services, certificate providers, HTTP clients, namespaces and the remaining root settings. See the [coverage and requirements table](FEATURE_REVIEW.md) for details.
+
+The daily update check runs independently of the browser and core, uses fixed public GitHub endpoints, and persists its cache across restarts. Failed checks show “Update check unavailable”; they do not mean the installed version is current.
+
 
 ## First connection
 
@@ -100,8 +116,8 @@ QR codes contain the private subscription URL, including the account token and w
 - Usage and expiry are checked every **5 seconds**. Crossing a limit rebuilds the running configuration and restarts the whole core, disconnecting all active connections. Enforcement can overshoot within the polling/restart window. Sudden crashes/power loss can lose the most recent uncollected interval; graceful restarts collect first.
 - Form edits take effect when **Save** succeeds. Account enable/disable, deletion, quota/expiry edits, usage resets, TLS changes and DNS changes apply automatically. Equivalent server configurations, client-only settings and token rotations avoid unnecessary core restarts. A successful usage reset reactivates an otherwise eligible exhausted account. Rotating a subscription URL does not invalidate already downloaded credentials.
 - After **three consecutive failed accounting polls**, the panel stops the core. An unexpected exit is reported and requires **Start core** or a successful settings save; no automatic crash loop is started inside the panel. A normal panel restart restores the last applied configuration if the core had not been explicitly stopped.
-- No live connected-user count, online status, per-device/IP/concurrency limit, per-client speed limit, periodic quota renewal, protocol-link/Base64 subscriptions, ACME automation for inbound certificates, or REALITY/ShadowTLS editor is claimed in this release. Account status means eligible, not currently connected. Shadowsocks inbounds are not included.
-- Imported certificates are stored and used locally. To renew a certificate, edit and save its TLS profile. Rule-set downloads are performed by the core; failed core validation/download does not replace the active generation.
+- Panel-managed accounts have no live connected-user count, online indicator, per-device/IP/concurrency limit, per-client speed cap or periodic quota renewal. Standalone protocol settings can have additional upstream controls, but they are not panel account limits. Account status means eligible, not currently connected. Protocol-link/Base64 subscriptions remain outside this release.
+- Imported certificate profiles are stored and used locally. Renew them by editing their TLS profile, or configure an upstream certificate provider through the full core editor when appropriate. Rule-set downloads are performed by the core; failed core validation/download does not replace the active generation.
 - There is one administrator identity. Private keys, client credentials, subscription tokens, and the database must stay private. Core diagnostics live in the private data directory as `core.log`; the UI does not display raw core errors that might contain credentials.
 - For a consistent manual backup, stop the panel service and back up the entire `/var/lib/nara-panel` directory including the SQLite database. Restore only to a trusted host with the service stopped. Automatic encrypted backups and multi-server management are outside this release.
 
@@ -143,3 +159,11 @@ sudo -u nara-panel .venv/bin/python -m nara reset-password --data /var/lib/nara-
 - [Official source used for the core build](https://github.com/SagerNet/sing-box/tree/v1.14.3)
 
 NARA Panel is independent of SagerNet. Panel code is MIT licensed. Sing-box and third-party dependencies retain their respective licenses; the core is built separately from upstream GPL-licensed source.
+
+## Bundled reference data
+
+The versioned schema and configuration help are under `nara/schema`. Their source,
+regeneration command and upstream documentation license are recorded there. The
+panel's own code retains its project license; the bundled QR encoder retains its
+MIT notice. The build script downloads the pinned upstream core and its separately
+licensed runtime dependencies from their official sources.

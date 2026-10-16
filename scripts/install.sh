@@ -42,6 +42,10 @@ python3 -m venv /opt/nara-panel/.venv
 cp -R "$source_dir/nara" "$source_dir/web" /opt/nara-panel/
 cp "$source_dir/requirements.txt" /opt/nara-panel/
 install -m 755 "$core" /opt/nara-panel/bin/sing-box
+if [ -f "$(dirname "$core")/libcronet.so" ]; then
+    install -m 755 "$(dirname "$core")/libcronet.so" /opt/nara-panel/bin/libcronet.so
+    install -m 644 "$(dirname "$core")/libcronet.LICENSE" /opt/nara-panel/bin/libcronet.LICENSE
+fi
 install -m 644 "$source_dir/deploy/nara-panel.service" /etc/systemd/system/nara-panel.service
 cd /opt/nara-panel
 # An interrupted earlier installation can leave a database without an administrator.

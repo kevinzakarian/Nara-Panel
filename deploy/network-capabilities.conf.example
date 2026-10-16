@@ -1,0 +1,7 @@
+# Optional systemd drop-in for Linux network-interface features.
+# Install only when you intentionally need TUN, transparent redirection or
+# system WireGuard/OpenVPN endpoints. This permits the service to change routes.
+# sudo systemctl edit nara-panel
+[Service]
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW

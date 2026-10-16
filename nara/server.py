@@ -18,6 +18,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, require, validate
+from . import native
+from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
 from .store import password_hash, password_matches
 from .install_config import normalize_web_path
@@ -193,14 +195,18 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                     return self.send(200, {"csrf": session["csrf"], "username": store.get("admin")["username"]})
                 if path == "/api/options":
                     return self.send(200, options.schema())
+                if path == "/api/core-schema":
+                    return self.send(200, native.payload())
                 if path == "/api/state":
                     state = copy.deepcopy(store.get("state"))
                     for profile in state["tls"]:
                         profile.pop("private_key", None)
-                    return self.send(200, state)
+                    return self.send(200, native.redact(state))
                 if path == "/api/dashboard":
                     with runtime.lock:
-                        return self.send(200, {"metrics": metrics.read(store.directory), "core": runtime.status(),
+                        status = runtime.status()
+                        return self.send(200, {"metrics": metrics.read(store.directory), "core": status,
+                                               "panel_version": __version__, "updates": UpdateChecker(store).status(status["version"]),
                                                "totals": store.totals(), "events": store.events()})
                 if path == "/api/config":
                     return self.send(200, build_config(store.get("state"), store.totals(), runtime.run_dir, runtime.stats_port))
@@ -213,6 +219,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                 return self.send(404, {"error": "Not found"})
             assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/favicon.svg": "favicon.svg",
                       "/vendor/qrcodegen.js": "vendor/qrcodegen.js", "/subscription-qr.js": "subscription-qr.js", "/options.js": "options.js"}
+            assets["/core-editor.js"] = "core-editor.js"
             if path in assets:
                 file = web_dir / assets[path]
                 return self.send(200, file.read_bytes(), mimetypes.guess_type(str(file))[0] or "text/plain")
@@ -278,7 +285,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
             with runtime.lock:
                 state = store.get("state")
                 reset_client = None
-                if path in ("/api/save", "/api/delete", "/api/self-signed", "/api/settings", "/api/reset-traffic", "/api/rotate-token", "/api/apply", "/api/reorder-rules"):
+                if path in ("/api/save", "/api/delete", "/api/self-signed", "/api/settings", "/api/core-options", "/api/reset-traffic", "/api/rotate-token", "/api/apply", "/api/reorder-rules"):
                     require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
                 if path == "/api/apply":
                     return self.send(200, runtime.apply(state))
@@ -299,6 +306,15 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                     state["tls"].append(profile)
                 elif path == "/api/settings":
                     state["settings"] = data["settings"]
+                elif path == "/api/core-options":
+                    section = data.get("section")
+                    require(section in ("log", "dns", "ntp", "certificate", "route", "experimental"), "Invalid core section")
+                    require(isinstance(data.get("options"), dict), "Core options must be an object")
+                    state.setdefault("core_options", {})[section] = native.preserve_secrets(data["options"], state.get("core_options", {}).get(section, {}))
+                    if section == "dns" and "default_resolver" in data:
+                        state["settings"]["dns_final"] = data["default_resolver"]
+                    if section == "dns":
+                        state["settings"]["dns_options"] = {}
                 elif path in ("/api/save", "/api/delete"):
                     collection = data.get("collection")
                     require(collection in COLLECTIONS, "Invalid collection")
@@ -309,7 +325,18 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                         require(isinstance(record, dict), "Invalid record")
                         existing = next((r for r in state[collection] if r["id"] == record.get("id")), {})
                         row = {**existing, **record}
+                        for key in ("config", "extra_options", "extra_client_options"):
+                            if key in record:
+                                row[key] = native.preserve_secrets(record[key], existing.get(key, {}))
                         row["id"] = existing.get("id") or uuid.uuid4().hex
+                        if row.get("mode") == "native" or collection in native.EXTRA_COLLECTIONS:
+                            row["mode"] = "native"
+                            require(isinstance(row.get("config"), dict), "Core configuration must be an object")
+                            row["tag"] = row["config"].get("tag", "")
+                            row["type"] = row["config"].get("type", "")
+                            if collection == "inbounds":
+                                row["port"] = row["config"].get("listen_port", 0)
+                                row["listen"] = row["config"].get("listen", "")
                         if collection == "clients":
                             row["uuid"] = existing.get("uuid") or str(uuid.uuid4())
                             row["password"] = existing.get("password") or secrets.token_urlsafe(24)
@@ -320,7 +347,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                                     row.pop(f["key"], None)
                             row["kind"] = existing.get("kind", "imported")
                             row.update(certificate_info(row))
-                        if collection == "dns_servers":
+                        if collection == "dns_servers" and row.get("mode") != "native":
                             if row.get("type") == "local":
                                 for key in ("server", "port", "domain_resolver", "path", "server_name"):
                                     row.pop(key, None)
@@ -328,19 +355,21 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                                 row.pop("path", None)
                             if row.get("type") not in ("https", "tls", "quic", "h3"):
                                 row.pop("server_name", None)
-                        if collection == "rule_sets":
+                        if collection == "rule_sets" and row.get("mode") != "native":
                             for key in (("url", "format", "update_interval") if row.get("type") == "inline" else ("rules",)):
                                 row.pop(key, None)
-                        if collection == "dns_rules" and row.get("action") == "reject":
+                        if collection == "dns_rules" and row.get("mode") != "native" and row.get("action") == "reject":
                             row.pop("server", None)
                         if existing:
                             state[collection] = [row if r["id"] == row["id"] else r for r in state[collection]]
                         else:
                             state[collection].append(row)
                 elif path == "/api/reorder-rules":
-                    index = next((n for n, r in enumerate(state["dns_rules"]) if r["id"] == data.get("id")), None)
+                    collection = data.get("collection", "dns_rules")
+                    require(collection in ("dns_rules", "route_rules", "rule_sets"), "Invalid ordered collection")
+                    index = next((n for n, r in enumerate(state[collection]) if r["id"] == data.get("id")), None)
                     require(index is not None and index > 0, "Rule cannot be moved")
-                    state["dns_rules"][index - 1], state["dns_rules"][index] = state["dns_rules"][index], state["dns_rules"][index - 1]
+                    state[collection][index - 1], state[collection][index] = state[collection][index], state[collection][index - 1]
                 elif path in ("/api/reset-traffic", "/api/rotate-token"):
                     client = next((c for c in state["clients"] if c["id"] == data.get("id")), None)
                     require(client is not None, "Client not found")
@@ -366,6 +395,8 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
     server.daemon_threads = True
     thread = threading.Thread(target=runtime.worker, daemon=True)
     thread.start()
+    updates = UpdateChecker(store)
+    threading.Thread(target=updates.worker, daemon=True).start()
     print("NARA panel: http://" + bind + ":" + str(port) + normalize_web_path(web_path) + "/", flush=True)
     try:
         server.serve_forever(poll_interval=.5)
@@ -373,6 +404,7 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
         pass
     finally:
         runtime.shutdown.set()
+        updates.shutdown.set()
         with runtime.lock:
             runtime.stop()
         server.server_close()

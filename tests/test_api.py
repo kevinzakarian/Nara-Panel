@@ -166,6 +166,69 @@ class APITests(unittest.TestCase):
         self.assertEqual(exported["route"]["rules"][0]["action"], "hijack-dns")
 
 
+    def test_complete_schema_requires_authentication_and_is_versioned(self):
+        self.assertEqual(self.request('/api/core-schema')[0],401)
+        self.login()
+        status, data, _=self.request('/api/core-schema')
+        self.assertEqual(status,200)
+        self.assertEqual(data['version'],'1.14.3')
+        self.assertIn('snell',data['types']['inbounds'])
+        self.assertIn('DNSRuleAction',data['schema']['$defs'])
+        self.assertEqual(self.request('/core-editor.js')[0],200)
+
+    def test_full_dns_save_and_default_resolver_apply_together(self):
+        self.login()
+        conf={'type':'hosts','tag':'hosts','predefined':{'example.com':['192.0.2.1']}}
+        status,data,_=self.request('/api/save',{'revision':0,'collection':'dns_servers','record':{'mode':'native','config':conf}})
+        self.assertEqual(status,200,data)
+        status,data,_=self.request('/api/core-options',{'revision':1,'section':'dns','options':{'timeout':'5s','optimistic':{'enabled':True}},'default_resolver':'hosts'})
+        self.assertEqual(status,200,data)
+        model=self.store.get('state')
+        self.assertEqual(model['settings']['dns_final'],'hosts')
+        self.assertEqual(model['dns_servers'][-1]['config'],conf)
+        self.assertEqual(model['core_options']['dns']['timeout'],'5s')
+        status,config,_=self.request('/api/config')
+        self.assertEqual(status,200)
+        self.assertEqual(config['dns']['servers'][-1],conf)
+        self.assertEqual(config['dns']['final'],'hosts')
+
+    def test_routing_rules_save_reorder_and_revision_guard(self):
+        self.login()
+        ids=[]
+        for revision,domain in enumerate(['one.example','two.example']):
+            result=self.request('/api/save',{'revision':revision,'collection':'route_rules','record':{'config':{'action':'reject','domain_suffix':[domain]}}})
+            self.assertEqual(result[0],200,result[1])
+            ids.append(self.store.get('state')['route_rules'][-1]['id'])
+        result=self.request('/api/reorder-rules',{'revision':2,'collection':'route_rules','id':ids[1]})
+        self.assertEqual(result[0],200,result[1])
+        self.assertEqual(self.store.get('state')['route_rules'][0]['id'],ids[1])
+        self.assertEqual(self.request('/api/core-options',{'revision':2,'section':'log','options':{'level':'info'}})[0],400)
+
+    def test_native_private_key_survives_redacted_edit(self):
+        self.login()
+        conf={'type':'wireguard','tag':'wg','private_key':'fixture-private-key','address':['10.0.0.1/32']}
+        result=self.request('/api/save',{'revision':0,'collection':'endpoints','record':{'config':conf}})
+        self.assertEqual(result[0],200,result[1])
+        public=self.request('/api/state')[1]
+        self.assertNotIn('fixture-private-key',json.dumps(public))
+        record=public['endpoints'][0]
+        record['config']['address']=['10.0.0.2/32']
+        result=self.request('/api/save',{'revision':1,'collection':'endpoints','record':record})
+        self.assertEqual(result[0],200,result[1])
+        self.assertEqual(self.store.get('state')['endpoints'][0]['config']['private_key'],'fixture-private-key')
+
+    def test_dashboard_has_versions_and_cached_update_results(self):
+        self.login()
+        self.store.set('updates',{'attempted_at':100000,'panel':{'latest':'9.0.0','checked_at':100000,'error':''},'core':{'latest':'9.0.1','checked_at':100000,'error':''}})
+        with mock.patch.object(self.runtime,'version',return_value='sing-box version 1.14.3'):
+            status,data,_=self.request('/api/dashboard')
+        self.assertEqual(status,200)
+        self.assertTrue(data['updates']['panel']['available'])
+        self.assertTrue(data['updates']['core']['available'])
+        self.assertEqual(data['updates']['interval_hours'],24)
+        self.assertIn('panel_version',data)
+
+
 class WebPathTests(APITests):
     web_path = "/AbCdEfGh"
 

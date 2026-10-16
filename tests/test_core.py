@@ -118,8 +118,13 @@ class CoreTests(unittest.TestCase):
                                           tls={"enabled": True, "server_name": "127.0.0.1", "certificate": [self.profile["certificate"]]})
         return port, config
 
-    def transfer(self, state):
-        port, config = self.local_client(state)
+    def transfer(self, state, outbound=None):
+        if outbound:
+            port = free_port()
+            config = {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "listen": "127.0.0.1", "listen_port": port}],
+                      "outbounds": [outbound], "route": {"final": outbound["tag"]}}
+        else:
+            port, config = self.local_client(state)
         path = Path(self.temp.name) / "client.json"
         atomic_write(path, json.dumps(config))
         process = subprocess.Popen([CORE, "run", "-c", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -182,14 +187,16 @@ class CoreTests(unittest.TestCase):
                         self.fail("Client core did not start")
                     time.sleep(.1)
             with sock:
-                sock.settimeout(8)
+                sock.settimeout(15)
                 sock.sendall(b"\x05\x01\x00")
                 self.assertEqual(sock.recv(2), b"\x05\x00")
                 sock.sendall(b"\x05\x01\x00\x01"+socket.inet_aton("1.1.1.1")+struct.pack("!H", 53))
                 reply = sock.makefile("rb")
                 self.assertEqual(reply.read(10)[:2], b"\x05\x00")
                 sock.sendall(struct.pack("!H", len(query))+query)
-                length = struct.unpack("!H", reply.read(2))[0]
+                prefix = reply.read(2)
+                self.assertEqual(len(prefix), 2, "DNS exchange closed before its response")
+                length = struct.unpack("!H", prefix)[0]
                 answer = reply.read(length)
                 self.assertEqual(answer[:2], query[:2])
                 self.assertEqual(answer[-4:], socket.inet_aton("127.0.0.1"))
@@ -213,6 +220,68 @@ class CoreTests(unittest.TestCase):
                 self.assertGreater(self.store.totals()["user1"]["download"], before + 1000)
                 self.assertGreater(self.store.totals()["user1"]["upload"], 0)
                 self.runtime.stop()
+
+    def test_new_standalone_protocols_transfer(self):
+        cases = [
+            ("http", {"users": [{"username": "fixture", "password": "fixture-password"}]},
+             {"type": "http", "username": "fixture", "password": "fixture-password"}),
+            ("mixed", {"users": [{"username": "fixture", "password": "fixture-password"}]},
+             {"type": "http", "username": "fixture", "password": "fixture-password"}),
+            ("socks", {"users": [{"username": "fixture", "password": "fixture-password"}]},
+             {"type": "socks", "version": "5", "username": "fixture", "password": "fixture-password"}),
+            ("shadowsocks", {"method": "aes-128-gcm", "password": "fixture-password"},
+             {"type": "shadowsocks", "method": "aes-128-gcm", "password": "fixture-password"}),
+            ("snell", {"version": 5, "psk": "fixture-password"}, {"type": "snell", "version": 4, "psk": "fixture-password"}),
+            ("snell", {"version": 6, "psk": "fixture-password", "mode": "unshaped"},
+             {"type": "snell", "version": 6, "psk": "fixture-password", "mode": "unshaped"}),
+            ("hysteria", {"up_mbps": 20, "down_mbps": 20, "users": [{"name": "fixture", "auth_str": "fixture-password"}], "obfs": "fixture-obfs"},
+             {"type": "hysteria", "up_mbps": 20, "down_mbps": 20, "auth_str": "fixture-password", "obfs": "fixture-obfs"}),
+        ]
+        from nara.config import initial_state
+        for protocol, server, outbound in cases:
+            with self.subTest(protocol=protocol, version=server.get("version")):
+                port = free_port()
+                state = initial_state()
+                state["settings"]["block_private"] = False
+                state["tls"] = [self.profile]
+                conf = {"type": protocol, "tag": "native", "listen": "127.0.0.1", "listen_port": port, **server}
+                state["inbounds"] = [{"id": "native", "mode": "native", "enabled": True, "tag": "native", "type": protocol,
+                                      "config": conf, "tls_id": self.profile["id"] if protocol == "hysteria" else ""}]
+                self.runtime.apply(state)
+                outbound = {"tag": "proxy", "server": "127.0.0.1", "server_port": port, **outbound}
+                if protocol == "hysteria":
+                    outbound["tls"] = {"enabled": True, "server_name": "127.0.0.1", "certificate": [self.profile["certificate"]]}
+                self.transfer(state, outbound)
+                self.runtime.stop()
+
+    def test_advanced_client_tls_verification_keeps_self_signed_trust(self):
+        profile = copy.deepcopy(self.profile)
+        profile['insecure'] = True
+        state = example_state('trojan', profile)
+        state['settings']['block_private'] = False
+        state['inbounds'][0]['extra_client_options'] = {'tls': {'insecure': False}}
+        exported = client_config(state,state['clients'][0],{})
+        self.assertEqual(exported['outbounds'][1]['tls']['certificate'],[profile['certificate']])
+        self.runtime.apply(state)
+        self.transfer(state)
+
+    def test_native_dns_hosts_rule_and_routing_hijack_answer_udp(self):
+        from nara.config import initial_state
+        from tests.test_native import row
+        state=initial_state()
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as reserve:
+            reserve.bind(('127.0.0.1',0));port=reserve.getsockname()[1]
+        state['inbounds']=[row({'type':'direct','tag':'dns-in','listen':'127.0.0.1','listen_port':port,
+                               'network':'udp','override_address':'1.1.1.1','override_port':53})]
+        state['dns_servers'].append(row({'type':'hosts','tag':'hosts','predefined':{'demo.nara.test':['192.0.2.42']}},'hosts'))
+        state['dns_rules']=[row({'domain_suffix':['nara.test'],'action':'route','server':'hosts'})]
+        state['route_rules']=[row({'inbound':['dns-in'],'action':'hijack-dns'})]
+        self.runtime.apply(state)
+        query=b'\x34\x56'+struct.pack('!HHHHH',0x100,1,0,0,0)+b'\x04demo\x04nara\x04test\x00'+struct.pack('!HH',1,1)
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+            sock.settimeout(5);sock.sendto(query,('127.0.0.1',port));answer,_=sock.recvfrom(4096)
+        self.assertEqual(answer[:2],query[:2])
+        self.assertEqual(answer[-4:],socket.inet_aton('192.0.2.42'))
 
     def test_protocol_specific_settings_transfer_and_account(self):
         cases = [

@@ -38,18 +38,29 @@ class Runtime:
         self.run_dir = store.directory / "runtime"
         self.run_dir.mkdir(exist_ok=True, mode=0o700)
         self.generation = None
+        self._build_cache = None
 
     @property
     def running(self):
         return self.process is not None and self.process.poll() is None
 
-    def version(self):
-        if not shutil.which(self.binary):
-            return None
+    def build_info(self):
+        binary = shutil.which(self.binary)
+        if not binary:
+            return {"version": None, "tags": []}
         try:
-            return subprocess.run([self.binary, "version"], capture_output=True, text=True, timeout=5).stdout.splitlines()[0]
+            stamp = Path(binary).stat().st_mtime_ns
+            if self._build_cache and self._build_cache[0] == stamp:
+                return self._build_cache[1]
+            lines = subprocess.run([binary, "version"], capture_output=True, text=True, timeout=5).stdout.splitlines()
+            info = {"version": lines[0], "tags": next((line[6:].strip().split(",") for line in lines if line.startswith("Tags: ")), [])}
+            self._build_cache = (stamp, info)
+            return info
         except (OSError, subprocess.SubprocessError, IndexError):
-            return None
+            return {"version": None, "tags": []}
+
+    def version(self):
+        return self.build_info()["version"]
 
     def collect(self):
         counters = stats.query(self.stats_port)
@@ -72,7 +83,7 @@ class Runtime:
 
     def prepare(self, state, totals=None):
         validate(state)
-        require(all(i["port"] != self.stats_port for i in state["inbounds"]), "An inbound cannot use the statistics API port")
+        require(all((i.get("config", {}).get("listen_port") if i.get("mode") == "native" else i.get("port")) != self.stats_port for i in state["inbounds"]), "An inbound cannot use the statistics API port")
         require(shutil.which(self.binary), "Sing-box core is not installed or is not in PATH")
         import uuid
         generation = self.run_dir / uuid.uuid4().hex
@@ -84,9 +95,11 @@ class Runtime:
             usage = self.store.totals() if totals is None else totals
             # Check inactive and unassigned inbounds too, without opening their ports.
             checked_config = build_config(state, usage, generation, self.stats_port, check_all=True)
-            self.check_config(checked_config, generation, "inbound / DNS")
-            if state["inbounds"]:
+            self.check_config(checked_config, generation, "server configuration")
+            managed = [i for i in state["inbounds"] if i.get("mode") != "native"]
+            if managed:
                 probe = copy.deepcopy(state)
+                probe["inbounds"] = copy.deepcopy(managed)
                 probe["settings"]["server_address"] = probe["settings"].get("server_address") or "127.0.0.1"
                 for inbound in probe["inbounds"]:
                     inbound["enabled"] = True
@@ -216,7 +229,7 @@ class Runtime:
             return {"running": True, "inbounds": len(config["inbounds"]), "restarted": True}
 
     def status(self):
-        return {"running": self.running, "version": self.version(), "started": self.started,
+        return {"running": self.running, "version": self.version(), "tags": self.build_info()["tags"], "started": self.started,
                 "active_revision": self.active.get("revision") if self.active else None,
                 "last_stats": self.last_stats, "stats_error": self.stats_error,
                 "error": self.error, "stats_port": self.stats_port}
