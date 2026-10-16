@@ -176,6 +176,11 @@ inspection at **390 × 844** showed a **390 px** document, **352 px** dialog and
 only the demonstration store. The compact version/update strips replace the hero,
 and the logo shows the full panel version.
 
+After publication, a fresh live check successfully read the public panel manifest
+(`0.3.0`) and official stable core release (`1.14.3`). The Overview displayed both
+as up to date, and its browser console contained no warnings or errors. The saved
+desktop screenshot includes these real check results.
+
 The full standard-capability Darwin core was built and exercised locally. A Linux
 amd64 core including Naive outbound/purego was cross-compiled successfully. The
 matching pinned `libcronet.so` and license are installed beside the Linux binary;
