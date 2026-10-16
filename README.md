@@ -63,6 +63,18 @@ docker compose up -d
 
 The container runs unprivileged with a persistent named volume. Set `NARA_WEB_PATH=/YourChosenPath` in its environment if you want a prefix; container setup does not run the interactive Linux installer. Use inbound ports **1024 or above inside the container**. Update Compose port mappings for every inbound. For example, container port 8443 can be published as host port 443; set the inbound's **Public port** to 443 so exports use the correct endpoint. The example publishes TCP 8443 and UDP 8444 on the same numbered host ports; add other mappings as needed. HTTPS reverse proxy setup is separate; `NARA_SECURE_COOKIE=1` expects HTTPS. For initial HTTP tunnel access only, temporarily override it to `0`.
 
+## Updating an installed panel
+
+For application updates with unchanged Python dependencies, run as root:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/update.sh | bash
+```
+
+This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
+
+Version **0.1.2** fixes Generate certificate on Python 3.12+ by replacing the removed `ssl.match_hostname` call with OpenSSL DNS/IP checking. Certificate/key matching and expiry checks remain enforced. Missing OpenSSL now produces an actionable error.
+
 ## First connection
 
 1. In **Settings**, set the public server domain/IP and public HTTPS panel URL.

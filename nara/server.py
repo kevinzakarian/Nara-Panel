@@ -23,7 +23,17 @@ from .store import password_hash, password_matches
 from .install_config import normalize_web_path
 
 
+def run_openssl(arguments, timeout=20):
+    try:
+        return subprocess.run(["openssl"] + arguments, capture_output=True, timeout=timeout)
+    except FileNotFoundError:
+        raise ValueError("OpenSSL executable was not found. Install OpenSSL and check the service PATH.")
+    except OSError:
+        raise ValueError("OpenSSL could not be started. Check executable permissions and the service PATH.")
+
+
 def certificate_info(profile):
+    host(profile["server_name"])
     with tempfile.TemporaryDirectory() as temp:
         cert, key = Path(temp) / "cert.pem", Path(temp) / "key.pem"
         atomic_write(cert, profile["certificate"])
@@ -32,13 +42,24 @@ def certificate_info(profile):
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.load_cert_chain(str(cert), str(key))
             decoded = ssl._ssl._test_decode_cert(str(cert))
-            ssl.match_hostname(decoded, profile["server_name"])
-            expires = ssl.cert_time_to_seconds(decoded["notAfter"])
-            require(expires > time.time(), "Certificate has expired")
-            der = ssl.PEM_cert_to_DER_cert(profile["certificate"])
-            return {"expires": expires, "fingerprint": hashlib.sha256(der).hexdigest()}
         except (ssl.SSLError, ssl.CertificateError, ValueError, KeyError):
-            raise ValueError("Certificate and key do not match, the server name is incorrect, or the certificate has expired")
+            raise ValueError("Certificate and private key are invalid or do not match")
+        # ssl.match_hostname was removed in Python 3.12. Use the existing
+        # OpenSSL dependency to check DNS names and IP SANs without a network request.
+        try:
+            ipaddress.ip_address(profile["server_name"])
+            check_option = "-checkip"
+        except ValueError:
+            check_option = "-checkhost"
+        checked = run_openssl(["x509", "-in", str(cert), "-noout", check_option, profile["server_name"]])
+        # OpenSSL 1.1.1/3.0 can exit zero even on mismatch. Require the positive
+        # check message too; "does NOT match" must never be accepted.
+        require(checked.returncode == 0 and b" does match certificate" in checked.stdout,
+                "Certificate does not match the configured server domain or IP address")
+        expires = ssl.cert_time_to_seconds(decoded["notAfter"])
+        require(expires > time.time(), "Certificate has expired")
+        der = ssl.PEM_cert_to_DER_cert(profile["certificate"])
+        return {"expires": expires, "fingerprint": hashlib.sha256(der).hexdigest()}
 
 
 def self_signed(data):
@@ -53,10 +74,10 @@ def self_signed(data):
         san = "DNS:" + server_name
     with tempfile.TemporaryDirectory() as temp:
         cert, key = Path(temp) / "cert.pem", Path(temp) / "key.pem"
-        result = subprocess.run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
+        result = run_openssl(["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256",
                                  "-nodes", "-days", str(days), "-subj", "/CN=" + server_name,
                                  "-addext", "subjectAltName=" + san, "-keyout", str(key), "-out", str(cert)],
-                                capture_output=True, timeout=20)
+                             timeout=20)
         require(result.returncode == 0, "Certificate generation failed; OpenSSL 1.1.1 or later is required")
         return {"id": uuid.uuid4().hex, "name": data.get("name") or server_name, "server_name": server_name,
                 "kind": "self_signed", "certificate": cert.read_text(), "private_key": key.read_text()}

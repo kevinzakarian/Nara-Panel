@@ -4,6 +4,8 @@ import json
 import tempfile
 import threading
 import unittest
+import ssl
+from unittest import mock
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from nara.runtime import Runtime
@@ -95,6 +97,15 @@ class APITests(unittest.TestCase):
         self.assertEqual(response[0], 200, response[1])
         result = self.request("/api/state")[1]
         self.assertNotIn("private_key", result["tls"][0])
+
+    def test_generate_certificate_for_domain_and_ip_on_modern_python(self):
+        self.login()
+        with mock.patch.object(ssl, "match_hostname", None, create=True):
+            for revision, address in enumerate(("example.com", "127.0.0.1", "2001:db8::1")):
+                with self.subTest(address=address):
+                    response = self.request("/api/self-signed", {"revision": revision, "server_name": address, "days": 1})
+                    self.assertEqual(response[0], 200, response[1])
+        self.assertEqual(len(self.store.get("state")["tls"]), 3)
 
     def test_default_language_and_assets(self):
         status, data, headers = self.request("/")

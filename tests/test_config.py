@@ -2,6 +2,9 @@ import copy
 import datetime as dt
 import tempfile
 import unittest
+import ssl
+import subprocess
+from unittest import mock
 from pathlib import Path
 from nara.config import build_config, client_config, eligible, initial_state, validate
 from nara.server import certificate_info, self_signed
@@ -96,6 +99,36 @@ class ConfigTests(unittest.TestCase):
         profile["server_name"] = "other.example.com"
         with self.assertRaises(ValueError):
             certificate_info(profile)
+
+    def test_certificate_generation_without_removed_python_ssl_helper(self):
+        # Reproduce Python 3.12's removed API even when running on older Python.
+        with mock.patch.object(ssl, "match_hostname", None, create=True):
+            for address in ("127.0.0.1", "example.com", "2001:db8::1"):
+                with self.subTest(address=address):
+                    profile = self_signed({"server_name": address, "days": 1})
+                    self.assertGreater(certificate_info(profile)["expires"], dt.datetime.now().timestamp())
+
+    def test_certificate_ip_mismatch_and_wrong_private_key_rejected(self):
+        profile = self_signed({"server_name": "127.0.0.1", "days": 1})
+        profile["server_name"] = "127.0.0.2"
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            certificate_info(profile)
+        profile["server_name"] = "127.0.0.1"
+        profile["private_key"] = self_signed({"server_name": "127.0.0.1", "days": 1})["private_key"]
+        with self.assertRaisesRegex(ValueError, "private key"):
+            certificate_info(profile)
+
+    def test_old_openssl_zero_exit_on_name_mismatch_is_rejected(self):
+        profile = self_signed({"server_name": "example.com", "days": 1})
+        with mock.patch("nara.server.run_openssl", return_value=subprocess.CompletedProcess(
+                [], 0, b"Hostname other.example.com does NOT match certificate\n", b"")):
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                certificate_info(profile)
+
+    def test_missing_openssl_has_actionable_error(self):
+        with mock.patch("nara.server.subprocess.run", side_effect=FileNotFoundError):
+            with self.assertRaisesRegex(ValueError, "OpenSSL executable was not found"):
+                self_signed({"server_name": "example.com", "days": 1})
 
     def test_password_hash_and_persistent_usage(self):
         encoded = password_hash("a secure password")

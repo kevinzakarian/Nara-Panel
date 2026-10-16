@@ -1,7 +1,7 @@
 services:
   nara:
     build: .
-    image: nara-panel:0.1.1
+    image: nara-panel:0.1.2
     init: true
     restart: unless-stopped
     environment:
