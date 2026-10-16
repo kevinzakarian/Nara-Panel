@@ -78,17 +78,21 @@ def read_env(path):
 
 def configure_file(path):
     from .runtime import atomic_write
+    from .terminal import input_label, styled
     defaults = read_env(path)
     # All interaction uses the controlling terminal, including curl | bash installs.
     with open("/dev/tty", "r") as terminal_input, open("/dev/tty", "w") as terminal_output:
+        terminal_output.write("\n" + styled("NARA / Panel entry settings", terminal_output) + "\nPress Enter to accept the value in brackets.\n")
         def prompt(message):
-            terminal_output.write(message)
+            terminal_output.write("\n" + input_label(message, terminal_output))
             terminal_output.flush()
             line = terminal_input.readline()
             if not line:
                 raise ValueError("An interactive terminal is required for installation")
             return line.rstrip("\n")
-        values = ask_configuration(prompt, defaults=defaults)
+        def announce(message):
+            terminal_output.write(styled("  [!] " + message, terminal_output, "33") + "\n")
+        values = ask_configuration(prompt, announce=announce, defaults=defaults)
     values = {**defaults, **values}
     values.setdefault("NARA_BIND", "0.0.0.0")
     values.setdefault("NARA_STATS_PORT", "10085")

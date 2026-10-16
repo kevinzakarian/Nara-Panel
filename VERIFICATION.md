@@ -193,3 +193,42 @@ intentionally do not receive panel-account quotas or subscription export.
 
 JavaScript syntax, Python compilation, shell syntax, whitespace checks and source
 packaging were checked. Node/jsdom/jsQR remain development-only dependencies.
+
+
+## Interactive Linux management and panel HTTPS (0.3.1)
+
+The full regression suite passed **127 tests without skips** against the full
+Sing-box 1.14.3 binary and official Caddy 2.4.6/2.6.2 binaries. After the final
+maintenance refinements, **31 installer/maintenance tests passed**, including
+new controlling-terminal and PEM validation cases. The existing **45 Node tests**
+passed again. Python compilation, shell syntax, source packaging and whitespace
+checks also passed.
+
+Both official Caddy binaries were downloaded into a temporary directory and
+verified against the publisher's SHA-512 checksums. Generated automatic-certificate
+configurations were adapted by each binary. For real proxy tests, each version
+served a generated ECDSA certificate on an ephemeral loopback TCP port, forwarded
+the complete webPath to an actual NARA HTTP handler, returned a verified TLS health
+response, allowed administrator sign-in with a Secure/path-scoped cookie, served
+authenticated state, and rejected paths outside the panel prefix. A final real-proxy
+run also passed domain and reserved-public-IP cases on both versions. IP clients
+send no SNI; generated IP sites set `default_sni` so certificate selection works
+through loopback/NAT while retaining hostname/IP verification. No public ACME
+request, host trust-store modification or privileged 80/443 listener was used.
+
+Tests verify system package command order and failure propagation, ANSI/NO_COLOR
+input labels, `/dev/tty` interaction when stdin is piped, invalid-menu recovery,
+SQLite online backup with committed WAL data, private archive permissions,
+keep-data/purge boundaries, refusing removal when a service cannot stop, automatic
+URL/cookie/bind changes, retained HTTPS service reconstruction, and restoring the
+prior environment/proxy/public URL on certificate or post-change startup failure.
+An execution of the actual shell installer, with filesystem paths mapped to a
+temporary fixture and OS commands replaced with test doubles, failed at readiness
+and restored the original application, core, virtual environment, service, manager
+command and entry settings.
+
+Local integration ran on macOS. Actual Linux apt upgrades, distribution package
+installation, systemd sandbox/capabilities, account creation/removal, production
+ACME issuance/renewal, and a remote-server deployment were not performed. These
+require a Linux target and, for public issuance, a configured domain and reachable
+TCP 80/443. No user's server settings were changed during development.

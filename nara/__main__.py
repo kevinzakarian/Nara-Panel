@@ -7,6 +7,7 @@ from .store import Store, password_hash
 from .runtime import Runtime
 from .server import serve
 from .install_config import normalize_web_path
+from .terminal import input_label
 
 
 def main():
@@ -31,10 +32,11 @@ def main():
     if args.command in ("init", "reset-password"):
         if store.get("admin") and args.command == "init":
             parser.error("Admin already exists. Use reset-password instead.")
-        password = getpass.getpass("Admin password (12+ characters): ")
+        print("\nNARA / Administrator credentials\nPassword input is hidden; no characters will appear while typing.")
+        password = getpass.getpass(input_label("Admin password (12+ characters): "))
         if len(password) < 12 or len(password) > 256:
             parser.error("Password must be 12–256 characters.")
-        if password != getpass.getpass("Repeat password: "):
+        if password != getpass.getpass(input_label("Repeat password: ")):
             parser.error("Passwords do not match.")
         store.set("admin", {"username": args.username, "password": password_hash(password)})
         with store.connect() as db:

@@ -22,7 +22,7 @@ The interface defaults to **English and left-to-right**, with a 16 px body/input
 
 - Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, and CA certificates.
 - Sing-box **1.14.3**, built with the **upstream standard capabilities plus `with_v2ray_api`**. Default official release builds do not include V2Ray API. The supplied build script pins the official source commit and uses its Go module checksums. Building requires Go 1.27.1 or a compatible newer toolchain, Git, and Internet access.
-- Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS; an HTTPS reverse proxy can be configured separately.
+- Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS. The server manager can set up a dedicated HTTPS reverse proxy, or you can use an existing one.
 
 The panel owns its Sing-box child process and configuration. Give it separate ports from any existing installation. The installer leaves host firewall, routes, DNS and other Sing-box services untouched. Native TUN/transparent/network-namespace features can change networking when you explicitly configure them and provide the required capabilities; see [host requirements](FEATURE_REVIEW.md#builds-and-host-requirements).
 
@@ -36,7 +36,11 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/insta
 
 For an account with sudo access, replace the last `bash` with `sudo bash`.
 
-The installer downloads the source, installs system dependencies, verifies an isolated Go toolchain against its official SHA-256, builds the pinned Sing-box source with standard capabilities and client statistics, and creates the systemd service. Building can take several minutes. It asks for:
+The launcher **first refreshes apt package lists and upgrades installed system packages**, keeping existing package configuration files when a decision is required. This can restart system services. It does not run a distribution release upgrade, remove packages automatically or reboot the server; a pending-reboot notice appears in the menu. It then opens the English **NARA server manager**. Package-update errors stop preparation with an error rather than being reported as success.
+
+Choose **1 — New installation** for a new server or to reinstall previously retained data. For an existing installation, choose **2 — Upgrade panel only** (keep the core) or **3 — Upgrade panel + rebuild bundled compatible core**. Option 3 builds the pinned core supported by this panel, rather than replacing it with an untested release. The verified, isolated Go toolchain is downloaded only when a build is needed. Building can take several minutes; the existing service continues running during the build.
+
+Every question has a bold cyan **[INPUT]** marker, with the default in brackets. Password prompts explain that typing is hidden. `NO_COLOR` or a plain terminal disables ANSI colors while preserving the markers. A new installation asks for:
 
 1. **webPath** — enter a single path segment such as `MyPanel`. Press **Enter** for a cryptographically random **8-letter path containing both uppercase and lowercase letters**, e.g. `/aBcDefGh/`.
 2. **Panel port** — press **Enter** for **10000**, or enter another available port. Invalid, reserved, and occupied ports are rejected.
@@ -44,9 +48,9 @@ The installer downloads the source, installs system dependencies, verifies an is
 
 The panel is then reachable at `http://YOUR_SERVER_IP:PORT/webPath/`. The final URL is printed after a readiness check; allow the selected TCP port in your firewall. No administrator password is bundled. The installer does not change firewall rules.
 
-Entry settings are stored with mode 0600 in `/etc/nara-panel.env`. Re-running the installer offers existing path/port values as defaults and preserves accounts and data. A customized path scopes the UI, assets, API, subscription links, and session cookies; it supplements administrator authentication.
+Entry settings are stored with mode 0600 in `/etc/nara-panel.env`. Menu upgrades preserve the existing path/port, administrator, accounts, HTTPS and data without asking for replacement entry values. Failed full upgrades attempt to restore the previous application, virtual environment, core, service and entry settings; a private data backup is created before menu upgrades. A customized path scopes the UI, assets, API, subscription links, and session cookies; it supplements administrator authentication.
 
-For public HTTPS, configure a reverse proxy using `deploy/Caddyfile.example`, **preserve the full webPath**, set `NARA_BIND=127.0.0.1` and `NARA_SECURE_COOKIE=1` in `/etc/nara-panel.env`, and restart the service. The proxy must forward the chosen panel port. The optional Public panel URL setting accepts HTTP or HTTPS, including the webPath; an origin-only value uses the current webPath. If the field is blank, subscription links and QR codes use the current browser address, port and path.
+For public HTTPS, use **4 — Panel HTTPS / Certificate** in the manager (see below), or configure your own reverse proxy using `deploy/Caddyfile.example`, **preserve the full webPath**, set `NARA_BIND=127.0.0.1` and `NARA_SECURE_COOKIE=1` in `/etc/nara-panel.env`, and restart the service. An existing proxy must forward the chosen internal panel port. The optional Public panel URL setting accepts HTTP or HTTPS, including the webPath; an origin-only value uses the current webPath. If the field is blank, subscription links and QR codes use the current browser address, port and path.
 
 For a manual source installation on other systemd Linux distributions, install Python/venv, Git, a compatible Go toolchain, OpenSSL and CA certificates first, then run:
 
@@ -55,6 +59,44 @@ sudo sh scripts/install.sh
 ```
 
 The local installer asks the same entry questions and builds a missing core. You may supply an already compatible binary with `sudo NARA_INSTALL_CORE=/path/to/sing-box sh scripts/install.sh`.
+
+## Installed server manager
+
+After installing or upgrading to 0.3.1, run:
+
+```sh
+sudo nara
+```
+
+It performs the same initial system-package update, then offers:
+
+| Option | Action |
+| --- | --- |
+| 1 | New installation / reinstall retained data |
+| 2 | Upgrade panel only, preserving the installed core |
+| 3 | Upgrade panel and rebuild the bundled compatible core |
+| 4 | Panel HTTPS: automatic domain certificate, self-signed domain/IP certificate, PEM import, certificate status |
+| 5 | Service status, versions and entry URL |
+| 6 / 7 / 8 | Restart / stop / start panel service; stopping also stops its core |
+| 9 | Recent panel and dedicated HTTPS service logs |
+| 10 | Create a private account/settings/certificate backup |
+| 11 | Change administrator password and invalidate admin sessions |
+| 12 | Uninstall application while keeping data, or delete its data/settings/certificates |
+| 0 | Exit |
+
+Start/restart follows the core’s saved start/stop state. Reinstalling retained data also recreates the dedicated HTTPS service; if its saved certificate cannot be verified, the manager reports that it needs repair through option 4.
+
+Uninstall requires typing an exact confirmation. Both removal modes retain pre-existing backup archives, system packages and service users. They do not remove other Sing-box installations or another web server's configuration. Backups are mode 0600 in `/var/backups/nara-panel` (directory 0700), contain credentials/private keys, and are never uploaded. SQLite's online backup includes committed WAL data; runtime generations and logs are regenerated instead of archived. To restore a NARA-created data backup manually, stop `nara-panel` and `nara-panel-https`, restore the archive's `etc/` and `var/` contents to their original paths with ownership preserved, then reinstall/upgrade through the menu and start the services. App binaries and Python packages are reinstalled, not stored in the data archive.
+
+### Panel HTTPS certificates
+
+The manager uses Caddy from the distribution's apt repositories and its own `nara-panel-https.service`, `/etc/nara-panel/https/` and `/var/lib/nara-panel-https/`. It does not overwrite `/etc/caddy/Caddyfile` or an existing Caddy/Nginx/Apache service. TCP **80 and 443 must be free**; the internal panel port must differ from both. If those ports are already in use, use your existing reverse proxy. UDP 443 remains available for QUIC proxy inbounds. Firewall rules are not changed automatically.
+
+- **Automatic domain certificate:** first point every A/AAAA record to this server and allow inbound TCP 80/443. Caddy obtains a trusted certificate and renews it automatically while the dedicated service runs. The domain is shared with public certificate authorities/transparency logs, as expected for public certificates. See [Caddy's requirements and renewal behavior](https://caddyserver.com/docs/automatic-https).
+- **Self-signed domain/IP:** creates an ECDSA certificate with the correct SAN, valid for one year. Devices must explicitly trust its public certificate. The manager does not disable verification or install a local CA into the server trust store. Regenerate before expiry.
+- **Import PEM:** reads local absolute paths to a full-chain certificate and matching unencrypted private key, validates hostname/IP, key pairing and expiry, then copies them into the protected HTTPS generation. Re-import after renewal; external source files are not watched.
+
+The proxy preserves the complete webPath and subscription routes. Setup binds the internal panel to `127.0.0.1`, enables Secure cookies and verifies a real HTTPS health request with SNI/hostname validation. Only after verification does it update the Public panel URL. Failure restores the previous entry settings and managed proxy. Panel HTTPS is independent of the certificates attached to Sing-box inbounds.
 
 ## Docker alternative
 
@@ -76,7 +118,9 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
-Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, full DNS forms and daily release checks. Existing data is migrated without removing accounts or settings. The app-only updater keeps your current core binary. **For all new build-dependent features, rerun the full one-line installer above**, which builds the complete core and preserves your accounts and entry settings. Press Enter to retain the offered existing path/port. Docker users should rebuild.
+Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, full DNS forms and daily release checks. Existing data is migrated without removing accounts or settings. The app-only updater keeps your current core binary. **For all new build-dependent features, open the one-line manager above and choose option 3**, which rebuilds the complete compatible core and preserves your accounts and entry settings. Docker users should rebuild.
+
+Version **0.3.1** adds the interactive server manager, highlighted terminal input, system-package preparation, protected backups/removal and panel HTTPS setup. The short app-only `update.sh` command remains available; it does not perform the system-package upgrade or open the menu.
 
 The panel only reports available updates; it never installs a newer core automatically. Forms target 1.14.3. Review compatibility before independently moving the core to another version.
 

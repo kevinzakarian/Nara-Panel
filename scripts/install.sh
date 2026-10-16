@@ -1,17 +1,47 @@
 #!/bin/sh
 set -eu
+umask 022  # Application/venv files must be readable by the service user.
 [ "$(uname -s)" = Linux ] || { echo "This installer requires Linux." >&2; exit 1; }
 [ "$(id -u)" = 0 ] || { echo "Run as root or with sudo." >&2; exit 1; }
 command -v systemctl >/dev/null || { echo "systemd is required." >&2; exit 1; }
 source_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$source_dir/scripts/terminal.sh"
+ui_title "Installation / Upgrade"
+if [ "${NARA_MANAGER_LOCK_HELD:-0}" != 1 ]; then
+    exec 9>/run/lock/nara-panel-manager.lock
+    flock -n 9 || { ui_error 'Another NARA maintenance session is running.'; exit 1; }
+fi
 python3 -c 'import sys; assert sys.version_info >= (3,10), "Python 3.10+ is required"'
 command -v openssl >/dev/null || { echo "Install OpenSSL first." >&2; exit 1; }
 # Stage configuration: failed installs never overwrite the live entry URL.
 setup_dir=$(mktemp -d)
 was_running=0
+was_enabled=0
+was_https_running=0
+was_https_enabled=0
+if systemctl is-enabled --quiet nara-panel; then was_enabled=1; fi
+if systemctl is-active --quiet nara-panel-https; then was_https_running=1; fi
+if systemctl is-enabled --quiet nara-panel-https; then was_https_enabled=1; fi
+mutating=0
 cleanup() {
     status=$?
     trap - EXIT
+    if [ "$status" -ne 0 ] && [ "$mutating" = 1 ]; then
+        ui_warn 'Installation failed; restoring the previous application, core and entry settings.'
+        systemctl stop nara-panel || true
+        if [ "$was_enabled" = 0 ]; then systemctl disable nara-panel || true; fi
+        for item in nara web scripts bin .venv requirements.txt; do
+            rm -rf "/opt/nara-panel/$item"
+            if [ -e "$setup_dir/previous/$item" ]; then cp -R "$setup_dir/previous/$item" /opt/nara-panel/; fi
+        done
+        if [ "$was_https_running" = 0 ]; then systemctl stop nara-panel-https || true; fi
+        if [ "$was_https_enabled" = 0 ]; then systemctl disable nara-panel-https || true; fi
+        for item in env unit https-unit command; do
+            case "$item" in env) target=/etc/nara-panel.env ;; unit) target=/etc/systemd/system/nara-panel.service ;; https-unit) target=/etc/systemd/system/nara-panel-https.service ;; command) target=/usr/local/bin/nara ;; esac
+            if [ -f "$setup_dir/previous-$item" ]; then cp -p "$setup_dir/previous-$item" "$target"; else rm -f "$target"; fi
+        done
+        systemctl daemon-reload || true
+    fi
     if [ "$status" -ne 0 ] && [ "$was_running" = 1 ]; then systemctl start nara-panel || true; fi
     rm -rf "$setup_dir"
     exit "$status"
@@ -20,26 +50,63 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 if [ -f /etc/nara-panel.env ]; then cp /etc/nara-panel.env "$setup_dir/panel.env"; fi
-# Stop only NARA's own service so its existing port can be retained on upgrades.
-if systemctl is-active --quiet nara-panel; then
-    was_running=1
-    systemctl stop nara-panel
-fi
 cd "$source_dir"
-PYTHONDONTWRITEBYTECODE=1 python3 -m nara.install_config "$setup_dir/panel.env"
 core=${NARA_INSTALL_CORE:-$source_dir/dist/sing-box}
 if [ ! -x "$core" ]; then
-    echo "Building the Sing-box core with per-client statistics. This may take several minutes..."
+    ui_info "Building the compatible Sing-box core. The existing service keeps running during this build."
     CGO_ENABLED=0 sh "$source_dir/scripts/build-core.sh" "$core" </dev/null
 fi
 "$core" version | grep -q with_v2ray_api || { echo "The core requires with_v2ray_api." >&2; exit 1; }
 "$core" version | grep -q with_quic || { echo "The core requires with_quic." >&2; exit 1; }
+# Build/verify first, then snapshot before changing the installed application.
+mkdir "$setup_dir/previous"
+for item in nara web scripts bin .venv requirements.txt; do
+    if [ -e "/opt/nara-panel/$item" ]; then cp -R "/opt/nara-panel/$item" "$setup_dir/previous/"; fi
+done
+if [ -f /etc/nara-panel.env ]; then cp -p /etc/nara-panel.env "$setup_dir/previous-env"; fi
+if [ -f /etc/systemd/system/nara-panel.service ]; then cp -p /etc/systemd/system/nara-panel.service "$setup_dir/previous-unit"; fi
+if [ -f /etc/systemd/system/nara-panel-https.service ]; then cp -p /etc/systemd/system/nara-panel-https.service "$setup_dir/previous-https-unit"; fi
+if [ -f /usr/local/bin/nara ]; then cp -p /usr/local/bin/nara "$setup_dir/previous-command"; fi
+# Stop only NARA so its existing port can be retained.
+if systemctl is-active --quiet nara-panel; then
+    was_running=1
+    systemctl stop nara-panel
+fi
+if { [ "${NARA_KEEP_ENTRY:-0}" = 1 ] || [ -f /etc/nara-panel/https/current/metadata.json ]; } && [ -f "$setup_dir/panel.env" ]; then
+    NARA_SETUP_ENV="$setup_dir/panel.env" PYTHONDONTWRITEBYTECODE=1 python3 - <<'ENTRY'
+import os
+from pathlib import Path
+from nara.maintenance import Layout, settings, write_env
+from nara.install_config import port_available
+paths = Layout()
+paths.env = Path(os.environ['NARA_SETUP_ENV'])
+config = settings(paths)
+config.setdefault('NARA_BIND', '0.0.0.0')
+config.setdefault('NARA_STATS_PORT', '10085')
+config.setdefault('NARA_SECURE_COOKIE', '0')
+if not port_available(int(config['NARA_PORT'])):
+    raise ValueError('Saved panel port is in use by another process')
+if not 1 <= int(config['NARA_STATS_PORT']) <= 65535 or int(config['NARA_STATS_PORT']) == int(config['NARA_PORT']):
+    raise ValueError('Panel and statistics ports must be valid and different')
+write_env(paths.env, config)
+print('Keeping existing panel entry settings.')
+ENTRY
+else
+    PYTHONDONTWRITEBYTECODE=1 python3 -m nara.install_config "$setup_dir/panel.env"
+fi
+mutating=1
 id nara-panel >/dev/null 2>&1 || useradd --system --home-dir /var/lib/nara-panel --shell /usr/sbin/nologin nara-panel
 install -d -m 755 /opt/nara-panel /opt/nara-panel/bin
 install -d -o nara-panel -g nara-panel -m 700 /var/lib/nara-panel
+chown -hR nara-panel:nara-panel /var/lib/nara-panel
 python3 -m venv /opt/nara-panel/.venv
 /opt/nara-panel/.venv/bin/python -m pip install --disable-pip-version-check -r "$source_dir/requirements.txt" </dev/null
-cp -R "$source_dir/nara" "$source_dir/web" /opt/nara-panel/
+for item in nara web scripts; do
+    rm -rf "/opt/nara-panel/$item"
+    cp -R "$source_dir/$item" /opt/nara-panel/
+done
+chmod -R u=rwX,go=rX /opt/nara-panel/nara /opt/nara-panel/web /opt/nara-panel/scripts
+install -m 755 "$source_dir/scripts/nara-command.sh" /usr/local/bin/nara
 cp "$source_dir/requirements.txt" /opt/nara-panel/
 install -m 755 "$core" /opt/nara-panel/bin/sing-box
 if [ -f "$(dirname "$core")/libcronet.so" ]; then
@@ -63,9 +130,10 @@ from nara.install_config import read_env
 settings = read_env(Path(os.environ['NARA_SETUP_ENV']))
 port, path = settings['NARA_PORT'], settings['NARA_WEB_PATH']
 probe = 'http://127.0.0.1:' + port + path + '/api/health'
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 for attempt in range(30):
     try:
-        with urllib.request.urlopen(probe, timeout=2) as response:
+        with opener.open(probe, timeout=2) as response:
             if response.status == 200:
                 break
     except OSError:
@@ -83,8 +151,20 @@ except (OSError, subprocess.SubprocessError, IndexError, ValueError):
     address = 'YOUR_SERVER_IP'
 if settings.get('NARA_BIND') in ('127.0.0.1', '::1'):
     address = '127.0.0.1'
-print('Panel URL: http://' + address + ':' + port + path + '/')
+metadata = Path('/etc/nara-panel/https/current/metadata.json')
+if metadata.exists():
+    import json
+    print('Panel URL: ' + json.loads(metadata.read_text())['url'])
+else:
+    print('Panel URL: http://' + address + ':' + port + path + '/')
 print('Saved entry settings: /etc/nara-panel.env')
 print('Allow TCP port ' + port + ' in your firewall if using direct access.')
-print('For public HTTPS, put a reverse proxy in front and enable NARA_SECURE_COOKIE=1.')
+print('Server management menu: sudo nara (includes panel HTTPS setup).')
 PY
+if [ -f /etc/nara-panel/https/current/metadata.json ]; then
+    if ! PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m nara.maintenance restore-https; then
+        ui_warn 'Panel installed, but saved HTTPS could not be verified. Use menu 4 to repair the certificate/proxy; direct access remains restricted to the saved bind address.'
+    fi
+fi
+mutating=0
+ui_success "NARA is ready. Run sudo nara to reopen the management menu."
