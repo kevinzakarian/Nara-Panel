@@ -96,3 +96,39 @@ The official URI follows the upstream graphical-client remote-profile contract:
 https://sing-box.sagernet.org/clients/general/#remote . Actual scanning on a physical
 Android/iOS device and installation/updating on a remote Linux server were not
 performed. The underlying full JSON profile and server runtime are unchanged.
+
+## Official-app VPN connectivity (0.2.3)
+
+The former client export had only a loopback mixed listener, so it did not capture
+traffic in the official apps' VPN mode. Exports/subscriptions now add IPv4/IPv6
+TUN, automatic routing/interface detection, port-53 DNS capture, proxied DoH,
+a separate direct bootstrap resolver, and timestamped info logs. Managed selector
+tags cannot collide with assigned inbound names. No account or TLS setting is
+changed by this update.
+
+**77 tests passed without skips in the complete Python 3.12.14 suite**, using the
+feature-enabled Sing-box **1.14.3** core. **Two additional API tests passed** after
+that run, confirming download/subscription equality at the root and a custom
+webPath. **28 Node.js QR tests passed.** Coverage includes validation of the complete
+VPN JSON for all six protocols, actual loopback protocol/transport transfers,
+certificate verification, accounting, expiry/quota enforcement, automatic apply
+and rollback, plus the new VPN routing/DNS structure.
+
+A new integration test exercises Hysteria2 with Salamander and a hostname endpoint:
+local UDP bootstrap resolves the node; a SOCKS DNS request on port 53 is captured
+and resolved by a local TLS DoH fixture through the Hysteria2 connection, with
+nonzero account upload. The loopback harness removes only the TUN inbound before
+running and replaces public DNS endpoints with isolated fixtures. Full VPN
+profiles are separately checked by the core. No host TUN, firewall, routes or
+system DNS are created or modified by tests.
+
+A separate one-off connection through the user-supplied Hysteria2 account fetched
+a public HTTP page with **HTTP/1.1 200 OK**. This verifies the supplied endpoint and
+credentials from this Mac's network, independently of device VPN integration.
+The supplied account was held only in a private temporary directory and removed
+after the check; it is not included in source, screenshots, or test fixtures.
+
+Native Android/macOS graphical-app VPN activation and remote Linux update were
+not performed. Existing remote profiles must be refreshed; local JSON files must
+be downloaded and imported again. Python compilation, JavaScript syntax and source
+packaging were checked.

@@ -145,10 +145,25 @@ class APITests(unittest.TestCase):
         status, config, headers = self.request("/sub/" + token)
         self.assertEqual(status, 200)
         self.assertIn("upload=100; download=200", headers["Subscription-Userinfo"])
+        self.assertTrue(any(i["type"] == "tun" for i in config["inbounds"]))
+        self.assertEqual(config["dns"]["final"], "remote")
         self.assertNotIn("private_key", str(config))
         state["clients"][0]["enabled"] = False
         self.store.set("state", state)
         self.assertEqual(self.request("/sub/" + token)[0], 404)
+
+    def test_download_and_subscription_serve_the_same_vpn_profile(self):
+        self.login()
+        state = example_state()
+        self.store.set("state", state)
+        self.runtime.active = copy.deepcopy(state)
+        client = state["clients"][0]
+        export_status, exported, _ = self.request("/api/export/" + client["id"])
+        sub_status, subscribed, _ = self.request("/sub/" + client["token"])
+        self.assertEqual((export_status, sub_status), (200, 200))
+        self.assertEqual(exported, subscribed)
+        self.assertTrue(any(i["type"] == "tun" for i in exported["inbounds"]))
+        self.assertEqual(exported["route"]["rules"][0]["action"], "hijack-dns")
 
 
 class WebPathTests(APITests):

@@ -74,3 +74,9 @@ Public panel URL is optional and accepts HTTP or HTTPS. When blank, the subscrip
 ## QR import formats (0.2.2)
 
 Official Sing-box graphical clients require the [remote-profile import URI](https://sing-box.sagernet.org/clients/general/#remote): `sing-box://import-remote-profile?url=urlEncodedURL#urlEncodedName`. The default QR now uses this scheme with an encoded subscription URL and account name. A second format exposes the direct JSON subscription URL. Both the dedicated dialog and account details offer the selector; copy and PNG download use its current value. This adds no Clash YAML or protocol-link/Base64 endpoint. HTTP and HTTPS subscription URLs are supported in both formats.
+
+## Official-app VPN profile (0.2.3)
+
+Exports and subscriptions now include a dual-stack TUN with automatic routing, strict routing and MTU 1400, in addition to the existing loopback mixed listener. DNS traffic on port 53 is captured; Cloudflare DoH goes through the selected outbound. Proxy-server hostnames use a separate direct UDP bootstrap resolver, and automatic interface detection prevents the proxy socket from routing back into the TUN. Managed selector tags avoid collisions with inbound names. Info-level timestamped logs make startup and connection failures visible.
+
+This follows the upstream [client VPN model](https://sing-box.sagernet.org/manual/proxy/client/#virtual-interface), [TUN fields](https://sing-box.sagernet.org/configuration/inbound/tun/), [typed DoH transport](https://sing-box.sagernet.org/configuration/dns/server/https/) and [route configuration](https://sing-box.sagernet.org/configuration/route/). Refresh existing remote profiles after updating; re-import local JSON files. Server-side DNS settings and inbound TLS/obfuscation credentials retain their existing behavior.

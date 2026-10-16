@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
-Version **0.2.2** fixes QR import in the official Sing-box app using its remote-profile URI scheme and adds a QR format selector. Copy link and PNG download use the selected format. HTTP support and the automatic apply, typography, TLS and protocol editors from earlier versions are included. No Python dependency changes or core rebuild are required for this panel update.
+Version **0.2.3** supplies a complete VPN profile for the official Sing-box apps: IPv4/IPv6 TUN, DNS capture, DNS-over-HTTPS through the selected proxy, direct server-hostname bootstrap and interface detection to avoid routing loops. It also enables informative client logs. The official-app QR format and direct JSON URL choice from 0.2.2 are included. HTTP support and the automatic apply, typography, TLS and protocol editors from earlier versions are included. No Python dependency changes or core rebuild are required for this panel update.
 
 ## First connection
 
@@ -82,7 +82,11 @@ Version **0.2.2** fixes QR import in the official Sing-box app using its remote-
 3. In **Inbounds**, create an inbound with a unique port and attach the certificate.
 4. In **Clients**, create a client, assign inbounds, and choose allowance/expiry.
 5. Every **Save** automatically validates and activates the configuration using the installed core. There is no separate Apply step. Failed validation preserves the working core and previous settings; a startup failure triggers a rollback attempt. Connection changes can briefly disconnect clients.
-6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. When the public panel URL is blank, the current panel address, port and webPath are used automatically. Client JSON exposes a loopback mixed proxy on port 2080 and a selector of assigned outbounds. It can be imported/merged into a Sing-box-compatible client.
+6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. When the public panel URL is blank, the current panel address, port and webPath are used automatically. Client JSON includes an IPv4/IPv6 TUN for VPN mode in the official Sing-box apps, a loopback mixed proxy on port 2080, and a selector of assigned outbounds. The app manages the VPN interface and requests any required operating-system permission.
+
+**After updating from 0.2.2 or earlier, refresh the remote profile in the Sing-box app before reconnecting.** Previously downloaded/local JSON files must be downloaded and imported again. Changing the panel does not update an already imported local file.
+
+Client DNS uses Cloudflare DoH through the selected proxy; a direct 1.1.1.1 UDP resolver bootstraps proxy-server hostnames only. The panel DNS editor configures server-side DNS. Ordinary client traffic stays on the selected proxy. Client logs use info level to expose startup and connection errors. Generated VPN profiles require a Sing-box graphical app or a core with TUN support and the necessary system privileges; command-line proxy-only use must remove the TUN inbound.
 
 By default, self-signed client exports include the public certificate as a trusted certificate. Selecting **Allow insecure (client)** explicitly disables certificate verification in that profile’s client exports; it is disabled by default and never added to the server TLS configuration. Public panel HTTPS and inbound TLS are configured independently.
 

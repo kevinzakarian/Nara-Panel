@@ -108,6 +108,40 @@ class ConfigTests(unittest.TestCase):
         state["inbounds"][0]["public_port"] = 443
         self.assertEqual(client_config(state, state["clients"][0], {})["outbounds"][1]["server_port"], 443)
 
+    def test_client_export_is_a_complete_vpn_profile(self):
+        state = example_state()
+        config = client_config(state, state["clients"][0], {})
+        tun = next(i for i in config["inbounds"] if i["type"] == "tun")
+        self.assertTrue(tun["auto_route"])
+        self.assertTrue(tun["strict_route"])
+        self.assertTrue(any(":" in address for address in tun["address"]))
+        self.assertTrue(any("." in address for address in tun["address"]))
+        self.assertEqual(config["route"]["rules"], [{"port": 53, "action": "hijack-dns"}])
+        self.assertTrue(config["route"]["auto_detect_interface"])
+        self.assertEqual(config["log"]["level"], "info")
+        dns = {d["tag"]: d for d in config["dns"]["servers"]}
+        outbounds = {o["tag"]: o for o in config["outbounds"]}
+        proxy = outbounds[config["route"]["final"]]
+        self.assertEqual(proxy["type"], "selector")
+        self.assertEqual(proxy["default"], state["inbounds"][0]["tag"])
+        self.assertEqual(dns[config["dns"]["final"]]["detour"], proxy["tag"])
+        self.assertEqual(dns["remote"]["type"], "https")
+        self.assertTrue(dns["remote"]["tls"]["enabled"])
+        bootstrap = dns[config["route"]["default_domain_resolver"]["server"]]
+        self.assertNotIn("detour", bootstrap)
+
+    def test_client_managed_tags_cannot_collide_with_inbound_names(self):
+        state = example_state()
+        template = state["inbounds"][0]
+        state["inbounds"] = [{**template, "id": str(n), "tag": tag, "port": 20000+n}
+                             for n, tag in enumerate(("proxy", "proxy-2", "direct", "direct-2"))]
+        state["clients"][0]["inbound_ids"] = [i["id"] for i in state["inbounds"]]
+        config = client_config(state, state["clients"][0], {})
+        tags = [o["tag"] for o in config["outbounds"]]
+        self.assertEqual(len(tags), len(set(tags)))
+        self.assertEqual(config["route"]["final"], "proxy-3")
+        self.assertNotIn("detour", config["dns"]["servers"][0])
+
     def test_public_panel_url_accepts_http_and_https(self):
         state = initial_state()
         for value in ("", "http://203.0.113.42:10000/AbCdEfGh/", "http://[2001:db8::1]:10000/AbCdEfGh/", "https://panel.example.com/AbCdEfGh/"):

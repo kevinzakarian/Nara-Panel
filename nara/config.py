@@ -283,6 +283,37 @@ def client_config(state, c, totals):
         outbounds.append(obj)
     require(bool(outbounds), "No enabled inbound is assigned to this client")
     tags = [o["tag"] for o in outbounds]
-    return {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "local", "listen": "127.0.0.1", "listen_port": 2080}],
-            "outbounds": [{"type": "selector", "tag": "proxy", "outbounds": tags}] + outbounds,
-            "route": {"final": "proxy"}}
+    # Inbound names become outbound tags. Allocate managed tags without colliding
+    # with user-defined names such as "proxy".
+    used_tags = set(tags)
+    def managed_tag(base):
+        tag, suffix = base, 2
+        while tag in used_tags:
+            tag, suffix = f"{base}-{suffix}", suffix + 1
+        used_tags.add(tag)
+        return tag
+    proxy_tag = managed_tag("proxy")
+    return {
+        "log": {"level": "info", "timestamp": True},
+        "dns": {
+            "servers": [
+                # Typed DNS transports dial directly unless a detour is set.
+                {"type": "udp", "tag": "bootstrap", "server": "1.1.1.1"},
+                {"type": "https", "tag": "remote", "server": "1.1.1.1", "path": "/dns-query",
+                 "tls": {"enabled": True, "server_name": "cloudflare-dns.com"}, "detour": proxy_tag},
+            ],
+            "final": "remote", "strategy": "prefer_ipv4",
+        },
+        "inbounds": [
+            {"type": "mixed", "tag": "local", "listen": "127.0.0.1", "listen_port": 2080},
+            {"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+             "mtu": 1400, "auto_route": True, "strict_route": True},
+        ],
+        "outbounds": [{"type": "selector", "tag": proxy_tag, "outbounds": tags, "default": tags[0]}]
+                     + outbounds,
+        "route": {
+            "rules": [{"port": 53, "action": "hijack-dns"}],
+            "final": proxy_tag, "auto_detect_interface": True,
+            "default_domain_resolver": {"server": "bootstrap", "strategy": "prefer_ipv4"},
+        },
+    }
