@@ -1,0 +1,6 @@
+panel.example.com {
+    # Caddy obtains and renews the public panel HTTPS certificate.
+    reverse_proxy 127.0.0.1:10000
+    header Strict-Transport-Security "max-age=31536000"
+    # Keep access logs disabled: subscription URLs contain bearer tokens.
+}

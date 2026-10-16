@@ -1,0 +1,251 @@
+"""Validated panel model and sing-box configuration generation."""
+import copy
+import datetime as dt
+import ipaddress
+import re
+import time
+from urllib.parse import urlsplit
+
+PROTOCOLS = ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls")
+TLS_REQUIRED = ("trojan", "hysteria2", "tuic", "anytls")
+COLLECTIONS = ("inbounds", "tls", "dns_servers", "dns_rules", "rule_sets", "clients")
+
+
+def initial_state():
+    return {"revision": 0, "inbounds": [], "tls": [], "dns_rules": [], "rule_sets": [],
+            "clients": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
+            "server": "1.1.1.1", "port": 53}],
+            "settings": {"server_address": "", "public_url": "", "dns_final": "bootstrap",
+                         "block_private": True}}
+
+
+def require(ok, message):
+    if not ok:
+        raise ValueError(message)
+
+
+def integer(value, minimum, maximum, label):
+    require(type(value) is int and minimum <= value <= maximum, label + " is out of range")
+
+
+def host(value):
+    require(isinstance(value, str) and 0 < len(value) <= 253, "Server address is required")
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        require(bool(re.fullmatch(r"(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", value)), "Invalid domain name")
+
+
+def expiry(value):
+    if not value:
+        return 0
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        require(parsed.tzinfo is not None, "Expiry date must include a timezone")
+        return parsed.timestamp()
+    except (ValueError, AttributeError):
+        raise ValueError("Invalid expiry date")
+
+
+def eligible(client, totals, now=None):
+    used = sum(totals.get(client["id"], {}).get(k, 0) for k in ("upload", "download"))
+    return (client.get("enabled", True) and (not expiry(client.get("expires_at")) or
+            expiry(client["expires_at"]) > (time.time() if now is None else now)) and
+            (not client.get("quota_bytes", 0) or used < client["quota_bytes"]))
+
+
+def validate(state):
+    require(isinstance(state, dict), "Invalid data structure")
+    for collection in COLLECTIONS:
+        rows = state.get(collection)
+        require(isinstance(rows, list) and len(rows) <= 1000, "Too many records")
+        ids = []
+        for row in rows:
+            require(isinstance(row, dict), "Invalid record")
+            require(bool(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", row.get("id", ""))), "Invalid record ID")
+            ids.append(row["id"])
+        require(len(ids) == len(set(ids)), "Duplicate record ID")
+    tls_ids = {x["id"] for x in state["tls"]}
+    inbound_ids = {x["id"] for x in state["inbounds"]}
+    dns_tags = {x.get("tag") for x in state["dns_servers"]}
+    rs_tags = {x.get("tag") for x in state["rule_sets"]}
+    for coll in ("dns_servers", "rule_sets", "inbounds"):
+        tags = [x.get("tag", "") for x in state[coll]]
+        require(all(isinstance(t, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", t) for t in tags), "Tags may contain letters, numbers, hyphens, and underscores")
+        require(len(tags) == len(set(tags)), "Duplicate tag")
+    ports = set()
+    for i in state["inbounds"]:
+        require(i.get("type") in PROTOCOLS, "Unsupported protocol")
+        integer(i.get("port"), 1, 65535, "Port")
+        if i.get("public_port"):
+            integer(i["public_port"], 1, 65535, "Public port")
+        require(type(i.get("enabled", True)) is bool, "Invalid inbound enabled state")
+        try:
+            ipaddress.ip_address(i.get("listen", "::"))
+        except ValueError:
+            raise ValueError("Listen must be an IP address")
+        # Conservatively reject port reuse even across TCP/UDP and bind addresses.
+        require(i["port"] not in ports, "Duplicate inbound port")
+        ports.add(i["port"])
+        require(not i.get("tls_id") or i["tls_id"] in tls_ids, "TLS profile not found")
+        require(i["type"] not in TLS_REQUIRED or i.get("tls_id"), "This protocol requires TLS")
+        require(i.get("transport", "tcp") in ("tcp", "ws", "grpc"), "Invalid transport")
+        require(i.get("transport", "tcp") == "tcp" or i["type"] in ("vless", "vmess", "trojan"), "Transport is not supported by this protocol")
+        require(len(i.get("path", "/")) <= 256, "Transport path is too long")
+    for t in state["tls"]:
+        host(t.get("server_name"))
+        require(t.get("kind") in ("self_signed", "imported"), "Invalid TLS profile type")
+        require(isinstance(t.get("certificate"), str) and "BEGIN CERTIFICATE" in t["certificate"], "Certificate is required")
+        require(isinstance(t.get("private_key"), str) and "PRIVATE KEY" in t["private_key"], "Private key is required")
+    for d in state["dns_servers"]:
+        require(d.get("type") in ("udp", "tcp", "tls", "https", "local"), "Invalid DNS resolver type")
+        if d["type"] != "local":
+            host(d.get("server"))
+            integer(d.get("port", {"udp": 53, "tcp": 53, "tls": 853, "https": 443}[d["type"]]), 1, 65535, "DNS port")
+            try:
+                ipaddress.ip_address(d["server"])
+            except ValueError:
+                require(d.get("domain_resolver") in dns_tags and d.get("domain_resolver") != d["tag"], "Select a separate bootstrap resolver for this DNS hostname")
+    # Reject resolver dependency cycles before sing-box sees them.
+    dependencies = {d["tag"]: d.get("domain_resolver") for d in state["dns_servers"]}
+    for tag in dependencies:
+        seen = set()
+        while tag:
+            require(tag not in seen, "DNS resolver dependency cycle")
+            seen.add(tag)
+            tag = dependencies.get(tag)
+    require(state["settings"].get("dns_final") in dns_tags, "A default DNS resolver is required")
+    for r in state["rule_sets"]:
+        require(r.get("type") in ("inline", "remote"), "Invalid rule set type")
+        if r["type"] == "remote":
+            u = urlsplit(r.get("url", ""))
+            require(u.scheme == "https" and bool(u.hostname) and not u.username, "Rule set URL must use HTTPS")
+            require(r.get("format") in ("source", "binary"), "Invalid rule set format")
+        else:
+            require(isinstance(r.get("rules"), list) and bool(r["rules"]), "Inline rule set requires a nonempty rules array")
+    for r in state["dns_rules"]:
+        require(r.get("match") in ("domain", "domain_suffix", "domain_keyword", "rule_set"), "Invalid DNS match type")
+        require(isinstance(r.get("values"), list) and bool(r["values"]) and all(isinstance(v, str) and v for v in r["values"]), "Rule values are required")
+        require(r.get("action") in ("route", "reject"), "Invalid DNS action")
+        if r["action"] == "route":
+            require(r.get("server") in dns_tags, "Rule resolver not found")
+        if r["match"] == "rule_set":
+            require(set(r["values"]) <= rs_tags, "Rule set not found")
+    for c in state["clients"]:
+        require(type(c.get("enabled", True)) is bool, "Invalid client enabled state")
+        require(isinstance(c.get("name"), str) and 0 < len(c["name"]) <= 100, "Client name is required")
+        integer(c.get("quota_bytes", 0), 0, 10**18, "Traffic allowance")
+        expiry(c.get("expires_at"))
+        require(isinstance(c.get("inbound_ids"), list) and bool(c["inbound_ids"]) and set(c["inbound_ids"]) <= inbound_ids, "Assign at least one valid inbound to the client")
+        import uuid
+        try:
+            uuid.UUID(c.get("uuid", ""))
+        except (ValueError, AttributeError):
+            raise ValueError("Invalid UUID")
+        require(isinstance(c.get("password"), str) and 12 <= len(c["password"]) <= 256, "Client password must contain at least 12 characters")
+        require(bool(re.fullmatch(r"[A-Za-z0-9_-]{32,128}", c.get("token", ""))), "Invalid subscription token")
+    for k in ("server_address", "public_url"):
+        value = state["settings"].get(k, "")
+        require(isinstance(value, str), "Invalid settings")
+        if value and k == "server_address":
+            host(value)
+        elif value:
+            u = urlsplit(value)
+            require(u.scheme == "https" and u.hostname and not u.username and not u.query and not u.fragment, "Public panel URL must use HTTPS")
+    require(type(state["settings"].get("block_private")) is bool, "Invalid private network setting")
+
+
+def user_entry(c, protocol):
+    user = {"name": "client-" + c["id"]}
+    if protocol in ("vless", "vmess", "tuic"):
+        user["uuid"] = c["uuid"]
+    if protocol in ("trojan", "hysteria2", "tuic", "anytls"):
+        user["password"] = c["password"]
+    return user
+
+
+def transport(inbound):
+    kind = inbound.get("transport", "tcp")
+    if kind == "ws":
+        return {"type": "ws", "path": inbound.get("path", "/")}
+    if kind == "grpc":
+        return {"type": "grpc", "service_name": inbound.get("path", "nara").lstrip("/")}
+    return None
+
+
+def build_config(state, totals, cert_dir, stats_port=10085):
+    validate(state)
+    tls = {t["id"]: t for t in state["tls"]}
+    clients = [c for c in state["clients"] if eligible(c, totals)]
+    inbounds = []
+    for i in state["inbounds"]:
+        users = [user_entry(c, i["type"]) for c in clients if i["id"] in c["inbound_ids"]]
+        if not i.get("enabled", True) or not users:
+            continue  # Never start an unauthenticated listener when users=[] means no auth.
+        obj = {"type": i["type"], "tag": i["tag"], "listen": i.get("listen", "::"),
+               "listen_port": i["port"], "users": users}
+        if i.get("tls_id"):
+            t = tls[i["tls_id"]]
+            obj["tls"] = {"enabled": True, "server_name": t["server_name"],
+                          "certificate_path": str(cert_dir / (t["id"] + ".crt")),
+                          "key_path": str(cert_dir / (t["id"] + ".key"))}
+            if i["type"] == "tuic":
+                obj["tls"]["alpn"] = ["h3"]
+        tr = transport(i)
+        if tr:
+            obj["transport"] = tr
+        inbounds.append(obj)
+    servers = []
+    for d in state["dns_servers"]:
+        obj = {k: d[k] for k in ("type", "tag", "server", "domain_resolver", "path") if d.get(k)}
+        if d.get("port") and d["type"] != "local":
+            obj["server_port"] = d["port"]
+        if d.get("server_name") and d["type"] in ("tls", "https"):
+            obj["tls"] = {"enabled": True, "server_name": d["server_name"]}
+        servers.append(obj)
+    rules = []
+    for r in state["dns_rules"]:
+        obj = {r["match"]: r["values"], "action": r["action"]}
+        if r["action"] == "route":
+            obj["server"] = r["server"]
+        rules.append(obj)
+    sets = [{k: copy.deepcopy(v) for k, v in r.items() if k in ("type", "tag", "url", "format", "rules")}
+            for r in state["rule_sets"]]
+    return {"log": {"level": "warn", "timestamp": True}, "dns": {"servers": servers,
+            "rules": rules, "final": state["settings"]["dns_final"]}, "inbounds": inbounds,
+            "outbounds": [{"type": "direct", "tag": "direct"}],
+            "route": {"rules": ([{"ip_is_private": True, "action": "reject"}] if state["settings"]["block_private"] else []),
+                      "rule_set": sets, "final": "direct", "default_domain_resolver": state["settings"]["dns_final"]},
+            "experimental": {"v2ray_api": {"listen": "127.0.0.1:" + str(stats_port),
+                             "stats": {"enabled": True, "users": ["client-" + c["id"] for c in clients]}}}}
+
+
+def client_config(state, c, totals):
+    require(eligible(c, totals), "Account is disabled, expired, or has reached its traffic limit")
+    address = state["settings"].get("server_address")
+    require(address, "Set the public server address in Settings first")
+    tls = {t["id"]: t for t in state["tls"]}
+    outbounds = []
+    for i in state["inbounds"]:
+        if i["id"] not in c["inbound_ids"] or not i.get("enabled", True):
+            continue
+        obj = {"type": i["type"], "tag": i["tag"], "server": address, "server_port": i.get("public_port") or i["port"]}
+        obj.update({k: v for k, v in user_entry(c, i["type"]).items() if k != "name"})
+        if i["type"] == "vmess":
+            obj["security"] = "auto"
+        if i.get("tls_id"):
+            t = tls[i["tls_id"]]
+            obj["tls"] = {"enabled": True, "server_name": t["server_name"]}
+            if t["kind"] == "self_signed":
+                obj["tls"]["certificate"] = [t["certificate"]]
+            if i["type"] == "tuic":
+                obj["tls"]["alpn"] = ["h3"]
+        tr = transport(i)
+        if tr:
+            obj["transport"] = tr
+        outbounds.append(obj)
+    require(bool(outbounds), "No enabled inbound is assigned to this client")
+    tags = [o["tag"] for o in outbounds]
+    return {"log": {"level": "warn"}, "inbounds": [{"type": "mixed", "tag": "local", "listen": "127.0.0.1", "listen_port": 2080}],
+            "outbounds": [{"type": "selector", "tag": "proxy", "outbounds": tags}] + outbounds,
+            "route": {"final": "proxy"}}

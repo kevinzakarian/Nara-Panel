@@ -1,0 +1,20 @@
+FROM golang:1.27.1-bookworm AS core
+COPY scripts/build-core.sh /build-core.sh
+RUN sh /build-core.sh /sing-box
+
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin nara
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=core /sing-box /usr/local/bin/sing-box
+COPY nara ./nara
+COPY web ./web
+RUN mkdir /data && chown nara:nara /data
+ENV NARA_DATA=/data NARA_BIND=0.0.0.0 NARA_PORT=10000 PYTHONDONTWRITEBYTECODE=1
+USER nara
+EXPOSE 10000
+VOLUME ["/data"]
+CMD ["python", "-m", "nara", "serve"]

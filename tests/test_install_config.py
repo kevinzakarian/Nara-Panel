@@ -1,0 +1,51 @@
+import re
+import tempfile
+import unittest
+from pathlib import Path
+from nara.install_config import ask_configuration, normalize_web_path, random_web_path, read_env
+
+
+class InstallConfigTests(unittest.TestCase):
+    def test_enter_defaults_to_eight_mixed_case_letters_and_port_10000(self):
+        answers = iter(["", ""])
+        result = ask_configuration(lambda _: next(answers), available=lambda p: True)
+        self.assertEqual(result["NARA_PORT"], "10000")
+        self.assertRegex(result["NARA_WEB_PATH"], r"^/[A-Za-z]{8}$")
+        self.assertRegex(result["NARA_WEB_PATH"], r"[a-z]")
+        self.assertRegex(result["NARA_WEB_PATH"], r"[A-Z]")
+
+    def test_custom_path_and_port(self):
+        answers = iter(["MyPanel", "12345"])
+        self.assertEqual(ask_configuration(lambda _: next(answers), available=lambda p: True),
+                         {"NARA_WEB_PATH": "/MyPanel", "NARA_PORT": "12345"})
+
+    def test_invalid_and_occupied_values_are_reprompted(self):
+        answers = iter(["bad/path", "SafePath", "abc", "0", "65536", "10085", "12000", "13000"])
+        errors = []
+        result = ask_configuration(lambda _: next(answers), errors.append, available=lambda p: p != 12000)
+        self.assertEqual(result, {"NARA_WEB_PATH": "/SafePath", "NARA_PORT": "13000"})
+        self.assertEqual(len(errors), 6)
+
+    def test_existing_entry_defaults_are_retained(self):
+        answers = iter(["", ""])
+        result = ask_configuration(lambda _: next(answers), available=lambda p: True,
+                                   defaults={"NARA_WEB_PATH": "/Existing", "NARA_PORT": "12300"})
+        self.assertEqual(result, {"NARA_WEB_PATH": "/Existing", "NARA_PORT": "12300"})
+
+    def test_path_rejects_injection_traversal_and_unicode(self):
+        for path in ("../admin", "abc/def", "ab?c", "a b", "a;id", "a\nPORT=1", "پنل", "a" * 65):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                normalize_web_path(path)
+        self.assertEqual(normalize_web_path("/MyPanel/"), "/MyPanel")
+
+    def test_generated_paths_have_both_cases(self):
+        for _ in range(100):
+            path = random_web_path()
+            self.assertTrue(re.fullmatch(r"/[A-Za-z]{8}", path))
+            self.assertTrue(any(c.isupper() for c in path) and any(c.islower() for c in path))
+
+    def test_env_reader_does_not_execute_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "panel.env"
+            path.write_text("# comment\nNARA_PORT=10000\nNARA_WEB_PATH=/SomePath\n")
+            self.assertEqual(read_env(path), {"NARA_PORT": "10000", "NARA_WEB_PATH": "/SomePath"})

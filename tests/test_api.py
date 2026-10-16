@@ -1,0 +1,148 @@
+import copy
+import http.client
+import json
+import tempfile
+import threading
+import unittest
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from nara.runtime import Runtime
+from nara.server import make_handler
+from nara.store import Store, password_hash
+from tests.helpers import example_state
+
+
+class APITests(unittest.TestCase):
+    web_path = ""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(self.temp.name)
+        self.store.set("admin", {"username": "admin", "password": password_hash("test-password-123")})
+        self.runtime = Runtime(self.store, binary="/nonexistent")
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.store, self.runtime, Path("web"), web_path=self.web_path))
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.cookie = self.csrf = ""
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.temp.cleanup()
+
+    def request(self, path, body=None, headers=None):
+        conn = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+        hdr = {"Cookie": self.cookie, "X-CSRF-Token": self.csrf}
+        if body is not None:
+            hdr["Content-Type"] = "application/json"
+        hdr.update(headers or {})
+        conn.request("POST" if body is not None else "GET", path, json.dumps(body) if body is not None else None, hdr)
+        resp = conn.getresponse()
+        data = resp.read()
+        status, response_headers = resp.status, dict(resp.getheaders())
+        conn.close()
+        try:
+            data = json.loads(data)
+        except ValueError:
+            pass
+        return status, data, response_headers
+
+    def login(self):
+        status, data, headers = self.request("/api/login", {"username": "admin", "password": "test-password-123"})
+        self.assertEqual(status, 200)
+        self.cookie = headers["Set-Cookie"].split(";")[0]
+        self.csrf = data["csrf"]
+
+    def test_api_requires_login(self):
+        self.assertEqual(self.request("/api/state")[0], 401)
+        self.assertEqual(self.request("/api/health")[0], 200)
+
+    def test_login_cookie_and_csrf(self):
+        self.login()
+        self.assertEqual(self.request("/api/state")[0], 200)
+        self.assertEqual(self.request("/api/stop", {}, {"X-CSRF-Token": "wrong"})[0], 403)
+
+    def test_cross_origin_login_rejected(self):
+        self.assertEqual(self.request("/api/login", {"username": "admin", "password": "test-password-123"}, {"Origin": "https://evil.example"})[0], 400)
+
+    def test_revision_conflict(self):
+        self.login()
+        state = self.store.get("state")
+        self.assertEqual(self.request("/api/settings", {"revision": 0, "settings": state["settings"]})[0], 200)
+        self.assertEqual(self.request("/api/settings", {"revision": 0, "settings": state["settings"]})[0], 400)
+
+    def test_logout_revokes_session(self):
+        self.login()
+        self.assertEqual(self.request("/api/logout", {})[0], 200)
+        self.assertEqual(self.request("/api/state")[0], 401)
+
+    def test_client_credentials_generated_on_server(self):
+        self.login()
+        record = dict(tag="test", type="vless", port=12345, listen="127.0.0.1", enabled=True)
+        self.assertEqual(self.request("/api/save", {"revision": 0, "collection": "inbounds", "record": record})[0], 200)
+        inbound = self.store.get("state")["inbounds"][0]
+        record = dict(name="Alice", quota_bytes=1000, expires_at="", inbound_ids=[inbound["id"]], enabled=True)
+        self.assertEqual(self.request("/api/save", {"revision": 1, "collection": "clients", "record": record})[0], 200)
+        client = self.store.get("state")["clients"][0]
+        self.assertGreaterEqual(len(client["token"]), 32)
+        self.assertGreaterEqual(len(client["password"]), 12)
+        # Deleting a referenced inbound must not corrupt saved state.
+        self.assertEqual(self.request("/api/delete", {"revision": 2, "collection": "inbounds", "id": inbound["id"]})[0], 400)
+        self.assertEqual(len(self.store.get("state")["inbounds"]), 1)
+
+    def test_private_key_not_exposed_in_state(self):
+        self.login()
+        response = self.request("/api/self-signed", {"revision": 0, "server_name": "127.0.0.1", "days": 1})
+        self.assertEqual(response[0], 200, response[1])
+        result = self.request("/api/state")[1]
+        self.assertNotIn("private_key", result["tls"][0])
+
+    def test_default_language_and_assets(self):
+        status, data, headers = self.request("/")
+        self.assertEqual(status, 200)
+        self.assertIn(b'lang="en" dir="ltr"', data)
+        self.assertIn("Content-Security-Policy", headers)
+        self.assertEqual(self.request("/../../nara/store.py")[0], 404)
+
+    def test_subscription_headers_and_immediate_revocation(self):
+        state = example_state()
+        self.store.set("state", state)
+        self.runtime.active = copy.deepcopy(state)
+        token = state["clients"][0]["token"]
+        self.store.add_traffic([("user1", "upload", 100), ("user1", "download", 200)])
+        status, config, headers = self.request("/sub/" + token)
+        self.assertEqual(status, 200)
+        self.assertIn("upload=100; download=200", headers["Subscription-Userinfo"])
+        self.assertNotIn("private_key", str(config))
+        state["clients"][0]["enabled"] = False
+        self.store.set("state", state)
+        self.assertEqual(self.request("/sub/" + token)[0], 404)
+
+
+class WebPathTests(APITests):
+    web_path = "/AbCdEfGh"
+
+    def request(self, path, body=None, headers=None):
+        return super().request(self.web_path + path, body, headers)
+
+    def test_root_and_unprefixed_api_are_unavailable(self):
+        self.assertEqual(super().request("/")[0], 404)
+        self.assertEqual(super().request("/api/health")[0], 404)
+        self.assertEqual(super().request("/api/login", {"username": "admin", "password": "test-password-123"})[0], 404)
+        self.assertEqual(super().request("/abcdefgh/")[0], 404)
+
+    def test_no_trailing_slash_redirects_and_assets_load(self):
+        status, _, headers = super().request(self.web_path)
+        self.assertEqual(status, 308)
+        self.assertEqual(headers["Location"], self.web_path + "/")
+        for asset in ("/app.js", "/style.css", "/favicon.svg"):
+            self.assertEqual(self.request(asset)[0], 200)
+
+    def test_cookie_is_scoped_to_web_path(self):
+        status, data, headers = self.request("/api/login", {"username": "admin", "password": "test-password-123"})
+        self.assertEqual(status, 200)
+        self.assertIn("Path=/AbCdEfGh/;", headers["Set-Cookie"])
+        self.cookie = headers["Set-Cookie"].split(";")[0]
+        self.csrf = data["csrf"]
+        status, _, headers = self.request("/api/logout", {})
+        self.assertEqual(status, 200)
+        self.assertIn("Path=/AbCdEfGh/", headers["Set-Cookie"])

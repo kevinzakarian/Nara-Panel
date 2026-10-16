@@ -1,0 +1,22 @@
+services:
+  nara:
+    build: .
+    image: nara-panel:0.1.1
+    init: true
+    restart: unless-stopped
+    environment:
+      NARA_SECURE_COOKIE: "1"
+    ports:
+      - "127.0.0.1:10000:10000"
+      # Add an entry for every inbound.
+      - "8443:8443/tcp"
+      - "8444:8444/udp"
+    volumes:
+      - nara-data:/data
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Use ports >=1024 for inbounds inside the container.
+    # The Compose host mapping can expose those ports as 443, 80, etc.
+
+volumes:
+  nara-data:
