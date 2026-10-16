@@ -164,7 +164,9 @@ def validate(state):
             host(value)
         elif value:
             u = urlsplit(value)
-            require(u.scheme == "https" and u.hostname and not u.username and not u.query and not u.fragment, "Public panel URL must use HTTPS")
+            require(u.scheme in ("http", "https") and u.hostname and u.username is None and u.password is None
+                    and not u.query and not u.fragment and (u.port is None or 1 <= u.port <= 65535),
+                    "Public panel URL must use HTTP or HTTPS without credentials, a query, or a fragment")
     require(type(state["settings"].get("block_private")) is bool, "Invalid private network setting")
 
 

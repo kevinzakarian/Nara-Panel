@@ -66,3 +66,7 @@ inbound types are not implemented here. They are not presented as working UI
 switches. Certificate renewal, Linux socket capabilities and external DNS/network
 availability still depend on the host environment. See README for accounting and
 operational limits and VERIFICATION for actual test coverage.
+
+## HTTP subscriptions (0.2.1)
+
+Public panel URL is optional and accepts HTTP or HTTPS. When blank, the subscription link and QR use the current browser base URL, preserving the port and exact webPath. An explicit public URL takes precedence; an origin-only URL inherits the current path. This does not change inbound TLS profiles or the configured secure-cookie policy. Copy link includes a fallback for HTTP origins without the Clipboard API.

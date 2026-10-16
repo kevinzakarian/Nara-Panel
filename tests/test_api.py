@@ -80,6 +80,14 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.request("/api/settings", {"revision": 0, "settings": state["settings"]})[0], 200)
         self.assertEqual(self.request("/api/settings", {"revision": 0, "settings": state["settings"]})[0], 400)
 
+    def test_http_public_url_can_be_saved(self):
+        self.login()
+        state = self.store.get("state")
+        state["settings"]["public_url"] = "http://203.0.113.42:10000" + self.web_path + "/"
+        response = self.request("/api/settings", {"revision": 0, "settings": state["settings"]})
+        self.assertEqual(response[0], 200, response[1])
+        self.assertEqual(self.store.get("state")["settings"]["public_url"], state["settings"]["public_url"])
+
     def test_logout_revokes_session(self):
         self.login()
         self.assertEqual(self.request("/api/logout", {})[0], 200)

@@ -108,6 +108,17 @@ class ConfigTests(unittest.TestCase):
         state["inbounds"][0]["public_port"] = 443
         self.assertEqual(client_config(state, state["clients"][0], {})["outbounds"][1]["server_port"], 443)
 
+    def test_public_panel_url_accepts_http_and_https(self):
+        state = initial_state()
+        for value in ("", "http://203.0.113.42:10000/AbCdEfGh/", "http://[2001:db8::1]:10000/AbCdEfGh/", "https://panel.example.com/AbCdEfGh/"):
+            with self.subTest(value=value):
+                state["settings"]["public_url"] = value
+                validate(state)
+        for value in ("ftp://panel.example.com/", "javascript:alert(1)", "/AbCdEfGh/", "http://user:password@panel.example.com/", "http://@panel.example.com/", "http://panel.example.com/?token=x", "http://panel.example.com/#clients", "http://panel.example.com:0/", "http://panel.example.com:70000/"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                state["settings"]["public_url"] = value
+                validate(state)
+
     def test_rulesets_and_dns_rules(self):
         state = initial_state()
         state["rule_sets"] = [{"id": "rs", "tag": "test", "type": "inline", "rules": [{"domain_suffix": ["example.com"]}]}]

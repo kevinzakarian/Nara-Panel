@@ -36,6 +36,9 @@ for (const [label, publicURL, expectedBase] of [
  ['custom webPath', 'https://panel.example.com/AbCdEfGh/', 'https://panel.example.com/AbCdEfGh'],
  ['origin-only settings', 'https://panel.example.com', 'https://panel.example.com/AbCdEfGh'],
  ['IPv6 with port', 'https://[2001:db8::1]:10443/AbCdEfGh', 'https://[2001:db8::1]:10443/AbCdEfGh'],
+ ['HTTP with IP, port and webPath', 'http://203.0.113.42:10000/AbCdEfGh/', 'http://203.0.113.42:10000/AbCdEfGh'],
+ ['HTTP origin-only settings', 'http://panel.example.com:10000', 'http://panel.example.com:10000/AbCdEfGh'],
+ ['HTTP IPv6 with port', 'http://[2001:db8::1]:10000/AbCdEfGh/', 'http://[2001:db8::1]:10000/AbCdEfGh'],
  ['long public URL', 'https://panel.example.com/' + 'a'.repeat(180) + '/', 'https://panel.example.com/' + 'a'.repeat(180)]
 ]) {
  test(`sharing UI encodes the exact subscription link: ${label}`, () => {
@@ -58,11 +61,32 @@ test('legacy root path and rotated token generate fresh QR codes', () => {
  context.location.href = 'https://panel.example.com/AbCdEfGh/#clients';
 });
 
-test('missing public URL offers settings and exposes no QR or token', () => {
- const markup = vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client)", context);
- assert.ok(markup.includes('Open settings'));
- assert.ok(!markup.includes('<svg xmlns='));
- assert.ok(!markup.includes(token));
+for(const currentURL of [
+ 'http://203.0.113.42:10000/AbCdEfGh/#clients',
+ 'https://panel.example.com/AbCdEfGh/#clients',
+ 'http://[2001:db8::1]:10000/AbCdEfGh/#clients',
+ 'http://203.0.113.42:10000/#clients',
+ 'http://panel.example.com:10000/AbCdEfGh/index.html?preview=1#clients'
+]) {
+ test(`blank public URL produces a QR from the current address: ${currentURL}`, () => {
+  context.location.href=currentURL;
+  context.client={id:'demo-client',token};
+  try {
+   const markup=vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client)",context);
+   assert.equal(decode(markup),new URL('.',currentURL).href+'sub/'+token);
+   assert.ok(markup.includes('Copy link'));
+   assert.ok(markup.includes('Download QR'));
+   assert.ok(!markup.includes('Set the panel'));
+  } finally {context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
+ });
+}
+
+test('configured HTTPS public URL takes precedence over the current HTTP address', () => {
+ context.location.href='http://203.0.113.42:10000/AbCdEfGh/#clients';
+ try {
+  const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com'}};subscriptionShare(client)",context);
+  assert.equal(decode(markup),'https://panel.example.com/AbCdEfGh/sub/'+token);
+ } finally {context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
 });
 
 test('over-capacity links retain copy access with a helpful message', () => {
@@ -72,3 +96,35 @@ test('over-capacity links retain copy access with a helpful message', () => {
  assert.ok(markup.includes('Copy link'));
  assert.ok(!markup.includes('Download QR'));
 });
+
+for(const succeeds of [true,false]) {
+ test(`HTTP clipboard fallback ${succeeds?'copies the link':'offers manual copying when unavailable'}`,async()=>{
+  const current='http://203.0.113.42:10000/AbCdEfGh/#clients';
+  context.location.href=current;
+  context.client={id:'demo-client',token};
+  vm.runInContext("state={settings:{public_url:''}}",context);
+  let selected=false,removed=false,focused=false,input;
+  const previousToast=context.toast;
+  context.navigator={};
+  context.toast=()=>{};
+  context.document={
+   activeElement:{focus(){focused=true;}},
+   createElement(){return input={select(){selected=true;},remove(){removed=true;}};},
+   querySelector(){return {open:true,append(node){assert.equal(node,input);}};},
+   execCommand(command){
+    assert.equal(command,'copy');assert.ok(selected);
+    assert.equal(input.value,new URL('.',current).href+'sub/'+token);
+    return succeeds;
+   }
+  };
+  try {
+   if(succeeds)await context.copySubscription(context.client);
+   else await assert.rejects(context.copySubscription(context.client),/Select and copy the subscription link/);
+   assert.ok(removed);assert.ok(focused);
+  } finally {
+   context.toast=previousToast;
+   delete context.document;delete context.navigator;
+   context.location.href='https://panel.example.com/AbCdEfGh/#clients';
+  }
+ });
+}

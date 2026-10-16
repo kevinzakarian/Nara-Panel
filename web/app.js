@@ -141,7 +141,7 @@ function renderClients() {
  return heading(btn('New client','new-client','plus','primary'))+pendingBanner()+`<div class="toolbar"><div class="search">${icon('search')}<input id="client-search" placeholder="Search clients…" value="${e(search)}" aria-label="Search clients"></div><select id="client-filter" aria-label="Filter clients"><option value="all" ${filter==='all'?'selected':''}>All clients</option><option value="active" ${filter==='active'?'selected':''}>Active clients</option><option value="inactive" ${filter==='inactive'?'selected':''}>Disabled & limited</option></select><span class="count">${num(filtered.length)} clients</span></div><section class="card">${clientTable(filtered.slice((pageNumber-1)*10,pageNumber*10))}<div class="table-foot"><span>${num(filtered.length)} clients · page ${num(pageNumber)} of ${num(pages)}</span><div class="pagination"><button data-action="page" data-id="${Math.max(1,pageNumber-1)}" aria-label="Previous page">→</button><button class="active">${num(pageNumber)}</button><button data-action="page" data-id="${Math.min(pages,pageNumber+1)}" aria-label="Next page">←</button></div></div></section>`;
 }
 function renderSettings() {
- return heading()+pendingBanner()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel HTTPS URL<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">The base URL for subscriptions, served behind an HTTPS reverse proxy.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}${optionSection('DNS cache and address preferences',optionSchema.dns,state.settings.dns_options||{},'dns')}<label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section></div></div>`;
+ return heading()+pendingBanner()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">HTTP or HTTPS. Leave blank to use this panel's current address and path.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}${optionSection('DNS cache and address preferences',optionSchema.dns,state.settings.dns_options||{},'dns')}<label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section></div></div>`;
 }
 function field(label,name,value='',type='text',hint='',extra='') {return `<label ${extra}>${label}<input name="${name}" type="${type}" value="${e(value)}" ${type!=='checkbox'?'dir="auto"':''}>${hint?`<small class="field-hint">${hint}</small>`:''}</label>`;}
 function selectField(label,name,options,value='',extra=''){return `<label ${extra}>${label}<select name="${name}">${options.map(([v,t])=>`<option value="${e(v)}" ${v===value?'selected':''}>${e(t)}</option>`).join('')}</select></label>`;}
@@ -229,17 +229,32 @@ function editDNS(collection,item={}) {
 }
 function download(name,content,type='application/json') {const blob=new Blob([typeof content==='string'?content:JSON.stringify(content,null,2)],{type});const url=URL.createObjectURL(blob);const anchor=document.createElement('a');anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),3000);}
 function subscriptionURL(client) {
- const base=new URL(state.settings.public_url);
- if(base.pathname==='/') base.pathname=new URL('.',location.href).pathname;
+ const current=new URL('.',location.href);
+ const base=state.settings.public_url?.trim()?new URL(state.settings.public_url):current;
+ if(base.pathname==='/') base.pathname=current.pathname;
  return base.href.replace(/\/$/,'')+'/sub/'+client.token;
 }
 function subscriptionShare(client) {
- if (!state.settings.public_url) return `<p class="note">Set the panel's public HTTPS URL in Settings to generate subscription links and QR codes.</p>${btn('Open settings','subscription-settings','settings','sm')}`;
  const sub=subscriptionURL(client);
  let qr,qrReady=false;
  try { qr=`<div class="subscription-qr">${NaraQR.svg(sub)}</div>`;qrReady=true; }
  catch { qr='<p class="note">This link is too long for a QR code. Copy the subscription link below.</p>'; }
  return `<div class="subscription-share">${qr}<div class="subscription-access"><p class="note">Scan with a client that supports Sing-box JSON subscriptions.</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
+}
+async function copySubscription(client) {
+ const text=subscriptionURL(client);
+ if(navigator.clipboard?.writeText) {
+  try {await navigator.clipboard.writeText(text);toast('Subscription link copied.');return;} catch {}
+ }
+ // The Clipboard API is unavailable on ordinary HTTP origins.
+ const previous=document.activeElement,input=document.createElement('textarea');
+ input.className='clipboard-copy';input.value=text;input.readOnly=true;
+ ($('#modal').open?$('#modal'):document.body).append(input);
+ let copied=false;
+ try {input.select();copied=Boolean(document.execCommand?.('copy'));} catch {}
+ finally {input.remove();previous?.focus();}
+ if(!copied)throw new Error('Could not copy automatically. Select and copy the subscription link shown above.');
+ toast('Subscription link copied.');
 }
 function subscriptionQR(id) {
  const client=state.clients.find(c=>c.id===id);
@@ -286,10 +301,9 @@ async function handle(action,target) {
  if(action==='client-details')return details(id);
  if(action==='subscription-qr')return subscriptionQR(id);
  if(action==='download-qr')return downloadQR(state.clients.find(c=>c.id===id));
- if(action==='subscription-settings'){$('#modal').close();location.hash='settings';return;}
  if(action==='export'){const config=await api('export/'+id);download('nara-'+id.slice(0,8)+'.json',config);toast('Client configuration downloaded.');return;}
  if(action==='download-cert'){const t=state.tls.find(x=>x.id===id);return download(t.server_name+'.crt',t.certificate,'application/x-pem-file');}
- if(action==='copy-sub'){const c=state.clients.find(x=>x.id===id);await navigator.clipboard.writeText(subscriptionURL(c));toast('Subscription link copied.');return;}
+ if(action==='copy-sub')return copySubscription(state.clients.find(x=>x.id===id));
  if(action==='rotate-token'||action==='reset-traffic')return confirmAction(action==='rotate-token'?'Rotate subscription link':'Reset traffic usage',action==='rotate-token'?'The previous subscription link will stop working immediately. Previously downloaded configurations remain valid.':'Reset this account\'s traffic usage to zero? The account is reactivated automatically if its other limits allow access.',async()=>{await api(action,{id,revision:state.revision});await load();toast('Done.');});
  if(action==='move-rule'){
   const index=state.dns_rules.findIndex(r=>r.id===id);if(index<=0)return;

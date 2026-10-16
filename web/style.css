@@ -76,3 +76,5 @@ dialog { width:min(780px,calc(100% - 32px)); }
  .sidebar-bottom { padding-top:16px; }
  .core-label { margin-bottom:16px; }
 }
+
+.clipboard-copy { position:fixed; top:0; left:0; width:1px; height:1px; padding:0; border:0; opacity:0; pointer-events:none; }

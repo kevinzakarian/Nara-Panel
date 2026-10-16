@@ -19,7 +19,7 @@ The interface defaults to **English and left-to-right**, with a 16 px body/input
 
 - Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, and CA certificates.
 - Sing-box **1.14.3**, built with **`with_quic,with_v2ray_api`**. Default official release builds do not include V2Ray API. The supplied build script pins the official source commit and uses its Go module checksums. Building requires Go 1.27.1 or a compatible newer toolchain, Git, and Internet access.
-- Public server address, open inbound TCP/UDP ports, and an HTTPS reverse proxy for public panel/subscription access.
+- Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS; an HTTPS reverse proxy can be configured separately.
 
 The panel owns its Sing-box child process and configuration. Give it separate ports from any existing installation. It does not edit host firewall rules, routes, system DNS, or another Sing-box service.
 
@@ -43,7 +43,7 @@ The panel is then reachable at `http://YOUR_SERVER_IP:PORT/webPath/`. The final 
 
 Entry settings are stored with mode 0600 in `/etc/nara-panel.env`. Re-running the installer offers existing path/port values as defaults and preserves accounts and data. A customized path scopes the UI, assets, API, subscription links, and session cookies; it supplements administrator authentication.
 
-For public HTTPS, configure a reverse proxy using `deploy/Caddyfile.example`, **preserve the full webPath**, set `NARA_BIND=127.0.0.1` and `NARA_SECURE_COOKIE=1` in `/etc/nara-panel.env`, and restart the service. The proxy must forward the chosen panel port. In Settings, enter the public HTTPS URL, including the webPath; if only an origin is entered, the UI appends its current webPath to subscription links.
+For public HTTPS, configure a reverse proxy using `deploy/Caddyfile.example`, **preserve the full webPath**, set `NARA_BIND=127.0.0.1` and `NARA_SECURE_COOKIE=1` in `/etc/nara-panel.env`, and restart the service. The proxy must forward the chosen panel port. The optional Public panel URL setting accepts HTTP or HTTPS, including the webPath; an origin-only value uses the current webPath. If the field is blank, subscription links and QR codes use the current browser address, port and path.
 
 For a manual source installation on other systemd Linux distributions, install Python/venv, Git, a compatible Go toolchain, OpenSSL and CA certificates first, then run:
 
@@ -73,20 +73,20 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
-Version **0.2.0** adds automatic apply, readable typography, per-profile client TLS controls and protocol-specific inbound editors. The Python 3.12 certificate fix and subscription QR from 0.1.x are included. No Python dependency changes or core rebuild are required for this panel update. Existing 0.1.x drafts are validated and activated on the next successful save.
+Version **0.2.1** allows subscription QR codes over HTTP without configuring a public URL. It includes the automatic apply, readable typography, per-profile TLS controls and protocol-specific editors from 0.2.0. The Python 3.12 certificate fix and subscription QR from 0.1.x are included. No Python dependency changes or core rebuild are required for this panel update. Existing 0.1.x drafts are validated and activated on the next successful save.
 
 ## First connection
 
-1. In **Settings**, set the public server domain/IP and public HTTPS panel URL.
+1. In **Settings**, set the public server domain/IP. Public panel URL is optional and accepts HTTP or HTTPS.
 2. In **TLS certificates**, import a trusted certificate or click **Generate self-signed**.
 3. In **Inbounds**, create an inbound with a unique port and attach the certificate.
 4. In **Clients**, create a client, assign inbounds, and choose allowance/expiry.
 5. Every **Save** automatically validates and activates the configuration using the installed core. There is no separate Apply step. Failed validation preserves the working core and previous settings; a startup failure triggers a rollback attempt. Connection changes can briefly disconnect clients.
-6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. Set the public panel HTTPS URL in Settings first. Client JSON exposes a loopback mixed proxy on port 2080 and a selector of assigned outbounds. It can be imported/merged into a Sing-box-compatible client.
+6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. When the public panel URL is blank, the current panel address, port and webPath are used automatically. Client JSON exposes a loopback mixed proxy on port 2080 and a selector of assigned outbounds. It can be imported/merged into a Sing-box-compatible client.
 
 By default, self-signed client exports include the public certificate as a trusted certificate. Selecting **Allow insecure (client)** explicitly disables certificate verification in that profile’s client exports; it is disabled by default and never added to the server TLS configuration. Public panel HTTPS and inbound TLS are configured independently.
 
-QR codes contain the private subscription URL, including the account token and configured webPath. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. Scan them with a client that supports Sing-box JSON subscriptions. Rotating the subscription link produces a new QR code when reopened.
+QR codes contain the private subscription URL, including the account token and webPath. If you access the panel through a local tunnel, set the optional Public panel URL to an address reachable by your clients. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. Scan them with a client that supports Sing-box JSON subscriptions. Rotating the subscription link produces a new QR code when reopened.
 
 ![Subscription QR preview with a demonstration account](screenshots/subscription-qr.png)
 

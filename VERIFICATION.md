@@ -54,3 +54,21 @@ is 14 px. Browser checks and screenshots use only the isolated local demonstrati
 store; no production server configuration was changed.
 
 Mobile checks at 390 × 844 confirmed 16 px body/input text, a 390 px document width, and a 352 px inbound dialog. DNS cache capacity was saved through the mobile UI and confirmed in the active model. The desktop layout was inspected at 1280 × 800.
+
+## HTTP subscription QR fix (0.2.1)
+
+**17 Node.js QR/clipboard tests passed**, including independent decoding of HTTP
+and HTTPS QR payloads, configured IPv4/IPv6 addresses with ports and webPaths,
+blank-public-URL fallback, root and index.html paths, ignoring browser query/hash,
+explicit public URL precedence, and clipboard fallback success/failure without the
+Clipboard API. **5 targeted Python tests passed** for HTTP/HTTPS URL validation,
+saving HTTP public URLs through both root and prefixed APIs, and subscription
+headers/revocation through both route forms. Other core behavior was unchanged
+from the 0.2.0 verification above.
+
+A browser preview on HTTP with an empty public_url displayed the QR and exact
+current host/port/webPath subscription link without the former HTTPS setup gate.
+The screenshot uses the isolated demonstration account. The HTTP clipboard fallback
+was tested with DOM stubs; the local loopback browser is considered a secure context
+and does not exercise that fallback. JavaScript syntax, Python compilation and
+source packaging were checked. No remote Linux installation/update is claimed.
