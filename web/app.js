@@ -149,7 +149,7 @@ function textField(label,name,value='',hint='',extra=''){return `<label ${extra}
 function openModal(title,subtitle,content,submit=null,submitLabel='Save') {
  modalSubmit=submit;$('#modal-body').innerHTML=`<form id="modal-form"><div class="modal-head"><div><h2>${title}</h2><p>${subtitle}</p></div><button class="icon-btn" type="button" data-action="close" aria-label="Close">${icon('close')}</button></div><div class="modal-content">${content}</div><p class="error-text form-error" id="form-error" role="alert"></p><div class="modal-actions"><button class="btn" type="button" data-action="close">${submit?'Cancel':'Close'}</button>${submit?`<button class="btn primary" type="submit">${submitLabel}</button>`:''}</div></form>`;
  if (!$('#modal').open) $('#modal').showModal();
- setTimeout(()=>$('input:not([type=checkbox]),select,textarea', $('#modal'))?.focus(),30);
+ if(submit)setTimeout(()=>$('input:not([type=checkbox]),select,textarea', $('#modal'))?.focus(),30);
 }
 async function saveRecord(collection,record) {const result=await api('save',{revision:state.revision,collection,record});await load();toast(result.restarted?'Saved and applied. The core is running.':'Saved and applied.');}
 function editInbound(item={}) {
@@ -234,15 +234,30 @@ function subscriptionURL(client) {
  if(base.pathname==='/') base.pathname=current.pathname;
  return base.href.replace(/\/$/,'')+'/sub/'+client.token;
 }
-function subscriptionShare(client) {
- const sub=subscriptionURL(client);
+function subscriptionPayload(client,format='sing-box') {
+ const url=subscriptionURL(client);
+ if(format==='json')return url;
+ if(format==='sing-box')return 'sing-box://import-remote-profile?url='+encodeURIComponent(url)+'#'+encodeURIComponent(client.name||'Nara');
+ throw new Error('Unsupported subscription format.');
+}
+function subscriptionShare(client,format='sing-box') {
+ const sub=subscriptionPayload(client,format);
  let qr,qrReady=false;
  try { qr=`<div class="subscription-qr">${NaraQR.svg(sub)}</div>`;qrReady=true; }
  catch { qr='<p class="note">This link is too long for a QR code. Copy the subscription link below.</p>'; }
- return `<div class="subscription-share">${qr}<div class="subscription-access"><p class="note">Scan with a client that supports Sing-box JSON subscriptions.</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
+ const help=format==='sing-box'?'Scan in the official Sing-box app to import a remote profile.':'For clients that accept a Sing-box JSON subscription URL. You can also paste this URL into a remote profile.';
+ return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>QR format<select class="subscription-format" aria-label="QR format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option></select></label><p class="note">${help}</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
 }
-async function copySubscription(client) {
- const text=subscriptionURL(client);
+function changeSubscriptionFormat(target) {
+ const share=target.closest('.subscription-share'),client=state.clients.find(c=>c.id===share.dataset.clientId);
+ share.outerHTML=subscriptionShare(client,target.value);
+ $('.subscription-format',$('#modal')).focus();
+}
+function selectedSubscriptionFormat(target) {
+ return $('.subscription-format',target.closest('.subscription-share')).value;
+}
+async function copySubscription(client,format='sing-box') {
+ const text=subscriptionPayload(client,format);
  if(navigator.clipboard?.writeText) {
   try {await navigator.clipboard.writeText(text);toast('Subscription link copied.');return;} catch {}
  }
@@ -260,8 +275,8 @@ function subscriptionQR(id) {
  const client=state.clients.find(c=>c.id===id);
  openModal('Subscription QR code',e(client.name),`${subscriptionShare(client)}<p class="note">Keep this QR code private. Anyone with it can access this account's subscription.</p>`);
 }
-async function downloadQR(client) {
- const svg=NaraQR.svg(subscriptionURL(client));
+async function downloadQR(client,format='sing-box') {
+ const svg=NaraQR.svg(subscriptionPayload(client,format));
  const image=new Image();
  image.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
  await image.decode();
@@ -273,7 +288,7 @@ async function downloadQR(client) {
  const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
  if (!blob) throw new Error('Could not download the QR image.');
  const url=URL.createObjectURL(blob),anchor=document.createElement('a');
- anchor.href=url;anchor.download='nara-subscription-'+client.id.slice(0,8)+'.png';anchor.click();
+ anchor.href=url;anchor.download='nara-subscription-'+format+'-'+client.id.slice(0,8)+'.png';anchor.click();
  setTimeout(()=>URL.revokeObjectURL(url),3000);
  toast('Subscription QR code downloaded.');
 }
@@ -300,10 +315,10 @@ async function handle(action,target) {
  if(action==='config'){previewConfig=await api('config');openModal('Server config','Current settings. Contains confidential client credentials.',`<pre class="code">${e(JSON.stringify(previewConfig,null,2))}</pre><p class="note">TLS paths refer to files in the current configuration generation.</p>`);return;}
  if(action==='client-details')return details(id);
  if(action==='subscription-qr')return subscriptionQR(id);
- if(action==='download-qr')return downloadQR(state.clients.find(c=>c.id===id));
+ if(action==='download-qr')return downloadQR(state.clients.find(c=>c.id===id),selectedSubscriptionFormat(target));
  if(action==='export'){const config=await api('export/'+id);download('nara-'+id.slice(0,8)+'.json',config);toast('Client configuration downloaded.');return;}
  if(action==='download-cert'){const t=state.tls.find(x=>x.id===id);return download(t.server_name+'.crt',t.certificate,'application/x-pem-file');}
- if(action==='copy-sub')return copySubscription(state.clients.find(x=>x.id===id));
+ if(action==='copy-sub')return copySubscription(state.clients.find(x=>x.id===id),selectedSubscriptionFormat(target));
  if(action==='rotate-token'||action==='reset-traffic')return confirmAction(action==='rotate-token'?'Rotate subscription link':'Reset traffic usage',action==='rotate-token'?'The previous subscription link will stop working immediately. Previously downloaded configurations remain valid.':'Reset this account\'s traffic usage to zero? The account is reactivated automatically if its other limits allow access.',async()=>{await api(action,{id,revision:state.revision});await load();toast('Done.');});
  if(action==='move-rule'){
   const index=state.dns_rules.findIndex(r=>r.id===id);if(index<=0)return;
@@ -322,7 +337,7 @@ document.addEventListener('submit',async event=>{
  }catch(err){if(form.id==='modal-form')$('#form-error').textContent=err.message;else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=false;submit.textContent=label;}}
 });
 document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});
-document.addEventListener('change',event=>{if(event.target.id==='client-filter'){filter=event.target.value;pageNumber=1;render();}});
+document.addEventListener('change',event=>{if(event.target.matches('.subscription-format'))changeSubscriptionFormat(event.target);else if(event.target.id==='client-filter'){filter=event.target.value;pageNumber=1;render();}});
 window.addEventListener('hashchange',()=>{search='';filter='all';pageNumber=1;$('.sidebar').classList.remove('open');render();});
 $('#refresh').innerHTML=icon('refresh');$('#refresh').addEventListener('click',async()=>{try{await load();toast('Server data refreshed.');}catch(err){toast(err.message,true);}});
 $('#logout').addEventListener('click',async()=>{try{await api('logout',{});showLogin();}catch(err){toast(err.message,true);}});

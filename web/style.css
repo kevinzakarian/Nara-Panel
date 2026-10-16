@@ -78,3 +78,5 @@ dialog { width:min(780px,calc(100% - 32px)); }
 }
 
 .clipboard-copy { position:fixed; top:0; left:0; width:1px; height:1px; padding:0; border:0; opacity:0; pointer-events:none; }
+.subscription-access>label { display:block; margin-bottom:12px; }
+.subscription-format { display:block; width:100%; margin-top:6px; }

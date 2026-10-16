@@ -44,9 +44,22 @@ for (const [label, publicURL, expectedBase] of [
  test(`sharing UI encodes the exact subscription link: ${label}`, () => {
   context.publicURL = publicURL;
   context.client = { id: 'demo-client', token };
-  const markup = vm.runInContext('state={settings:{public_url:publicURL}};subscriptionShare(client)', context);
+  const markup = vm.runInContext("state={settings:{public_url:publicURL}};subscriptionShare(client,'json')", context);
   assert.equal(decode(markup), expectedBase + '/sub/' + token);
   assert.ok(markup.includes('Download QR'));
+ });
+ test(`official app QR preserves the remote profile URL and name: ${label}`, () => {
+  context.publicURL=publicURL;
+  context.client={id:'demo-client',token,name:'کاربر A & B / + #? 你好'};
+  const markup=vm.runInContext('state={settings:{public_url:publicURL}};subscriptionShare(client)',context);
+  const payload=decode(markup),uri=new URL(payload);
+  assert.equal(uri.protocol,'sing-box:');
+  assert.equal(uri.host,'import-remote-profile');
+  assert.equal(uri.searchParams.get('url'),expectedBase+'/sub/'+token);
+  assert.equal(decodeURIComponent(uri.hash.slice(1)),context.client.name);
+  assert.equal(uri.searchParams.size,1,'encoded URL must remain a single parameter');
+  assert.ok(markup.includes('value="sing-box" selected'));
+  assert.ok(markup.includes('JSON subscription URL'));
  });
 }
 
@@ -55,7 +68,7 @@ test('legacy root path and rotated token generate fresh QR codes', () => {
  context.publicURL = 'https://panel.example.com';
  for (const suffix of ['old', 'rotated']) {
   context.client = { id: 'demo-client', token: token + suffix };
-  const markup = vm.runInContext('state={settings:{public_url:publicURL}};subscriptionShare(client)', context);
+  const markup = vm.runInContext("state={settings:{public_url:publicURL}};subscriptionShare(client,'json')", context);
   assert.equal(decode(markup), 'https://panel.example.com/sub/' + token + suffix);
  }
  context.location.href = 'https://panel.example.com/AbCdEfGh/#clients';
@@ -72,7 +85,7 @@ for(const currentURL of [
   context.location.href=currentURL;
   context.client={id:'demo-client',token};
   try {
-   const markup=vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client)",context);
+   const markup=vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client,'json')",context);
    assert.equal(decode(markup),new URL('.',currentURL).href+'sub/'+token);
    assert.ok(markup.includes('Copy link'));
    assert.ok(markup.includes('Download QR'));
@@ -84,14 +97,14 @@ for(const currentURL of [
 test('configured HTTPS public URL takes precedence over the current HTTP address', () => {
  context.location.href='http://203.0.113.42:10000/AbCdEfGh/#clients';
  try {
-  const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com'}};subscriptionShare(client)",context);
+  const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com'}};subscriptionShare(client,'json')",context);
   assert.equal(decode(markup),'https://panel.example.com/AbCdEfGh/sub/'+token);
  } finally {context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
 });
 
 test('over-capacity links retain copy access with a helpful message', () => {
  context.publicURL = 'https://panel.example.com/' + 'a'.repeat(4000);
- const markup = vm.runInContext('state={settings:{public_url:publicURL}};subscriptionShare(client)', context);
+ const markup = vm.runInContext("state={settings:{public_url:publicURL}};subscriptionShare(client,'json')", context);
  assert.ok(markup.includes('too long for a QR code'));
  assert.ok(markup.includes('Copy link'));
  assert.ok(!markup.includes('Download QR'));
@@ -118,8 +131,8 @@ for(const succeeds of [true,false]) {
    }
   };
   try {
-   if(succeeds)await context.copySubscription(context.client);
-   else await assert.rejects(context.copySubscription(context.client),/Select and copy the subscription link/);
+   if(succeeds)await context.copySubscription(context.client,'json');
+   else await assert.rejects(context.copySubscription(context.client,'json'),/Select and copy the subscription link/);
    assert.ok(removed);assert.ok(focused);
   } finally {
    context.toast=previousToast;
@@ -128,3 +141,70 @@ for(const succeeds of [true,false]) {
   }
  });
 }
+
+for(const format of ['sing-box','json']) {
+ test(`copy and PNG download use the selected ${format} payload`,async()=>{
+  context.client={id:'demo-client',token,name:'Demo profile'};
+  vm.runInContext("state={settings:{public_url:'http://203.0.113.42:10000/AbCdEfGh'}}",context);
+  const expected=context.subscriptionPayload(context.client,format);
+  const originalToast=context.toast;
+  let copied,encodedSVG,filename,clicked=false;
+  const modal={querySelector(){return {value:format};}};
+  const action={dataset:{id:context.client.id},closest(){return modal;}};
+  vm.runInContext('state.clients=[client]',context);
+  context.navigator={clipboard:{async writeText(value){copied=value;}}};
+  context.toast=()=>{};
+  context.Image=class {
+   set src(value){encodedSVG=decodeURIComponent(value.split(',')[1]);}
+   async decode(){this.naturalWidth=512;this.naturalHeight=512;}
+  };
+  const anchor={click(){clicked=true;filename=this.download;}};
+  context.document={
+   querySelector(){return modal;},
+   createElement(tag){
+    if(tag==='a')return anchor;
+    assert.equal(tag,'canvas');
+    return {getContext(){return {drawImage(){}};},toBlob(callback,type){assert.equal(type,'image/png');callback({});}};
+   }
+  };
+  context.setTimeout=callback=>callback();
+  // Keep the host's URL class and blob URL registry untouched.
+  const originalURL=context.URL;
+  context.URL=class extends URL {static createObjectURL(){return 'blob:demo';}static revokeObjectURL(){}};
+  try {
+   await context.handle('copy-sub',action);
+   assert.equal(copied,expected);
+   await context.handle('download-qr',action);
+   assert.equal(decode(encodedSVG),expected);
+   assert.ok(clicked);
+   assert.equal(filename,`nara-subscription-${format}-demo-cli.png`);
+  } finally {
+   context.toast=originalToast;context.URL=originalURL;
+   for(const key of ['navigator','document','Image','setTimeout'])delete context[key];
+  }
+ });
+}
+
+test('changing format replaces only the sharing section and restores selector focus',()=>{
+ context.client={id:'demo-client',token,name:'Demo profile'};
+ vm.runInContext("state={settings:{public_url:''},clients:[client]}",context);
+ let markup,focused=false;
+ const share={dataset:{clientId:'demo-client'},set outerHTML(value){markup=value;}};
+ const selector={value:'json',closest(){return share;}};
+ context.document={querySelector(){return {querySelector(){return {focus(){focused=true;}};}};}};
+ try {
+  context.changeSubscriptionFormat(selector);
+  assert.equal(decode(markup),'https://panel.example.com/AbCdEfGh/sub/'+token);
+  assert.ok(markup.includes('value="json" selected'));
+  assert.ok(focused);
+ } finally {delete context.document;}
+});
+
+test('official profile names are encoded as text and unknown formats are rejected',()=>{
+ context.client={id:'demo-client',token,name:'<img src=x onerror=alert(1)> & # +'};
+ vm.runInContext("state={settings:{public_url:''}}",context);
+ const markup=context.subscriptionShare(context.client);
+ assert.ok(!markup.includes('<img'));
+ assert.equal(decodeURIComponent(new URL(decode(markup)).hash.slice(1)),context.client.name);
+ assert.throws(()=>context.subscriptionPayload(context.client,'clash'),/Unsupported subscription format/);
+});

@@ -70,3 +70,7 @@ operational limits and VERIFICATION for actual test coverage.
 ## HTTP subscriptions (0.2.1)
 
 Public panel URL is optional and accepts HTTP or HTTPS. When blank, the subscription link and QR use the current browser base URL, preserving the port and exact webPath. An explicit public URL takes precedence; an origin-only URL inherits the current path. This does not change inbound TLS profiles or the configured secure-cookie policy. Copy link includes a fallback for HTTP origins without the Clipboard API.
+
+## QR import formats (0.2.2)
+
+Official Sing-box graphical clients require the [remote-profile import URI](https://sing-box.sagernet.org/clients/general/#remote): `sing-box://import-remote-profile?url=urlEncodedURL#urlEncodedName`. The default QR now uses this scheme with an encoded subscription URL and account name. A second format exposes the direct JSON subscription URL. Both the dedicated dialog and account details offer the selector; copy and PNG download use its current value. This adds no Clash YAML or protocol-link/Base64 endpoint. HTTP and HTTPS subscription URLs are supported in both formats.

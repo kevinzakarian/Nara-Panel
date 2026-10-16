@@ -72,3 +72,27 @@ The screenshot uses the isolated demonstration account. The HTTP clipboard fallb
 was tested with DOM stubs; the local loopback browser is considered a secure context
 and does not exercise that fallback. JavaScript syntax, Python compilation and
 source packaging were checked. No remote Linux installation/update is claimed.
+
+## Official Sing-box profile QR fix (0.2.2)
+
+**28 Node.js tests passed.** The rendered SVGs are independently decoded with
+jsQR. Both direct JSON URLs and the official remote-profile URI are checked for
+HTTP/HTTPS, IPv4/IPv6, ports, custom paths, origin-only settings and long URLs.
+Official URI checks round-trip Unicode/reserved characters in account names and
+the nested subscription URL. Tests also cover format switching, matching copy and
+PNG-source payloads through the real action handlers, HTTP clipboard fallback,
+root paths, token rotation, empty public URLs and oversized QR fallback.
+
+**4 targeted Python HTTP tests passed** for locally served assets at root/custom
+paths and subscription headers/token revocation under both route forms. Browser
+checks on the isolated HTTP demonstration store verified both format options in
+the dedicated QR dialog and account details, with no browser errors. At 390 × 844,
+the document remains 390 px wide and the 352 px dialog opens with the complete QR
+visible; informational dialogs no longer scroll to their first selector on open.
+Desktop and mobile screenshots use demonstration credentials only. JavaScript
+syntax and source packaging were checked.
+
+The official URI follows the upstream graphical-client remote-profile contract:
+https://sing-box.sagernet.org/clients/general/#remote . Actual scanning on a physical
+Android/iOS device and installation/updating on a remote Linux server were not
+performed. The underlying full JSON profile and server runtime are unchanged.

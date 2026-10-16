@@ -10,7 +10,7 @@ An English web panel for running **Sing-box on your own Linux server**. Inspired
 - **Inbounds:** VLESS/Vision, VMess, Trojan, Hysteria2 with Salamander/Gecko obfuscation, TUIC and AnyTLS. Protocol-specific forms cover bandwidth, congestion control, padding, fallback, connection tuning and client exports. TCP, WebSocket, gRPC, HTTP, HTTPUpgrade and QUIC transports where supported; multiplex and listener settings. See the [feature review](FEATURE_REVIEW.md) for the exact scope.
 - **TLS:** import PEM certificate/key pairs, validate their match and SAN hostname, generate ECDSA self-signed certificates with one action, show expiry, and download the public certificate. Each profile has explicit client **Allow insecure**, SNI suppression, ALPN, TLS versions and handshake timeout.
 - **DNS:** UDP/TCP/DoT/DoH/DoQ/HTTP3/local resolvers, bootstrap validation, cache controls and IP preferences. Ordered domain/suffix/keyword/regex/query-type/rule-set rules, inversion, TTL and cache options; inline JSON and remote HTTPS source/SRS rule sets with update intervals.
-- **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated subscription QR codes with PNG download.
+- **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated QR codes in official Sing-box remote-profile and direct JSON URL formats, with PNG download.
 - **Operations:** SQLite persistence, admin sign-in, password change, logout, server-side sessions, CSRF checks, sign-in throttling, automatic validation/application on save, managed restarts, attempted rollback after startup failure, and systemd installation. Saved and active settings are committed together; invalid changes preserve the previous settings.
 
 The interface defaults to **English and left-to-right**, with a 16 px body/input baseline and larger readable labels and captions. [راهنمای نصب فارسی](INSTALL.fa.md).
@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
-Version **0.2.1** allows subscription QR codes over HTTP without configuring a public URL. It includes the automatic apply, readable typography, per-profile TLS controls and protocol-specific editors from 0.2.0. The Python 3.12 certificate fix and subscription QR from 0.1.x are included. No Python dependency changes or core rebuild are required for this panel update. Existing 0.1.x drafts are validated and activated on the next successful save.
+Version **0.2.2** fixes QR import in the official Sing-box app using its remote-profile URI scheme and adds a QR format selector. Copy link and PNG download use the selected format. HTTP support and the automatic apply, typography, TLS and protocol editors from earlier versions are included. No Python dependency changes or core rebuild are required for this panel update.
 
 ## First connection
 
@@ -86,9 +86,9 @@ Version **0.2.1** allows subscription QR codes over HTTP without configuring a p
 
 By default, self-signed client exports include the public certificate as a trusted certificate. Selecting **Allow insecure (client)** explicitly disables certificate verification in that profile’s client exports; it is disabled by default and never added to the server TLS configuration. Public panel HTTPS and inbound TLS are configured independently.
 
-QR codes contain the private subscription URL, including the account token and webPath. If you access the panel through a local tunnel, set the optional Public panel URL to an address reachable by your clients. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. Scan them with a client that supports Sing-box JSON subscriptions. Rotating the subscription link produces a new QR code when reopened.
+QR codes contain the private subscription URL, including the account token and webPath. If you access the panel through a local tunnel, set the optional Public panel URL to an address reachable by your clients. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. **Sing-box app (recommended)** is the default and encodes the [official remote-profile import URI](https://sing-box.sagernet.org/clients/general/#remote), including the account name. Choose **JSON subscription URL** for clients that accept a direct full Sing-box JSON URL, or for manually adding a remote profile. Copy link and Download QR follow the selected format. This does not provide Clash YAML or protocol-link/Base64 subscriptions. Rotating the subscription link produces a new QR code when reopened.
 
-![Subscription QR preview with a demonstration account](screenshots/subscription-qr.png)
+![Subscription QR preview with a demonstration account](screenshots/subscription-qr-formats.png)
 
 ## Accounting and operational limits
 
@@ -96,7 +96,7 @@ QR codes contain the private subscription URL, including the account token and w
 - Usage and expiry are checked every **5 seconds**. Crossing a limit rebuilds the running configuration and restarts the whole core, disconnecting all active connections. Enforcement can overshoot within the polling/restart window. Sudden crashes/power loss can lose the most recent uncollected interval; graceful restarts collect first.
 - Form edits take effect when **Save** succeeds. Account enable/disable, deletion, quota/expiry edits, usage resets, TLS changes and DNS changes apply automatically. Equivalent server configurations, client-only settings and token rotations avoid unnecessary core restarts. A successful usage reset reactivates an otherwise eligible exhausted account. Rotating a subscription URL does not invalidate already downloaded credentials.
 - After **three consecutive failed accounting polls**, the panel stops the core. An unexpected exit is reported and requires **Start core** or a successful settings save; no automatic crash loop is started inside the panel. A normal panel restart restores the last applied configuration if the core had not been explicitly stopped.
-- No live connected-user count, online status, per-device/IP/concurrency limit, per-client speed limit, periodic quota renewal, URI/Base64 subscription, ACME automation for inbound certificates, or REALITY/ShadowTLS editor is claimed in this release. Account status means eligible, not currently connected. Shadowsocks inbounds are not included.
+- No live connected-user count, online status, per-device/IP/concurrency limit, per-client speed limit, periodic quota renewal, protocol-link/Base64 subscriptions, ACME automation for inbound certificates, or REALITY/ShadowTLS editor is claimed in this release. Account status means eligible, not currently connected. Shadowsocks inbounds are not included.
 - Imported certificates are stored and used locally. To renew a certificate, edit and save its TLS profile. Rule-set downloads are performed by the core; failed core validation/download does not replace the active generation.
 - There is one administrator identity. Private keys, client credentials, subscription tokens, and the database must stay private. Core diagnostics live in the private data directory as `core.log`; the UI does not display raw core errors that might contain credentials.
 - For a consistent manual backup, stop the panel service and back up the entire `/var/lib/nara-panel` directory including the SQLite database. Restore only to a trusted host with the service stopped. Automatic encrypted backups and multi-server management are outside this release.
@@ -120,7 +120,7 @@ npm ci --ignore-scripts
 npm test
 ```
 
-Node.js/npm are only used for development QR verification; the installed panel needs neither. QR tests decode the rendered QR with an independent decoder and verify custom paths, IPv6/ports, long links, token rotation, and missing public URL behavior.
+Node.js/npm are only used for development QR verification; the installed panel needs neither. QR tests decode the rendered QR with an independent decoder and verify custom paths, IPv6/ports, long links, token rotation, missing public URL behavior, the official import URI with Unicode profile names, format switching, and matching copy/PNG payloads.
 
 Integration tests exercise real loopback transfers for all six protocols, Vision, VMess padding/multiplex, Salamander/Gecko, TUIC congestion settings, AnyTLS padding and every supported V2Ray transport. They also cover automatic HTTP saves, failed-save rollback, usage reset atomicity, inactive inbound checking, DNS options, self-signed TLS verification, accounting, persistence and quota enforcement. They do not change host routes, firewall, or DNS.
 
