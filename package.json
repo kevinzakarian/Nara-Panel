@@ -1,0 +1,10 @@
+{
+  "name": "nara-panel-verification",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/test_qr.cjs"
+  },
+  "devDependencies": {
+    "jsqr": "1.4.0"
+  }
+}

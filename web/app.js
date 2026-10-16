@@ -16,6 +16,7 @@ const paths = {
  disk:'M4 4h16v16H4z M4 15h16 M7 17.5h.01 M10 17.5h.01',
  traffic:'M7 3v18 M3 17l4 4 4-4 M17 21V3 M13 7l4-4 4 4',
  download:'M12 3v12 M7 10l5 5 5-5 M4 16v5h16v-5', edit:'m16 3 5 5-12 12-6 1 1-6z M13 6l5 5',
+ qr:'M3 3h6v6H3z M15 3h6v6h-6z M3 15h6v6H3z M15 15h2v2h-2z M19 15h2v6h-6v-2 M5 5h2v2H5z M17 5h2v2h-2z M5 17h2v2H5z',
  trash:'M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7',
  search:'M10.5 3a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15 M16 16l5 5',
  check:'M5 12l4 4L19 6', code:'m8 5-6 7 6 7 M16 5l6 7-6 7 M14 3l-4 18',
@@ -128,7 +129,7 @@ function dnsTable() {
 }
 function clientTable(clients,compact=false) {
  if (!clients.length) return empty('No clients to display','Create an account, assign inbounds, and set a traffic allowance and expiry date.','new-client','Create client','clients');
- return `<div class="table-wrap"><table><thead><tr><th>Client</th><th>Status</th><th>Usage / allowance</th><th>Expires</th>${compact?'':'<th>Inbounds</th>'}<th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr><td><div class="name-cell"><span class="client-avatar">${e(c.name.slice(0,2).toUpperCase())}</span><div><b>${e(c.name)}</b><small>${e(c.note||c.id.slice(0,8))}</small></div></div></td><td>${badge(...status(c))}</td><td><div class="usage"><small>${e(size(total(c)))} / ${c.quota_bytes?e(size(c.quota_bytes)):'∞'}</small><progress max="100" value="${c.quota_bytes?Math.min(100,total(c)/c.quota_bytes*100):0}" aria-label="Client usage"></progress></div></td><td>${date(c.expires_at)}</td>${compact?'':`<td>${c.inbound_ids.map(id=>badge(state.inbounds.find(i=>i.id===id)?.tag||id,'blue')).join(' ')}</td>`}<td><div class="row-actions">${rowBtn('Details & subscription','client-details','eye',c.id)}${rowBtn('Edit','edit','edit',c.id,'clients')}${rowBtn('Download config','export','download',c.id)}${compact?'':rowBtn('Delete','delete','trash',c.id,'clients')}</div></td></tr>`).join('')}</tbody></table></div>`;
+ return `<div class="table-wrap"><table><thead><tr><th>Client</th><th>Status</th><th>Usage / allowance</th><th>Expires</th>${compact?'':'<th>Inbounds</th>'}<th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr><td><div class="name-cell"><span class="client-avatar">${e(c.name.slice(0,2).toUpperCase())}</span><div><b>${e(c.name)}</b><small>${e(c.note||c.id.slice(0,8))}</small></div></div></td><td>${badge(...status(c))}</td><td><div class="usage"><small>${e(size(total(c)))} / ${c.quota_bytes?e(size(c.quota_bytes)):'∞'}</small><progress max="100" value="${c.quota_bytes?Math.min(100,total(c)/c.quota_bytes*100):0}" aria-label="Client usage"></progress></div></td><td>${date(c.expires_at)}</td>${compact?'':`<td>${c.inbound_ids.map(id=>badge(state.inbounds.find(i=>i.id===id)?.tag||id,'blue')).join(' ')}</td>`}<td><div class="row-actions">${rowBtn('Details & subscription','client-details','eye',c.id)}${rowBtn('Subscription QR code','subscription-qr','qr',c.id)}${rowBtn('Edit','edit','edit',c.id,'clients')}${rowBtn('Download config','export','download',c.id)}${compact?'':rowBtn('Delete','delete','trash',c.id,'clients')}</div></td></tr>`).join('')}</tbody></table></div>`;
 }
 function renderClients() {
  const filtered=state.clients.filter(c=>(c.name+' '+(c.note||'')).toLowerCase().includes(search.toLowerCase())&&(filter==='all'||(filter==='active'?(status(c)[0]==='Active'):(status(c)[0]!=='Active'))));
@@ -194,10 +195,38 @@ function subscriptionURL(client) {
  if(base.pathname==='/') base.pathname=new URL('.',location.href).pathname;
  return base.href.replace(/\/$/,'')+'/sub/'+client.token;
 }
+function subscriptionShare(client) {
+ if (!state.settings.public_url) return `<p class="note">Set the panel's public HTTPS URL in Settings to generate subscription links and QR codes.</p>${btn('Open settings','subscription-settings','settings','sm')}`;
+ const sub=subscriptionURL(client);
+ let qr,qrReady=false;
+ try { qr=`<div class="subscription-qr">${NaraQR.svg(sub)}</div>`;qrReady=true; }
+ catch { qr='<p class="note">This link is too long for a QR code. Copy the subscription link below.</p>'; }
+ return `<div class="subscription-share">${qr}<div class="subscription-access"><p class="note">Scan with a client that supports Sing-box JSON subscriptions.</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
+}
+function subscriptionQR(id) {
+ const client=state.clients.find(c=>c.id===id);
+ openModal('Subscription QR code',e(client.name),`${subscriptionShare(client)}<p class="note">Keep this QR code private. Anyone with it can access this account's subscription.</p>`);
+}
+async function downloadQR(client) {
+ const svg=NaraQR.svg(subscriptionURL(client));
+ const image=new Image();
+ image.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+ await image.decode();
+ const canvas=document.createElement('canvas');
+ canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+ const context=canvas.getContext('2d');
+ if (!context) throw new Error('Could not create the QR image.');
+ context.drawImage(image,0,0);
+ const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+ if (!blob) throw new Error('Could not download the QR image.');
+ const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+ anchor.href=url;anchor.download='nara-subscription-'+client.id.slice(0,8)+'.png';anchor.click();
+ setTimeout(()=>URL.revokeObjectURL(url),3000);
+ toast('Subscription QR code downloaded.');
+}
 function details(id) {
  const c=state.clients.find(x=>x.id===id);const usage=dashboard.totals[c.id]||{};
- const sub=state.settings.public_url?subscriptionURL(c):'';
- openModal(e(c.name),'Account details and connection access',`<div class="detail-stats"><div><small>Total usage</small><b>${e(size(total(c)))}</b></div><div><small>Remaining traffic</small><b>${c.quota_bytes?e(size(Math.max(0,c.quota_bytes-total(c)))):'∞'}</b></div><div><small>Account status</small><b>${badge(...status(c))}</b></div></div>${info('Upload / download',`<span class="mono">${e(size(usage.upload||0))} / ${e(size(usage.download||0))}</span>`)}${info('Expires',date(c.expires_at))}${info('UUID',`<span class="mono">${e(c.uuid)}</span>`)}${info('Inbounds',c.inbound_ids.map(id=>e(state.inbounds.find(i=>i.id===id)?.tag||id)).join(', '))}<br><h3>Sing-box JSON subscription</h3>${sub?`<div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${id}"`)}${btn('Download config','export','download','sm',`data-id="${id}"`)}</div>`:'<p class="note">Set the panel\'s public HTTPS URL in Settings to generate subscription links.</p>'}<p class="note">Exports use the last applied configuration. Keep this subscription link private: it contains account credentials.</p><div class="destructive-zone">${btn('Reset usage','reset-traffic','refresh','sm',`data-id="${id}"`)}${btn('Rotate subscription link','rotate-token','key','sm',`data-id="${id}"`)}</div>`);
+ openModal(e(c.name),'Account details and connection access',`<div class="detail-stats"><div><small>Total usage</small><b>${e(size(total(c)))}</b></div><div><small>Remaining traffic</small><b>${c.quota_bytes?e(size(Math.max(0,c.quota_bytes-total(c)))):'∞'}</b></div><div><small>Account status</small><b>${badge(...status(c))}</b></div></div>${info('Upload / download',`<span class="mono">${e(size(usage.upload||0))} / ${e(size(usage.download||0))}</span>`)}${info('Expires',date(c.expires_at))}${info('UUID',`<span class="mono">${e(c.uuid)}</span>`)}${info('Inbounds',c.inbound_ids.map(id=>e(state.inbounds.find(i=>i.id===id)?.tag||id)).join(', '))}<br><h3>Sing-box JSON subscription</h3>${subscriptionShare(c)}<p class="note">Exports use the last applied configuration. Keep this subscription link private: it contains account credentials.</p><div class="destructive-zone">${btn('Reset usage','reset-traffic','refresh','sm',`data-id="${id}"`)}${btn('Rotate subscription link','rotate-token','key','sm',`data-id="${id}"`)}</div>`);
 }
 function confirmAction(title,text,run,label='Confirm') {openModal(title,'',`<p class="confirm-text">${e(text)}</p>`,run,label);}
 async function handle(action,target) {
@@ -217,6 +246,9 @@ async function handle(action,target) {
  if(action==='check'){await api('check',{});toast('Configuration validated by the core.');return;}
  if(action==='config'){previewConfig=await api('config');openModal('Server config','Preview of saved settings. Contains confidential client credentials.',`<pre class="code">${e(JSON.stringify(previewConfig,null,2))}</pre><p class="note">TLS paths are assigned to a new configuration generation when applied.</p>`);return;}
  if(action==='client-details')return details(id);
+ if(action==='subscription-qr')return subscriptionQR(id);
+ if(action==='download-qr')return downloadQR(state.clients.find(c=>c.id===id));
+ if(action==='subscription-settings'){$('#modal').close();location.hash='settings';return;}
  if(action==='export'){const config=await api('export/'+id);download('nara-'+id.slice(0,8)+'.json',config);toast('Client configuration downloaded.');return;}
  if(action==='download-cert'){const t=state.tls.find(x=>x.id===id);return download(t.server_name+'.crt',t.certificate,'application/x-pem-file');}
  if(action==='copy-sub'){const c=state.clients.find(x=>x.id===id);await navigator.clipboard.writeText(subscriptionURL(c));toast('Subscription link copied.');return;}

@@ -112,6 +112,12 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b'lang="en" dir="ltr"', data)
         self.assertIn("Content-Security-Policy", headers)
+        for asset in ("/vendor/qrcodegen.js", "/subscription-qr.js"):
+            self.assertIn(('src="' + asset.lstrip("/") + '"').encode(), data)
+            status, script, asset_headers = self.request(asset)
+            self.assertEqual(status, 200)
+            self.assertIn("javascript", asset_headers["Content-Type"])
+            self.assertTrue(script)
         self.assertEqual(self.request("/../../nara/store.py")[0], 404)
 
     def test_subscription_headers_and_immediate_revocation(self):
@@ -145,7 +151,7 @@ class WebPathTests(APITests):
         status, _, headers = super().request(self.web_path)
         self.assertEqual(status, 308)
         self.assertEqual(headers["Location"], self.web_path + "/")
-        for asset in ("/app.js", "/style.css", "/favicon.svg"):
+        for asset in ("/app.js", "/style.css", "/favicon.svg", "/vendor/qrcodegen.js", "/subscription-qr.js"):
             self.assertEqual(self.request(asset)[0], 200)
 
     def test_cookie_is_scoped_to_web_path(self):

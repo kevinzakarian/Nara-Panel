@@ -1,6 +1,6 @@
 # Verification — 2026-10-16
 
-Version 0.1.2 was verified locally on macOS using **Python 3.12.14**, Python OpenSSL 3.5.8, the OpenSSL 3.6.4 command-line tool, and a native build of Sing-box 1.14.3 with `with_quic,with_v2ray_api`. Production installation targets Python 3.10+ on Linux. Earlier verification used Python 3.9.6; this regression is now exercised on Python 3.12 itself.
+Version 0.1.3 was verified locally on macOS using **Python 3.12.14**, Python OpenSSL 3.5.8, the OpenSSL 3.6.4 command-line tool, and a native build of Sing-box 1.14.3 with `with_quic,with_v2ray_api`. Production installation targets Python 3.10+ on Linux. Earlier verification used Python 3.9.6; this regression is now exercised on Python 3.12 itself.
 
 **55 automated tests passed without skips on Python 3.12.14** in the complete suite, including the original protocol/accounting tests and additional installation/custom-webPath tests. Coverage includes random mixed-case eight-letter defaults, default port 10000, custom values, re-prompting invalid/reserved/occupied ports, preserving existing entry defaults, path injection rejection, case-sensitive prefix routing, prefixed UI/assets/API/subscriptions, root-route isolation, path-scoped login/logout cookies, and all earlier authentication, configuration, TLS, expiry, quota, persistence, and rollback checks.
 
@@ -17,3 +17,9 @@ The one-line installer supports Debian 12+/Ubuntu 22.04+ on amd64/arm64, retriev
 The actual interactive configuration helper was also run in a controlling terminal with two empty answers: it produced a mixed-case eight-letter webPath, port 10000, and a mode-0600 environment file in an isolated temporary directory.
 
 **Not verified:** executing the full bootstrap or application updater as root on Linux, actual Linux installation/systemd behavior, Docker image build/runtime, and real Linux `/proc` measurements. Docker was unavailable on the development host. No remote server credentials or address were supplied. The deployment files are prepared, but no remote deployment is claimed.
+
+## Subscription QR verification (0.1.3)
+
+The complete Python suite again passed all **55 tests without skips**. Static asset tests verify both locally served QR scripts at the root and under a custom webPath. **7 additional Node.js tests passed**, decoding the actual SVG modules with the independent jsQR decoder. They verify exact URLs for configured/custom paths, an origin-only setting, IPv6 with a port, long URLs, legacy root paths, rotated tokens, missing public URL guidance, and graceful handling of over-capacity links.
+
+Browser checks verified the dedicated client QR action and QR in account details. PNG download succeeded; the downloaded 360 × 360 RGBA PNG was independently decoded and matched the exact demonstration subscription URL. The mobile QR dialog fit a 390 × 844 viewport with a document width of 390 px. The screenshot uses only an isolated demonstration account, example.com and a demonstration token. QR encoding uses a bundled MIT-licensed encoder; no external QR endpoint or CDN is used. Node.js and the independent decoder are development-only requirements. The same Linux deployment limitations above apply.

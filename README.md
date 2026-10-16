@@ -10,7 +10,7 @@ An English web panel for running **Sing-box on your own Linux server**. Inspired
 - **Inbounds:** VLESS, VMess, Trojan, Hysteria2, TUIC, and AnyTLS; TCP, WebSocket, and gRPC where supported; multiple authenticated clients per inbound; enable/disable and TLS assignment.
 - **TLS:** import PEM certificate/key pairs, validate their match and SAN hostname, generate ECDSA self-signed certificates with one action, show expiry, and download the public certificate.
 - **DNS:** UDP, TCP, TLS, HTTPS, and local resolvers; default resolver; hostname bootstrap validation; ordered domain/domain-suffix/domain-keyword/rule-set rules with route/reject actions; inline JSON and remote HTTPS source/SRS rule sets.
-- **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, and private Sing-box JSON subscription URLs with usage headers.
+- **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated subscription QR codes with PNG download.
 - **Operations:** SQLite persistence, admin sign-in, password change, logout, server-side sessions, CSRF checks, sign-in throttling, core validation, managed restarts, attempted rollback after startup failure, and systemd installation.
 
 The interface defaults to **English and left-to-right**. [راهنمای نصب فارسی](INSTALL.fa.md).
@@ -82,9 +82,13 @@ Version **0.1.2** fixes Generate certificate on Python 3.12+ by replacing the re
 3. In **Inbounds**, create an inbound with a unique port and attach the certificate.
 4. In **Clients**, create a client, assign inbounds, and choose allowance/expiry.
 5. Click **Apply changes**. The panel validates with `sing-box check`, starts the core, and verifies the traffic API. A startup failure triggers a rollback attempt.
-6. Download the client JSON or copy its subscription URL from account details. Client JSON exposes a loopback mixed proxy on port 2080 and a selector of assigned outbounds. It can be imported/merged into a Sing-box-compatible client.
+6. In **Clients**, click **Subscription QR code** to scan or download the subscription QR as a PNG. The QR is also shown in account details alongside **Copy link** and **Download config**. Set the public panel HTTPS URL in Settings first. Client JSON exposes a loopback mixed proxy on port 2080 and a selector of assigned outbounds. It can be imported/merged into a Sing-box-compatible client.
 
 Self-signed client exports include the public certificate as a trusted certificate; they never disable TLS verification. Public panel HTTPS and inbound TLS are configured independently.
+
+QR codes contain the private subscription URL, including the account token and configured webPath. Encoding and PNG export happen locally in the browser with a bundled encoder; no external QR service is contacted. Scan them with a client that supports Sing-box JSON subscriptions. Rotating the subscription link produces a new QR code when reopened.
+
+![Subscription QR preview with a demonstration account](screenshots/subscription-qr.png)
 
 ## Accounting and operational limits
 
@@ -92,7 +96,7 @@ Self-signed client exports include the public certificate as a trusted certifica
 - Usage and expiry are checked every **5 seconds**. Crossing a limit rebuilds the running configuration and restarts the whole core, disconnecting all active connections. Enforcement can overshoot within the polling/restart window. Sudden crashes/power loss can lose the most recent uncollected interval; graceful restarts collect first.
 - Saved edits are drafts until **Apply changes**. The active snapshot controls existing accounts and exported configurations. Disabling/deleting an account also prevents subscription downloads immediately; removing existing network access requires applying the edit. Rotating a subscription URL does not invalidate already downloaded credentials.
 - After **three consecutive failed accounting polls**, the panel stops the core. An unexpected exit is reported and requires a manual apply; no automatic crash loop is started inside the panel. A normal panel restart restores the last applied configuration if the core had not been explicitly stopped.
-- No live connected-user count, online status, per-device/IP/concurrency limit, speed limit, periodic quota renewal, QR code, URI/Base64 subscription, ACME automation for inbound certificates, or REALITY/ShadowTLS/advanced transport editor is claimed in this release. Account status means eligible, not currently connected. Shadowsocks inbounds are not included.
+- No live connected-user count, online status, per-device/IP/concurrency limit, speed limit, periodic quota renewal, URI/Base64 subscription, ACME automation for inbound certificates, or REALITY/ShadowTLS/advanced transport editor is claimed in this release. Account status means eligible, not currently connected. Shadowsocks inbounds are not included.
 - Imported certificates are stored and used locally. To renew a certificate, edit its TLS profile and apply. Rule-set downloads are performed by the core; failed core validation/download does not replace the active generation.
 - There is one administrator identity. Private keys, client credentials, subscription tokens, and the database must stay private. Core diagnostics live in the private data directory as `core.log`; the UI does not display raw core errors that might contain credentials.
 - For a consistent manual backup, stop the panel service and back up the entire `/var/lib/nara-panel` directory including the SQLite database. Restore only to a trusted host with the service stopped. Automatic encrypted backups and multi-server management are outside this release.
@@ -112,7 +116,11 @@ Open http://127.0.0.1:10000. To test a custom prefix, add `--web-path /AbCdEfGh`
 .venv/bin/python -m unittest discover -s tests -t . -v
 SING_BOX_TEST_BINARY="$PWD/dist/sing-box" .venv/bin/python -m unittest discover -s tests -t . -v
 node --check web/app.js
+npm ci --ignore-scripts
+npm test
 ```
+
+Node.js/npm are only used for development QR verification; the installed panel needs neither. QR tests decode the rendered QR with an independent decoder and verify custom paths, IPv6/ports, long links, token rotation, and missing public URL behavior.
 
 Integration tests exercise real loopback transfers for all six protocols, self-signed TLS verification, per-user accounting, persistence without double counting, quota enforcement, and rollback after a bind failure. They do not change host routes, firewall, or DNS.
 
