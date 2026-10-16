@@ -55,6 +55,17 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO kv VALUES(?,?)", (key, json.dumps(value)))
 
+    def commit_configuration(self, state, save=False, reset_client=None):
+        """Publish the active model, optional edits, and a usage reset together."""
+        with self.connect() as db:
+            records = [("active", state), ("autostart", True)]
+            if save:
+                records.append(("state", state))
+            for key, value in records:
+                db.execute("INSERT OR REPLACE INTO kv VALUES(?,?)", (key, json.dumps(value)))
+            if reset_client:
+                db.execute("DELETE FROM traffic WHERE id=?", (reset_client,))
+
     def audit(self, message):
         with self.connect() as db:
             db.execute("INSERT INTO audit(at, message) VALUES(?,?)", (time.time(), message))

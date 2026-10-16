@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
-from . import __version__
+from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, require, validate
 from .runtime import Metrics, atomic_write
 from .store import password_hash, password_matches
@@ -191,6 +191,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                     return
                 if path == "/api/session":
                     return self.send(200, {"csrf": session["csrf"], "username": store.get("admin")["username"]})
+                if path == "/api/options":
+                    return self.send(200, options.schema())
                 if path == "/api/state":
                     state = copy.deepcopy(store.get("state"))
                     for profile in state["tls"]:
@@ -210,7 +212,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                     return self.send(200, client_config(state, client, store.totals()))
                 return self.send(404, {"error": "Not found"})
             assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/favicon.svg": "favicon.svg",
-                      "/vendor/qrcodegen.js": "vendor/qrcodegen.js", "/subscription-qr.js": "subscription-qr.js"}
+                      "/vendor/qrcodegen.js": "vendor/qrcodegen.js", "/subscription-qr.js": "subscription-qr.js", "/options.js": "options.js"}
             if path in assets:
                 file = web_dir / assets[path]
                 return self.send(200, file.read_bytes(), mimetypes.guess_type(str(file))[0] or "text/plain")
@@ -275,6 +277,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                 return self.send(200, {"ok": True})
             with runtime.lock:
                 state = store.get("state")
+                reset_client = None
                 if path in ("/api/save", "/api/delete", "/api/self-signed", "/api/settings", "/api/reset-traffic", "/api/rotate-token", "/api/apply", "/api/reorder-rules"):
                     require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
                 if path == "/api/apply":
@@ -292,6 +295,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                 if path == "/api/self-signed":
                     profile = self_signed(data)
                     profile.update(certificate_info(profile))
+                    profile.update({f["key"]: data[f["key"]] for f in options.TLS if f["key"] in data})
                     state["tls"].append(profile)
                 elif path == "/api/settings":
                     state["settings"] = data["settings"]
@@ -311,18 +315,21 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                             row["password"] = existing.get("password") or secrets.token_urlsafe(24)
                             row["token"] = existing.get("token") or secrets.token_urlsafe(32)
                         if collection == "tls":
+                            for f in options.TLS:
+                                if f["key"] not in record:
+                                    row.pop(f["key"], None)
                             row["kind"] = existing.get("kind", "imported")
                             row.update(certificate_info(row))
                         if collection == "dns_servers":
                             if row.get("type") == "local":
                                 for key in ("server", "port", "domain_resolver", "path", "server_name"):
                                     row.pop(key, None)
-                            if row.get("type") != "https":
+                            if row.get("type") not in ("https", "h3"):
                                 row.pop("path", None)
-                            if row.get("type") not in ("https", "tls"):
+                            if row.get("type") not in ("https", "tls", "quic", "h3"):
                                 row.pop("server_name", None)
                         if collection == "rule_sets":
-                            for key in (("url", "format") if row.get("type") == "inline" else ("rules",)):
+                            for key in (("url", "format", "update_interval") if row.get("type") == "inline" else ("rules",)):
                                 row.pop(key, None)
                         if collection == "dns_rules" and row.get("action") == "reject":
                             row.pop("server", None)
@@ -340,17 +347,14 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path=""):
                     if path == "/api/rotate-token":
                         client["token"] = secrets.token_urlsafe(32)
                     else:
-                        if runtime.running:
-                            runtime.collect()
-                        with store.connect() as db:
-                            db.execute("DELETE FROM traffic WHERE id=?", (client["id"],))
+                        reset_client = client["id"]
                 else:
                     return self.send(404, {"error": "Not found"})
                 validate(state)
                 state["revision"] += 1
-                store.set("state", state)
-                store.audit("Settings saved: " + path.split("/")[-1])
-                return self.send(200, {"ok": True, "revision": state["revision"]})
+                result = runtime.apply(state, save=True, reset_client=reset_client)
+                store.audit("Settings saved and applied: " + path.split("/")[-1])
+                return self.send(200, {"ok": True, "revision": state["revision"], **result})
 
     return Handler
 

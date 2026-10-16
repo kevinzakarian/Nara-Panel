@@ -5,6 +5,7 @@ import ipaddress
 import re
 import time
 from urllib.parse import urlsplit
+from . import options
 
 PROTOCOLS = ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls")
 TLS_REQUIRED = ("trojan", "hysteria2", "tuic", "anytls")
@@ -89,19 +90,25 @@ def validate(state):
         ports.add(i["port"])
         require(not i.get("tls_id") or i["tls_id"] in tls_ids, "TLS profile not found")
         require(i["type"] not in TLS_REQUIRED or i.get("tls_id"), "This protocol requires TLS")
-        require(i.get("transport", "tcp") in ("tcp", "ws", "grpc"), "Invalid transport")
+        require(i.get("transport", "tcp") in ("tcp", "ws", "grpc", "http", "httpupgrade", "quic"), "Invalid transport")
         require(i.get("transport", "tcp") == "tcp" or i["type"] in ("vless", "vmess", "trojan"), "Transport is not supported by this protocol")
-        require(len(i.get("path", "/")) <= 256, "Transport path is too long")
+        require(isinstance(i.get("path", "/"), str) and len(i.get("path", "/")) <= 256, "Invalid transport path")
+        options.validate_inbound(i)
+        profile = next((t for t in state["tls"] if t["id"] == i.get("tls_id")), {})
+        if i["type"] in ("hysteria2", "tuic") or i.get("transport") == "quic" or options.get(i, "server_options.flow"):
+            require(profile.get("max_version", "1.3") != "1.2", "QUIC and VLESS Vision require TLS 1.3")
     for t in state["tls"]:
+        options.validate_options({k: t[k] for k in (f["key"] for f in options.TLS) if k in t}, options.TLS, "TLS")
+        require(not (t.get("min_version") and t.get("max_version")) or t["min_version"] <= t["max_version"], "Minimum TLS version exceeds the maximum")
         host(t.get("server_name"))
         require(t.get("kind") in ("self_signed", "imported"), "Invalid TLS profile type")
         require(isinstance(t.get("certificate"), str) and "BEGIN CERTIFICATE" in t["certificate"], "Certificate is required")
         require(isinstance(t.get("private_key"), str) and "PRIVATE KEY" in t["private_key"], "Private key is required")
     for d in state["dns_servers"]:
-        require(d.get("type") in ("udp", "tcp", "tls", "https", "local"), "Invalid DNS resolver type")
+        require(d.get("type") in ("udp", "tcp", "tls", "https", "quic", "h3", "local"), "Invalid DNS resolver type")
         if d["type"] != "local":
             host(d.get("server"))
-            integer(d.get("port", {"udp": 53, "tcp": 53, "tls": 853, "https": 443}[d["type"]]), 1, 65535, "DNS port")
+            integer(d.get("port", {"udp": 53, "tcp": 53, "tls": 853, "https": 443, "quic": 853, "h3": 443}[d["type"]]), 1, 65535, "DNS port")
             try:
                 ipaddress.ip_address(d["server"])
             except ValueError:
@@ -115,7 +122,10 @@ def validate(state):
             seen.add(tag)
             tag = dependencies.get(tag)
     require(state["settings"].get("dns_final") in dns_tags, "A default DNS resolver is required")
+    options.validate_options(state["settings"].get("dns_options", {}), options.DNS, "DNS")
     for r in state["rule_sets"]:
+        if r.get("update_interval"):
+            options.validate_options({"update_interval": r["update_interval"]}, [options.field("update_interval", "Rule set update interval")], "rule set")
         require(r.get("type") in ("inline", "remote"), "Invalid rule set type")
         if r["type"] == "remote":
             u = urlsplit(r.get("url", ""))
@@ -124,7 +134,10 @@ def validate(state):
         else:
             require(isinstance(r.get("rules"), list) and bool(r["rules"]), "Inline rule set requires a nonempty rules array")
     for r in state["dns_rules"]:
-        require(r.get("match") in ("domain", "domain_suffix", "domain_keyword", "rule_set"), "Invalid DNS match type")
+        options.validate_options(r.get("options", {}), options.DNS_RULE, "DNS rule")
+        if r.get("action") == "reject":
+            require(not any(k in r.get("options", {}) for k in ("disable_cache", "rewrite_ttl", "strategy")), "DNS response options require a route action")
+        require(r.get("match") in ("domain", "domain_suffix", "domain_keyword", "domain_regex", "query_type", "rule_set"), "Invalid DNS match type")
         require(isinstance(r.get("values"), list) and bool(r["values"]) and all(isinstance(v, str) and v for v in r["values"]), "Rule values are required")
         require(r.get("action") in ("route", "reject"), "Invalid DNS action")
         if r["action"] == "route":
@@ -155,41 +168,56 @@ def validate(state):
     require(type(state["settings"].get("block_private")) is bool, "Invalid private network setting")
 
 
-def user_entry(c, protocol):
+def user_entry(c, protocol, inbound=None):
     user = {"name": "client-" + c["id"]}
     if protocol in ("vless", "vmess", "tuic"):
         user["uuid"] = c["uuid"]
     if protocol in ("trojan", "hysteria2", "tuic", "anytls"):
         user["password"] = c["password"]
+    settings = (inbound or {}).get("server_options", {})
+    if protocol == "vless" and settings.get("flow"):
+        user["flow"] = settings["flow"]
+    if protocol == "vmess":
+        user["alterId"] = settings.get("alter_id", 0)
     return user
 
 
 def transport(inbound):
     kind = inbound.get("transport", "tcp")
-    if kind == "ws":
-        return {"type": "ws", "path": inbound.get("path", "/")}
+    if kind == "tcp":
+        return None
+    obj = {"type": kind, **copy.deepcopy(inbound.get("transport_options", {}))}
     if kind == "grpc":
-        return {"type": "grpc", "service_name": inbound.get("path", "nara").lstrip("/")}
-    return None
+        obj["service_name"] = inbound.get("path", "nara").lstrip("/")
+    elif kind != "quic":
+        obj["path"] = inbound.get("path", "/")
+    return obj
 
 
-def build_config(state, totals, cert_dir, stats_port=10085):
+def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
     validate(state)
     tls = {t["id"]: t for t in state["tls"]}
-    clients = [c for c in state["clients"] if eligible(c, totals)]
+    clients = [c for c in state["clients"] if check_all or eligible(c, totals)]
     inbounds = []
     for i in state["inbounds"]:
-        users = [user_entry(c, i["type"]) for c in clients if i["id"] in c["inbound_ids"]]
-        if not i.get("enabled", True) or not users:
+        users = [user_entry(c, i["type"], i) for c in clients if i["id"] in c["inbound_ids"]]
+        if check_all and not users:
+            users = [user_entry({"id": "validation", "uuid": "00000000-0000-4000-8000-000000000001", "password": "validation-only-not-a-real-user"}, i["type"], i)]
+        if not check_all and (not i.get("enabled", True) or not users):
             continue  # Never start an unauthenticated listener when users=[] means no auth.
         obj = {"type": i["type"], "tag": i["tag"], "listen": i.get("listen", "::"),
                "listen_port": i["port"], "users": users}
+        obj.update(copy.deepcopy(i.get("listen_options", {})))
+        obj.update(options.server_options(i))
+        if i.get("multiplex", {}).get("enabled"):
+            obj["multiplex"] = {k: v for k, v in i["multiplex"].items() if k in ("enabled", "padding")}
         if i.get("tls_id"):
             t = tls[i["tls_id"]]
             obj["tls"] = {"enabled": True, "server_name": t["server_name"],
                           "certificate_path": str(cert_dir / (t["id"] + ".crt")),
                           "key_path": str(cert_dir / (t["id"] + ".key"))}
-            if i["type"] == "tuic":
+            obj["tls"].update(options.tls_options(t))
+            if i["type"] == "tuic" and not obj["tls"].get("alpn"):
                 obj["tls"]["alpn"] = ["h3"]
         tr = transport(i)
         if tr:
@@ -200,19 +228,22 @@ def build_config(state, totals, cert_dir, stats_port=10085):
         obj = {k: d[k] for k in ("type", "tag", "server", "domain_resolver", "path") if d.get(k)}
         if d.get("port") and d["type"] != "local":
             obj["server_port"] = d["port"]
-        if d.get("server_name") and d["type"] in ("tls", "https"):
-            obj["tls"] = {"enabled": True, "server_name": d["server_name"]}
+        if d["type"] in ("tls", "https", "quic", "h3"):
+            obj["tls"] = {"enabled": True}
+            if d.get("server_name"):
+                obj["tls"]["server_name"] = d["server_name"]
         servers.append(obj)
     rules = []
     for r in state["dns_rules"]:
         obj = {r["match"]: r["values"], "action": r["action"]}
         if r["action"] == "route":
             obj["server"] = r["server"]
+        obj.update(copy.deepcopy(r.get("options", {})))
         rules.append(obj)
-    sets = [{k: copy.deepcopy(v) for k, v in r.items() if k in ("type", "tag", "url", "format", "rules")}
+    sets = [{k: copy.deepcopy(v) for k, v in r.items() if k in ("type", "tag", "url", "format", "rules", "update_interval")}
             for r in state["rule_sets"]]
     return {"log": {"level": "warn", "timestamp": True}, "dns": {"servers": servers,
-            "rules": rules, "final": state["settings"]["dns_final"]}, "inbounds": inbounds,
+            "rules": rules, "final": state["settings"]["dns_final"], **state["settings"].get("dns_options", {})}, "inbounds": inbounds,
             "outbounds": [{"type": "direct", "tag": "direct"}],
             "route": {"rules": ([{"ip_is_private": True, "action": "reject"}] if state["settings"]["block_private"] else []),
                       "rule_set": sets, "final": "direct", "default_domain_resolver": state["settings"]["dns_final"]},
@@ -230,15 +261,19 @@ def client_config(state, c, totals):
         if i["id"] not in c["inbound_ids"] or not i.get("enabled", True):
             continue
         obj = {"type": i["type"], "tag": i["tag"], "server": address, "server_port": i.get("public_port") or i["port"]}
-        obj.update({k: v for k, v in user_entry(c, i["type"]).items() if k != "name"})
+        obj.update({k: v for k, v in user_entry(c, i["type"]).items() if k not in ("name", "alterId")})
+        obj.update(options.client_options(i))
+        if i.get("multiplex", {}).get("enabled"):
+            obj["multiplex"] = copy.deepcopy(i["multiplex"])
         if i["type"] == "vmess":
-            obj["security"] = "auto"
+            obj.setdefault("security", "auto")
         if i.get("tls_id"):
             t = tls[i["tls_id"]]
             obj["tls"] = {"enabled": True, "server_name": t["server_name"]}
-            if t["kind"] == "self_signed":
+            obj["tls"].update(options.tls_options(t, client=True))
+            if t["kind"] == "self_signed" and not t.get("insecure"):
                 obj["tls"]["certificate"] = [t["certificate"]]
-            if i["type"] == "tuic":
+            if i["type"] == "tuic" and not obj["tls"].get("alpn"):
                 obj["tls"]["alpn"] = ["h3"]
         tr = transport(i)
         if tr:

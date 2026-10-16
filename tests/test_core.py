@@ -101,6 +101,63 @@ class CoreTests(unittest.TestCase):
                 self.assertGreater(self.store.totals()["user1"]["upload"], 0)
                 self.runtime.stop()
 
+    def test_protocol_specific_settings_transfer_and_account(self):
+        cases = [
+            ("vless", {"flow": "xtls-rprx-vision"}, {}, {}),
+            ("vmess", {"alter_id": 0}, {"security": "chacha20-poly1305", "global_padding": True, "authenticated_length": True}, {"enabled": True, "padding": True, "protocol": "h2mux", "max_streams": 8}),
+            ("trojan", {"fallback": {"server": "127.0.0.1", "server_port": self.target.server_port}}, {}, {}),
+            ("hysteria2", {"obfs": {"type": "salamander", "password": "local-obfs-test"}, "up_mbps": 30, "down_mbps": 50, "masquerade": {"type": "string", "status_code": 404, "content": "Not found"}}, {}, {}),
+            ("hysteria2", {"up_mbps": 30, "down_mbps": 50, "ignore_client_bandwidth": True}, {}, {}),
+            ("hysteria2", {"obfs": {"type": "gecko", "password": "local-gecko-test", "min_packet_size": 512, "max_packet_size": 1200}, "bbr_profile": "standard", "idle_timeout": "30s", "stream_receive_window": "8 MB", "connection_receive_window": "20 MB"}, {}, {}),
+            ("tuic", {"congestion_control": "bbr", "auth_timeout": "5s", "heartbeat": "1s"}, {"udp_relay_mode": "quic"}, {}),
+            ("anytls", {"padding_scheme": ["stop=3", "0=30-30", "1=100-400", "2=400-500"]}, {"idle_session_check_interval": "5s", "idle_session_timeout": "10s", "min_idle_session": 1}, {})
+        ]
+        for protocol, server, client, multiplex in cases:
+            with self.subTest(protocol=protocol, options=server):
+                state = example_state(protocol, self.profile)
+                state["settings"]["block_private"] = False
+                state["inbounds"][0].update(server_options=server, client_options=client, multiplex=multiplex)
+                self.runtime.apply(state)
+                before = self.store.totals().get("user1", {}).get("download", 0)
+                self.transfer(state)
+                self.assertGreater(self.store.totals()["user1"]["download"], before + 1000)
+                self.runtime.stop()
+
+    def test_v2ray_transports_transfer(self):
+        for kind, settings in (("ws", {"max_early_data": 2048, "early_data_header_name": "Sec-WebSocket-Protocol"}),
+                               ("grpc", {"idle_timeout": "30s", "ping_timeout": "10s"}),
+                               ("http", {"host": ["vpn.example.com"], "method": "POST"}),
+                               ("httpupgrade", {"host": "vpn.example.com"}), ("quic", {})):
+            with self.subTest(transport=kind):
+                state = example_state("vless", self.profile)
+                state["settings"]["block_private"] = False
+                state["inbounds"][0].update(transport=kind, path="/nara-test", transport_options=settings)
+                self.runtime.apply(state)
+                self.transfer(state)
+                self.runtime.stop()
+
+    def test_dns_cache_rules_and_quic_resolvers_validate(self):
+        state = example_state("vless", self.profile)
+        state["settings"]["dns_options"] = {"strategy": "prefer_ipv4", "cache_capacity": 4096, "independent_cache": True, "reverse_mapping": True}
+        state["dns_servers"] += [
+            {"id": "doq", "tag": "doq", "type": "quic", "server": "1.1.1.1", "port": 853, "server_name": "cloudflare-dns.com"},
+            {"id": "h3", "tag": "h3", "type": "h3", "server": "1.1.1.1", "port": 443, "path": "/dns-query", "server_name": "cloudflare-dns.com"}]
+        state["dns_rules"] = [
+            {"id": "r1", "match": "domain_regex", "values": [r"^ads\\."], "action": "reject", "options": {"invert": False}},
+            {"id": "r2", "match": "query_type", "values": ["AAAA"], "action": "route", "server": "bootstrap", "options": {"ip_version": 6, "disable_cache": True, "rewrite_ttl": 60}}]
+        directory, config = self.runtime.prepare(state)
+        self.assertEqual(config["dns"]["cache_capacity"], 4096)
+        self.assertEqual(config["dns"]["rules"][1]["rewrite_ttl"], 60)
+        import shutil
+        shutil.rmtree(directory)
+
+    def test_unassigned_inbound_is_checked_by_core(self):
+        state = example_state("anytls", self.profile)
+        state["clients"] = []
+        state["inbounds"][0].update(enabled=False, server_options={"padding_scheme": ["stop=not-a-number"]})
+        with self.assertRaisesRegex(ValueError, "Sing-box rejected"):
+            self.runtime.prepare(state)
+
     def test_usage_persists_across_restarts_without_double_counting(self):
         state = example_state("vless", self.profile)
         state["settings"]["block_private"] = False

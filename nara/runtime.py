@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 from . import stats
-from .config import build_config, eligible, require, validate
+from .config import build_config, client_config, eligible, require, validate
 
 
 def atomic_write(path, content):
@@ -70,7 +70,7 @@ class Runtime:
         self.stats_error = ""
         self.failures = 0
 
-    def prepare(self, state):
+    def prepare(self, state, totals=None):
         validate(state)
         require(all(i["port"] != self.stats_port for i in state["inbounds"]), "An inbound cannot use the statistics API port")
         require(shutil.which(self.binary), "Sing-box core is not installed or is not in PATH")
@@ -81,16 +81,37 @@ class Runtime:
             for t in state["tls"]:
                 atomic_write(generation / (t["id"] + ".crt"), t["certificate"])
                 atomic_write(generation / (t["id"] + ".key"), t["private_key"])
-            config = build_config(state, self.store.totals(), generation, self.stats_port)
+            usage = self.store.totals() if totals is None else totals
+            # Check inactive and unassigned inbounds too, without opening their ports.
+            checked_config = build_config(state, usage, generation, self.stats_port, check_all=True)
+            self.check_config(checked_config, generation, "inbound / DNS")
+            if state["inbounds"]:
+                probe = copy.deepcopy(state)
+                probe["settings"]["server_address"] = probe["settings"].get("server_address") or "127.0.0.1"
+                for inbound in probe["inbounds"]:
+                    inbound["enabled"] = True
+                user = {"id": "validation", "uuid": "00000000-0000-4000-8000-000000000001",
+                        "password": "validation-only-not-a-real-user", "enabled": True,
+                        "inbound_ids": [i["id"] for i in probe["inbounds"]]}
+                self.check_config(client_config(probe, user, {}), generation, "client export")
+            config = build_config(state, usage, generation, self.stats_port)
             atomic_write(generation / "config.json", json.dumps(config, indent=2))
-            checked = subprocess.run([self.binary, "check", "-c", str(generation / "config.json")],
-                                     capture_output=True, text=True, timeout=30)
-            # Core output can contain credentials; only a generic error reaches the API/log.
-            require(checked.returncode == 0, "Sing-box validation failed; check the version, TLS profiles, and rule sets")
             return generation, config
         except Exception:
             shutil.rmtree(generation, ignore_errors=True)
             raise
+
+    def check_config(self, config, generation, label):
+        path = generation / "check.json"
+        atomic_write(path, json.dumps(config, indent=2))
+        checked = subprocess.run([self.binary, "check", "-c", str(path)],
+                                 capture_output=True, text=True, timeout=30)
+        if checked.returncode:
+            # Diagnostics may contain credentials. Keep them in the private directory.
+            with open(self.store.directory / "core.log", "a", opener=lambda p, f: os.open(p, f, 0o600)) as log:
+                log.write("Validation failed (" + label + "):\n" + checked.stderr[-16000:] + "\n")
+            raise ValueError("Sing-box rejected the " + label + " settings. Previous settings were kept; details are in the private core.log.")
+        path.unlink(missing_ok=True)
 
     def launch(self, generation):
         try:
@@ -136,25 +157,45 @@ class Runtime:
             self.log_file = None
         self.process = None
 
-    def apply(self, state, persist=True):
+    def apply(self, state, persist=True, save=False, reset_client=None):
         with self.lock:
             if self.running:
-                self.collect()  # Abort before changing a working core if accounting is unavailable.
-            generation, config = self.prepare(state)
+                self.collect()  # Keep the working core when accounting is unavailable.
+            def usage():
+                totals = self.store.totals()
+                if reset_client:
+                    totals[reset_client] = {"upload": 0, "download": 0}
+                return totals
+            generation, config = self.prepare(state, usage())
             old = self.generation
             was_running = self.running
+            # Link rotation, notes, public URL, and equivalent edits need no restart.
+            if save and was_running and old and not reset_client:
+                expected = build_config(state, usage(), old, self.stats_port)
+                certificates_match = all((old / (t["id"] + suffix)).exists() and
+                    (old / (t["id"] + suffix)).read_text() == t[key]
+                    for t in state["tls"] for suffix, key in ((".crt", "certificate"), (".key", "private_key")))
+                if certificates_match and expected == json.loads((old / "config.json").read_text()):
+                    try:
+                        self.store.commit_configuration(state, save=True)
+                        self.active = copy.deepcopy(state)
+                    finally:
+                        shutil.rmtree(generation, ignore_errors=True)
+                    self.error = ""
+                    return {"running": True, "inbounds": len(config["inbounds"]), "restarted": False}
             self.stop()
-            # The last collection may have crossed a quota boundary.
-            config = build_config(state, self.store.totals(), generation, self.stats_port)
-            atomic_write(generation / "config.json", json.dumps(config, indent=2))
             try:
+                # Final counters can cross a quota boundary while validation runs.
+                config = build_config(state, usage(), generation, self.stats_port)
+                atomic_write(generation / "config.json", json.dumps(config, indent=2))
                 self.launch(generation)
+                if persist:
+                    self.store.commit_configuration(state, save=save, reset_client=reset_client)
             except Exception as exc:
                 self.stop(collect=False)
                 shutil.rmtree(generation, ignore_errors=True)
                 self.error = str(exc)
                 if was_running and old and self.active:
-                    # Rebuild rollback with current usage/expiry; never reactivate an exhausted user.
                     old_config = build_config(self.active, self.store.totals(), old, self.stats_port)
                     atomic_write(old / "config.json", json.dumps(old_config, indent=2))
                     try:
@@ -162,20 +203,17 @@ class Runtime:
                     except Exception:
                         self.stop(collect=False)
                         self.error += "; rollback also failed"
-                self.store.audit("Configuration apply failed")
+                self.store.audit("Configuration apply failed; previous settings retained")
                 raise ValueError(self.error)
             self.generation = generation
             self.active = copy.deepcopy(state)
-            if persist:
-                self.store.set("active", self.active)
-                self.store.set("autostart", True)
             self.error = ""
             self.failures = 0
             for child in self.run_dir.iterdir():
                 if child != generation and child.is_dir():
                     shutil.rmtree(child, ignore_errors=True)
             self.store.audit("Configuration applied and core started")
-            return {"running": True, "inbounds": len(config["inbounds"])}
+            return {"running": True, "inbounds": len(config["inbounds"]), "restarted": True}
 
     def status(self):
         return {"running": self.running, "version": self.version(), "started": self.started,
@@ -193,7 +231,7 @@ class Runtime:
             with self.lock:
                 if not self.running:
                     if self.process is not None:
-                        self.error = "Core exited unexpectedly; review settings and apply again"
+                        self.error = "Core exited unexpectedly; review settings and start it again"
                         self.store.audit(self.error)
                         self.stop(collect=False)
                     continue

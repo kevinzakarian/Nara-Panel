@@ -42,6 +42,44 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(protocol=protocol), self.assertRaises(ValueError):
                 validate(example_state(protocol))
 
+    def test_protocol_constraints_and_managed_fields_cannot_be_overridden(self):
+        profile = self_signed({"server_name": "127.0.0.1", "days": 1})
+        for protocol, server, client, multiplex in [
+            ("hysteria2", {"obfs": {"type": "salamander"}}, {}, {}),
+            ("hysteria2", {"obfs": {"type": "gecko", "password": "test", "min_packet_size": 1200, "max_packet_size": 512}}, {}, {}),
+            ("hysteria2", {"up_mbps": 10}, {}, {}),
+            ("tuic", {}, {"udp_over_stream": True, "udp_relay_mode": "native"}, {}),
+            ("vless", {"flow": "xtls-rprx-vision"}, {}, {"enabled": True}),
+            ("vmess", {"users": []}, {}, {}),
+            ("anytls", {}, {"password": "override"}, {}),
+        ]:
+            with self.subTest(protocol=protocol, server=server, client=client):
+                state = example_state(protocol, profile)
+                state["inbounds"][0].update(server_options=server, client_options=client, multiplex=multiplex)
+                with self.assertRaises(ValueError):
+                    validate(state)
+        profile["max_version"] = "1.2"
+        state = example_state("vless", profile)
+        state["inbounds"][0]["server_options"] = {"flow": "xtls-rprx-vision"}
+        with self.assertRaisesRegex(ValueError, "1.3"):
+            validate(state)
+
+    def test_insecure_is_an_explicit_client_only_tls_choice(self):
+        profile = self_signed({"server_name": "127.0.0.1", "days": 1})
+        profile.update(insecure=True, disable_sni=True, alpn=["h2"], min_version="1.2", max_version="1.3")
+        state = example_state("trojan", profile)
+        server = build_config(state, {}, Path("/tmp"))["inbounds"][0]["tls"]
+        client = client_config(state, state["clients"][0], {})["outbounds"][1]["tls"]
+        self.assertTrue(client["insecure"])
+        self.assertTrue(client["disable_sni"])
+        self.assertNotIn("insecure", server)
+        self.assertNotIn("disable_sni", server)
+        self.assertNotIn("certificate", client)
+        self.assertEqual(server["alpn"], client["alpn"])
+        profile.update(min_version="1.3", max_version="1.2")
+        with self.assertRaises(ValueError):
+            validate(state)
+
     def test_deleted_references_rejected(self):
         state = example_state()
         state["inbounds"] = []

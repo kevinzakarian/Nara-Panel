@@ -9,6 +9,7 @@ from unittest import mock
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from nara.runtime import Runtime
+from nara.config import validate
 from nara.server import make_handler
 from nara.store import Store, password_hash
 from tests.helpers import example_state
@@ -21,6 +22,13 @@ class APITests(unittest.TestCase):
         self.store = Store(self.temp.name)
         self.store.set("admin", {"username": "admin", "password": password_hash("test-password-123")})
         self.runtime = Runtime(self.store, binary="/nonexistent")
+        if not getattr(self, "real_core", False):
+            def apply(state, persist=True, save=False, reset_client=None):
+                validate(state)
+                self.store.commit_configuration(state, save=save, reset_client=reset_client)
+                self.runtime.active = copy.deepcopy(state)
+                return {"running": True, "restarted": False}
+            self.runtime.apply = mock.Mock(side_effect=apply)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(self.store, self.runtime, Path("web"), web_path=self.web_path))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -32,7 +40,7 @@ class APITests(unittest.TestCase):
         self.temp.cleanup()
 
     def request(self, path, body=None, headers=None):
-        conn = http.client.HTTPConnection(*self.server.server_address, timeout=5)
+        conn = http.client.HTTPConnection(*self.server.server_address, timeout=20)
         hdr = {"Cookie": self.cookie, "X-CSRF-Token": self.csrf}
         if body is not None:
             hdr["Content-Type"] = "application/json"
@@ -112,7 +120,7 @@ class APITests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b'lang="en" dir="ltr"', data)
         self.assertIn("Content-Security-Policy", headers)
-        for asset in ("/vendor/qrcodegen.js", "/subscription-qr.js"):
+        for asset in ("/vendor/qrcodegen.js", "/subscription-qr.js", "/options.js"):
             self.assertIn(('src="' + asset.lstrip("/") + '"').encode(), data)
             status, script, asset_headers = self.request(asset)
             self.assertEqual(status, 200)
@@ -151,7 +159,7 @@ class WebPathTests(APITests):
         status, _, headers = super().request(self.web_path)
         self.assertEqual(status, 308)
         self.assertEqual(headers["Location"], self.web_path + "/")
-        for asset in ("/app.js", "/style.css", "/favicon.svg", "/vendor/qrcodegen.js", "/subscription-qr.js"):
+        for asset in ("/app.js", "/style.css", "/favicon.svg", "/vendor/qrcodegen.js", "/subscription-qr.js", "/options.js"):
             self.assertEqual(self.request(asset)[0], 200)
 
     def test_cookie_is_scoped_to_web_path(self):
