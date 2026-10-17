@@ -416,3 +416,39 @@ traffic, DNS saves, automatic apply and installation credential flows, in
 The pinned compatible core release is reused. Full root apt/systemd installation
 on a production host was not performed; installer rollback, credential flows and
 terminal rendering were tested using isolated layouts/streams.
+
+## Pasted IP resolver addresses and displayed form values (0.5.2)
+
+The supplied private-log excerpt identifies DNS server index 1 and the core
+message `missing domain resolver for domain server address` on NARA 0.5.0. A
+UDP record with `server: 8.8.8.8` and `server_port: 53` passes the core check, API save and activation.
+Adding leading/trailing whitespace or a newline to the IP reproduces exactly that
+core message: the core classifies the untrimmed string as a domain. The original
+submitted payload was not available, so whitespace versus a stale form value or
+another hostname resolver cannot be established for the user's host.
+
+Remote DNS addresses are now trimmed at the API/model boundary and during
+validation/config generation, covering both native and legacy records. This is
+limited to the Server field of UDP/TCP/TLS/HTTPS/QUIC/HTTP3 records; headers,
+credentials, PEM data and other options are preserved. Native DNS field errors
+include the affected tag. A genuine hostname still needs a separate resolver;
+IP-only records do not require one.
+
+The form now synchronizes changed displayed controls before saving and before
+structural changes, covering autofill/input methods that omit an input event.
+Unchanged values retain their original representation, including CRLF data.
+The UI regression changes HTTPS to UDP after a silent address edit, adds port 53,
+and checks the actual save payload is exactly `8.8.8.8`, with no stale TLS/DoH
+options. Tests also cover a silent edit after a normal input event and restoring
+the original value.
+
+All **53 Node.js tests** and **14 targeted Python tests** passed. Real API/core
+regressions save a pasted `8.8.8.8` containing spaces/tabs/CRLF, without a bootstrap,
+in native and legacy modes, and verify normalized saved/active state and a running
+core. Existing hostname validation and rollback checks remain active. Full host
+installation and the user's private configuration were not accessed.
+
+The complete local suite subsequently passed **199 Python tests with no skips**.
+Both native Linux amd64 and arm64 jobs passed **37 tests each** without Go or
+Git using the actual published prebuilt core in
+[run 39008747429](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39008747429).
