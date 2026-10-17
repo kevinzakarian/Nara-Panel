@@ -295,3 +295,8 @@ Existing installations must upgrade once with the command below (or installation
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/update.sh | sudo bash
 ```
+
+
+Version **0.6.7** adds Family Safe presets for AdGuard DNS, Cloudflare, CleanBrowsing and OpenDNS FamilyShield. Provider choices are alphabetical, with **Custom / Manual** last. New resolver forms default to Cloudflare over HTTPS and fill Display name from the provider. Automatic names follow provider changes; custom names and existing resolver configurations are preserved. CleanBrowsing uses its specific HTTPS path and a separate TLS hostname. OpenDNS FamilyShield offers UDP, TCP and HTTPS; no unsupported QUIC option is offered.
+
+Family endpoint references: [Cloudflare Families](https://developers.cloudflare.com/1.1.1.1/setup/), [AdGuard Family Protection](https://adguard-dns.io/kb/general/dns-providers/#family-protection), [CleanBrowsing network requirements](https://cleanbrowsing.org/support/troubleshooting/firewall-dns-requirements), [OpenDNS FamilyShield](https://www.opendns.com/setupguide/) and [Cisco FamilyShield guide](https://www.cisco.com/c/en/us/support/docs/security/umbrella/225803-understand-opendns-familyshield.html). The dedicated FamilyShield HTTPS address was also verified through public DNS and an HTTPS resolver query.

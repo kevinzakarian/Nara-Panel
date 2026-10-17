@@ -225,3 +225,24 @@ test('footer puts only the panel version beside the brand and tagline',()=>{
  const d=new JSDOM(fs.readFileSync('web/index.html','utf8')).window.document;
  const footer=d.querySelector('footer');assert.match(footer.textContent,/NARA v[0-9.]+ · Made for more control/);assert.ok(!footer.textContent.includes('server panel'));assert.equal(footer.querySelectorAll('.panel-version').length,1);
 });
+
+test('new DNS defaults to Cloudflare with sorted providers, Custom last and automatic display names',async()=>{
+ const f=app();try{
+  let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=r});f.w.TestApp.editCoreRecord('dns_servers');const d=f.w.document,provider=d.querySelector('[name=dns_provider]'),name=d.querySelector('[name=display_name]');
+  assert.equal(provider.value,'cloudflare');assert.equal(name.value,'Cloudflare');
+  const labels=[...provider.options].map(x=>x.textContent);assert.equal(labels.pop(),'Custom / Manual');assert.deepEqual(labels,[...labels].sort((a,b)=>a.localeCompare(b,'en')));
+  provider.value='cloudflare-family';provider.dispatchEvent(new f.w.Event('change'));assert.equal(name.value,'Cloudflare (Family Safe)');
+  assert.equal(f.w.TestApp.editorValue().server,'1.1.1.3');await f.w.TestApp.submit();assert.equal(saved.label,'Cloudflare (Family Safe)');
+  name.value='My own name';provider.value='adguard-family';provider.dispatchEvent(new f.w.Event('change'));assert.equal(name.value,'My own name');
+  name.value='';provider.value='cleanbrowsing-family';provider.dispatchEvent(new f.w.Event('change'));assert.equal(name.value,'CleanBrowsing (Family Safe)');
+  const type=d.querySelector('[data-core-variant]');type.value=[...type.options].find(x=>x.textContent==='TLS').value;type.dispatchEvent(new f.w.Event('change',{bubbles:true}));assert.equal(d.querySelector('[name=display_name]').value,'CleanBrowsing (Family Safe)');
+  provider.value='custom';provider.dispatchEvent(new f.w.Event('change'));assert.equal(name.value,'');assert.equal(d.querySelector('[data-core-variant]').options.length,15);
+ }finally{f.close()}
+});
+test('opening an existing resolver preserves its custom endpoint and label',()=>{
+ const f=app();try{
+  f.w.TestApp.editCoreRecord('dns_servers',{id:'stored',label:'Company DNS',config:{type:'udp',tag:'private',server:'192.0.2.53',server_port:5353}});
+  assert.equal(f.w.document.querySelector('[name=dns_provider]').value,'custom');assert.equal(f.w.document.querySelector('[name=display_name]').value,'Company DNS');assert.equal(f.w.TestApp.editorValue().server_port,5353);
+  f.w.TestApp.editCoreRecord('dns_servers',{id:'stored-google',config:{type:'udp',tag:'google',server:'8.8.8.8',server_port:53}});assert.equal(f.w.document.querySelector('[name=dns_provider]').value,'google');assert.equal(f.w.document.querySelector('[name=display_name]').value,'Google Public DNS');
+ }finally{f.close()}
+});

@@ -8,14 +8,18 @@ const DNSPresets=(()=>{
   quad9:{name:'Quad9',server:'9.9.9.9',sni:'dns.quad9.net',types:['udp','tcp','tls','https'],note:'Secure service with malicious-domain blocking.'},
   adguard:{name:'AdGuard DNS',server:'94.140.14.14',sni:'dns.adguard-dns.com',types:['udp','tcp','tls','https','quic'],note:'Default service blocks advertising and tracking domains.'},
   opendns:{name:'OpenDNS',server:'208.67.222.222',sni:'doh.opendns.com',types:['udp','tcp','https'],note:'Standard OpenDNS service; HTTPS uses its dedicated endpoint.'},
+  'adguard-family':{name:'AdGuard DNS (Family Safe)',server:'94.140.14.15',sni:'family.adguard-dns.com',types:['udp','tcp','tls','https','quic'],note:'Family protection blocks ads, trackers and adult content, and enables Safe Search.'},
+  'cleanbrowsing-family':{name:'CleanBrowsing (Family Safe)',server:'185.228.168.168',sni:'family-filter-dns.cleanbrowsing.org',https_sni:'doh.cleanbrowsing.org',path:'/doh/family-filter/',types:['udp','tcp','tls','https'],note:'Family Filter blocks adult content, proxy/VPN domains and mixed-content sites, and enables Safe Search.'},
+  'cloudflare-family':{name:'Cloudflare (Family Safe)',server:'1.1.1.3',sni:'family.cloudflare-dns.com',types:['udp','tcp','tls','https'],note:'1.1.1.1 for Families blocks malware and adult content.'},
+  'opendns-family':{name:'OpenDNS FamilyShield',server:'208.67.222.123',https_server:'146.112.41.3',sni:'doh.familyshield.opendns.com',types:['udp','tcp','https'],note:'FamilyShield uses predefined adult-content filtering. HTTPS uses its dedicated endpoint.'},
   nextdns:{name:'NextDNS',server:'45.90.28.0',sni:'dns.nextdns.io',types:['tls','https','quic'],note:'Uses your personal NextDNS profile. Enter its six-character Profile ID.'}
  };
  function build(provider,type,profileId='',tag=''){
   const p=providers[provider];if(!p||!p.types.includes(type))throw new Error('Choose a supported provider and protocol.');
   const profile=profileId.trim().toLowerCase();
-  const c={type,tag:tag||'dns-'+provider,server:provider==='opendns'&&type==='https'?'146.112.41.2':p.server,server_port:ports[type]};
-  if(['tls','https','quic'].includes(type))c.tls={enabled:true,server_name:provider==='cloudflare'&&type==='tls'?'one.one.one.one':provider==='nextdns'&&type!=='https'&&profile?profile+'.dns.nextdns.io':p.sni};
-  if(type==='https')c.path=provider==='nextdns'?'/'+profile:'/dns-query';
+  const c={type,tag:tag||'dns-'+provider,server:type==='https'?(p.https_server||(provider==='opendns'?'146.112.41.2':p.server)):p.server,server_port:ports[type]};
+  if(['tls','https','quic'].includes(type))c.tls={enabled:true,server_name:provider==='cloudflare'&&type==='tls'?'one.one.one.one':provider==='nextdns'&&type!=='https'&&profile?profile+'.dns.nextdns.io':type==='https'?(p.https_sni||p.sni):p.sni};
+  if(type==='https')c.path=provider==='nextdns'?'/'+profile:(p.path||'/dns-query');
   return c;
  }
  function detect(config){

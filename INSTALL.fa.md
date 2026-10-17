@@ -282,3 +282,8 @@ Display name و Tag کنار هم قرار دارند و Enable this item از �
 ```sh
 curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/update.sh | sudo bash
 ```
+
+
+## Family Safe و نام‌گذاری خودکار DNS — 0.6.7
+
+گزینه‌های خانوادگیِ AdGuard DNS، Cloudflare، CleanBrowsing و OpenDNS FamilyShield اضافه شده‌اند. لیست پرووایدرها الفبایی است و Custom / Manual در انتهای آن قرار دارد. فرم DNS جدید با Cloudflare و HTTPS باز می‌شود و Display name با نام پرووایدر پر می‌شود. نام خودکار با تغییر پرووایدر تغییر می‌کند؛ نام سفارشیِ کاربر حفظ می‌شود. این پیش‌فرض، resolverهای موجود یا Default DNS سرور را عوض نمی‌کند. هر preset فقط پروتکل‌های پشتیبانی‌شدهٔ خودش را نمایش می‌دهد.
