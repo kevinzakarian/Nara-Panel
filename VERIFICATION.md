@@ -452,3 +452,14 @@ The complete local suite subsequently passed **199 Python tests with no skips**.
 Both native Linux amd64 and arm64 jobs passed **37 tests each** without Go or
 Git using the actual published prebuilt core in
 [run 39008747429](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39008747429).
+
+
+## Guided routing workflow (0.6.0) — 2026-10-17
+
+The full local suite passed **202 Python tests without skips** on Python 3.12 with the real native Sing-box 1.14.3 core and Caddy 2.4.6/2.6.2. **72 Node.js tests passed**, including 19 new routing UI tests. The new HTTP integration saves a proxy destination, inline shared set and guided rule payloads; moves a rule down, disables it, changes the final destination and object-form domain resolver, and inspects the actual active core config. Private-network blocking remains first, disabled rules are omitted, and deleting a referenced default destination is rejected without changing the saved/active state. API tests exercise both directions, list boundaries, unknown IDs/directions, stale revisions and custom-webPath asset serving.
+
+UI tests cover match/action/scope generation, list validation, numeric port ranges, regular expressions containing commas, stale hidden-field removal, guided/JSON round trips, full preservation of logical rules/transports/TLS trust fields and advanced shared sets, action-specific ordering warnings, escaped labels, readable specialized condition summaries, group membership, object resolver preservation and revision-checked controls. Anonymous SOCKS does not require credentials or expose unsupported TLS fields. Proxy passwords retain surrounding whitespace.
+
+An isolated loopback preview exercised the actual browser and core: creating a domain block, moving its priority, and creating a port-53 DNS handling rule all saved and applied successfully. Desktop 1440 px and phone 390 × 844 layouts were inspected. The phone document width was 390 px; the rule dialog measured 352 px with 350 px scroll content. The new screenshot contains only demonstration names/domains and an isolated preview account. No production server was accessed or host routing/firewall/DNS changed. The existing schema, records and advanced JSON retain all supported specialized 1.14.3 options; common forms add no migration of existing settings.
+
+Linux amd64/arm64 checks using the existing public prebuilt core are recorded below when complete. Full root installation/systemd and a user's remote server are not claimed by these checks.

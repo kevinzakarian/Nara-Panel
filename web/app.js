@@ -126,7 +126,6 @@ function renderTLS() {
  (state.tls.length?`<div class="cards-grid">${state.tls.map(t=>`<article class="card certificate-card"><div class="cert-icon">${icon('tls')}</div><h3>${e(t.name||t.server_name)}</h3><span class="mono">${e(t.server_name)}</span><div class="cert-details"><span>Certificate type ${badge(t.kind==='self_signed'?'Self-signed':'Imported',t.kind==='self_signed'?'orange':'green')}</span><span>Client verification ${badge(t.insecure?'Allow insecure':'Verified',t.insecure?'orange':'green')}</span><span>Expires <b>${date(t.expires)}</b></span><span>Assigned to <b>${num(state.inbounds.filter(i=>i.tls_id===t.id).length)} Inbound</b></span></div><div class="cert-footer">${badge(t.expires>Date.now()/1000?'Valid':'Expired',t.expires>Date.now()/1000?'green':'red')}<div class="row-actions">${rowBtn('Download certificate','download-cert','download',t.id)}${rowBtn('Edit certificate','edit','edit',t.id,'tls')}${rowBtn('Delete','delete','trash',t.id,'tls')}</div></div></article>`).join('')}</div>`:`<section class="card">${empty('Start with a secure connection','Import your own certificate or generate a self-signed certificate in one click.','self-signed','Generate certificate','tls')}</section>`);
 }
 function renderDNS() {return renderCoreWorkspace('dns',['dns_servers','dns_rules','rule_sets','dns_options'],dnsTab);}
-function renderRouting() {return renderCoreWorkspace('routing',['route_rules','outbounds','rule_sets','route_options'],routingTab);}
 function renderCore() {return renderCoreWorkspace('core',['endpoints','services','certificate_providers','http_clients','network_namespaces','log','ntp','certificate','experimental'],coreTab);}
 function clientTable(clients,compact=false) {
  if (!clients.length) return empty('No clients to display','Create an account, assign inbounds, and set a traffic allowance and expiry date.','new-client','Create client','clients');
@@ -415,6 +414,7 @@ function details(id) {
 function confirmAction(title,text,run,label='Confirm') {openModal(title,'',`<p class="confirm-text">${e(text)}</p>`,run,label);}
 async function handle(action,target) {
  const id=target.dataset.id,collection=target.dataset.collection;
+ if(action.startsWith('route-'))return handleRouting(action,target);
  if(action==='close')return $('#modal').close();
  if(action==='new-inbound')return editInbound();
  if(action==='new-client')return editClient();

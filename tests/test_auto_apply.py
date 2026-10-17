@@ -53,6 +53,49 @@ class AutoApplyTests(unittest.TestCase):
         self.assertEqual(self.runtime.active, state)
         self.assertTrue(self.runtime.running)
 
+    def test_guided_routing_workflow_applies_order_toggle_sets_and_defaults_to_real_core(self):
+        import json
+        state = self.seed()
+        inbound = state['inbounds'][0]['tag']
+        steps = [
+            ('outbounds', {'type':'socks', 'tag':'upstream', 'server':'127.0.0.1', 'server_port':19080}),
+            ('rule_sets', {'type':'inline', 'tag':'domains', 'rules':[{'domain_suffix':['example.org']}]}),
+            ('route_rules', {'rule_set':['domains'], 'inbound':[inbound], 'network':['tcp'], 'action':'route', 'outbound':'upstream'}),
+            ('route_rules', {'port':[53], 'action':'hijack-dns'}),
+            ('route_rules', {'action':'sniff'}),
+            ('route_rules', {'source_ip_cidr':['127.0.0.0/8'], 'port_range':['8000:9000'], 'action':'reject'}),
+        ]
+        for collection, config in steps:
+            result = self.save(state, collection, {'mode':'native', 'config':config})
+            self.assertEqual(result[0], 200, result[1])
+            state = self.store.get('state')
+            self.assertEqual(self.runtime.active, state)
+            self.assertTrue(self.runtime.running)
+        rules = state['route_rules']
+        result = self.request('/api/reorder-rules', {'revision':state['revision'], 'collection':'route_rules',
+                              'id':rules[0]['id'], 'direction':'down'})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        self.assertEqual(state['route_rules'][0]['id'], rules[1]['id'])
+        result = self.save(state, 'route_rules', {**state['route_rules'][1], 'enabled':False})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        result = self.request('/api/core-options', {'revision':state['revision'], 'section':'route',
+                              'options':{'final':'upstream', 'default_domain_resolver':{'server':'bootstrap', 'strategy':'ipv4_only'}}})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        config = json.loads((self.runtime.generation/'config.json').read_text())
+        self.assertEqual(config['route']['rules'][0], {'ip_is_private':True, 'action':'reject'})
+        self.assertEqual(config['route']['rules'][1:], [steps[i][1] for i in (3,4,5)])
+        self.assertEqual(config['route']['final'], 'upstream')
+        self.assertEqual(self.runtime.active, state)
+        self.assertTrue(self.runtime.running)
+        # Deleting the default destination must not disrupt active traffic.
+        result = self.request('/api/delete', {'revision':state['revision'], 'collection':'outbounds', 'id':state['outbounds'][0]['id']})
+        self.assertEqual(result[0], 400, result[1])
+        self.assertEqual(self.store.get('state'), state)
+        self.assertEqual(self.runtime.active, state)
+
     def save(self, state, collection, record):
         return self.request("/api/save", {"revision": state["revision"], "collection": collection, "record": record})
 

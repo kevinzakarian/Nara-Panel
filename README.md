@@ -10,7 +10,7 @@ An independent English web panel for running **Sing-box on your own Linux server
 - **Inbounds:** all 19 Sing-box 1.14.3 types, including Shadowsocks, ShadowTLS, Hysteria, Snell 5/6, Naive, HTTP/SOCKS, TUN, transparent listeners and Cloudflared. Complete versioned forms include nested protocol/TLS/transport/listen options. Existing VLESS, VMess, Trojan, Hysteria2, TUIC and AnyTLS account management remains available. Standalone listeners manage their own credentials. See the [feature review](FEATURE_REVIEW.md).
 - **TLS:** import PEM certificate/key pairs, validate their match and SAN hostname, generate ECDSA self-signed certificates with one action, show expiry, and download the public certificate. Each profile has explicit client **Allow insecure**, SNI suppression, ALPN, TLS versions and handshake timeout.
 - **DNS:** all 15 typed resolvers, complete logical/default rules and actions, races/speculation, predefined replies, optimistic/cache controls and local/remote/inline rule sets.
-- **Routing:** ordered rules, logical groups, all match/action fields, 20 outbound types, interface/domain defaults and shared rule sets.
+- **Routing:** guided traffic rules, readable ordered cards, one-click enable/disable and priority changes, destination groups and shared lists. All specialized 1.14.3 options remain available in advanced JSON editors.
 - **Core features:** five endpoint types, ten service types, certificate providers, HTTP clients, namespaces, logging, NTP, certificate trust and experimental cache/Clash API settings.
 - **Updates:** daily, persisted, read-only checks for panel and stable upstream core releases, shown above a compact version strip in Overview.
 - **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated QR codes in official Sing-box remote-profile and direct JSON URL formats, with PNG download.
@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.6.0** reorganizes Routing around traffic flow: defaults, ordered traffic rules, destinations and shared rule sets. Common rules use flat match/action/scope forms instead of nested option menus. Existing specialized rules open in a lossless advanced JSON editor. Moving rules in either direction and toggling them validates and applies immediately.
+
 Version **0.5.2** removes surrounding whitespace/newlines from DNS addresses before validation, storage and generation. Core forms read current displayed values before saving or changing structure, including browser autofill without an input event. DNS errors identify the affected resolver. A hostname still requires a separate bootstrap; plain IP resolvers do not.
 
 Version **0.5.1** supplies a visible bootstrap resolver for new DNS forms, checks hostname/URL/port input with actionable errors, asks for an administrator username and displays colored access details after successful installation. Password resets preserve the current username unless `--username` is provided.
@@ -160,7 +162,21 @@ In **Inbounds**, use **New inbound** for the existing panel-managed protocols. A
 
 Use **Add option** within any object to add a field, including nested TLS/QUIC settings, arrays and maps. Version/action selectors switch the appropriate schema. The JSON view can load and review an entire record. Private keys are hidden in general state responses and retained when omitted during editing. Save checks references, rejects outbound cycles, validates with the core and applies automatically.
 
-**DNS** contains all resolver types, DNS rules, shared rule sets and global DNS settings. **Routing** contains rules, outbounds and routing defaults. **Core features** contains endpoints, services, certificate providers, HTTP clients, namespaces and the remaining root settings. See the [coverage and requirements table](FEATURE_REVIEW.md) for details.
+**DNS** contains all resolver types, DNS rules, shared rule sets and global DNS settings. **Routing** contains Traffic rules, Destinations and Shared rule sets, with default destination/resolver controls visible above them. **Core features** contains endpoints, services, certificate providers, HTTP clients, namespaces and the remaining root settings. See the [coverage and requirements table](FEATURE_REVIEW.md) for details.
+
+### Routing workflow
+
+1. Check **Default destination**. Unmatched traffic leaves through this destination; **Edit defaults** also selects the domain resolver without replacing specialized route settings.
+2. Under **Destinations**, add an upstream connection if needed. The built-in Direct destination connects from this server. Selector and URLTest groups use existing members; endpoints are managed in Core features.
+3. Choose **Add rule**. Select domains, IPs, ports, a shared list, or all traffic; select a routing/blocking/DNS/detection/resolution action; optionally limit the inbound and network. Lists match any entry, while scope groups are combined with AND. Ports accept comma/newline-separated values and ranges such as `8000-9000`.
+4. Review the actual matches and action on each rule card. Use ↑ / ↓ to change priority, or On / Off to enable/disable. A final catch-all warns when later rules cannot run. Detection and resolution continue to subsequent rules. For domain matches on IP-only requests, place a Detect protocol rule earlier when a hostname can be sniffed.
+5. Review **Private network protection** above the list: its block rule runs before user rules while enabled in Settings. **Everything else** shows the final fallback below the list.
+
+**Shared rule sets** accepts remote lists, local files or inline headless rules; DNS can reuse the same lists. Adding a list alone does not route traffic. Specialized match combinations, logical groups, transports, HTTP clients and other core options remain in **Advanced JSON**; existing advanced records open there without flattening or dropping fields. Invalid changes keep the previous saved and active configuration. These are server-side rules, separate from client-app routing.
+
+![Routing workflow with demonstration rules](screenshots/routing-0.6.0.jpg)
+
+The routing model follows the official [route options](https://sing-box.sagernet.org/configuration/route/), [matching logic](https://sing-box.sagernet.org/configuration/route/rule/) and [rule actions](https://sing-box.sagernet.org/configuration/route/rule_action/); validation uses the bundled 1.14.3 schema and installed core.
 
 The daily update check runs independently of the browser and core, uses fixed public GitHub endpoints, and persists its cache across restarts. Failed checks show “Update check unavailable”; they do not mean the installed version is current.
 

@@ -228,6 +228,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/favicon.svg": "favicon.svg",
                       "/vendor/qrcodegen.js": "vendor/qrcodegen.js", "/subscription-qr.js": "subscription-qr.js", "/options.js": "options.js"}
             assets["/core-editor.js"] = "core-editor.js"
+            assets["/routing.js"] = "routing.js"
             if path in assets:
                 file = web_dir / assets[path]
                 return self.send(200, file.read_bytes(), mimetypes.guess_type(str(file))[0] or "text/plain")
@@ -386,8 +387,11 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     collection = data.get("collection", "dns_rules")
                     require(collection in ("dns_rules", "route_rules", "rule_sets"), "Invalid ordered collection")
                     index = next((n for n, r in enumerate(state[collection]) if r["id"] == data.get("id")), None)
-                    require(index is not None and index > 0, "Rule cannot be moved")
-                    state[collection][index - 1], state[collection][index] = state[collection][index], state[collection][index - 1]
+                    direction = data.get("direction", "up")
+                    require(direction in ("up", "down"), "Invalid rule move direction")
+                    target = (index + (1 if direction == "down" else -1)) if index is not None else -1
+                    require(index is not None and 0 <= target < len(state[collection]), "Rule cannot be moved")
+                    state[collection][target], state[collection][index] = state[collection][index], state[collection][target]
                 elif path in ("/api/reset-traffic", "/api/rotate-token"):
                     client = next((c for c in state["clients"] if c["id"] == data.get("id")), None)
                     require(client is not None, "Client not found")

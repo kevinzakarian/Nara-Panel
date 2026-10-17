@@ -214,6 +214,7 @@ class APITests(unittest.TestCase):
         self.assertIn('snell',data['types']['inbounds'])
         self.assertIn('DNSRuleAction',data['schema']['$defs'])
         self.assertEqual(self.request('/core-editor.js')[0],200)
+        self.assertEqual(self.request('/routing.js')[0],200)
 
     def test_full_dns_save_and_default_resolver_apply_together(self):
         self.login()
@@ -242,6 +243,27 @@ class APITests(unittest.TestCase):
         self.assertEqual(result[0],200,result[1])
         self.assertEqual(self.store.get('state')['route_rules'][0]['id'],ids[1])
         self.assertEqual(self.request('/api/core-options',{'revision':2,'section':'log','options':{'level':'info'}})[0],400)
+
+    def test_ordered_rules_move_both_directions_and_reject_invalid_moves_atomically(self):
+        self.login()
+        for revision, domain in enumerate(['one.example', 'two.example', 'three.example']):
+            result = self.request('/api/save', {'revision':revision, 'collection':'route_rules',
+                'record':{'config':{'domain_suffix':[domain], 'action':'reject'}}})
+            self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        ids = [row['id'] for row in state['route_rules']]
+        result = self.request('/api/reorder-rules', {'revision':3, 'collection':'route_rules', 'id':ids[0], 'direction':'down'})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        self.assertEqual([row['id'] for row in state['route_rules']], [ids[1], ids[0], ids[2]])
+        for record in ({'id':ids[1], 'direction':'up'}, {'id':ids[2], 'direction':'down'},
+                       {'id':'missing', 'direction':'up'}, {'id':ids[0], 'direction':'sideways'}):
+            result = self.request('/api/reorder-rules', {'revision':4, 'collection':'route_rules', **record})
+            self.assertEqual(result[0], 400, result[1])
+            self.assertEqual(self.store.get('state'), state)
+        result = self.request('/api/reorder-rules', {'revision':3, 'collection':'route_rules', 'id':ids[0], 'direction':'down'})
+        self.assertEqual(result[0], 400, result[1])
+        self.assertEqual(self.store.get('state'), state)
 
     def test_native_private_key_survives_redacted_edit(self):
         self.login()
@@ -285,7 +307,7 @@ class WebPathTests(APITests):
         status, _, headers = super().request(self.web_path)
         self.assertEqual(status, 308)
         self.assertEqual(headers["Location"], self.web_path + "/")
-        for asset in ("/app.js", "/style.css", "/favicon.svg", "/vendor/qrcodegen.js", "/subscription-qr.js", "/options.js"):
+        for asset in ("/routing.js", "/app.js", "/style.css", "/favicon.svg", "/vendor/qrcodegen.js", "/subscription-qr.js", "/options.js"):
             self.assertEqual(self.request(asset)[0], 200)
 
     def test_cookie_is_scoped_to_web_path(self):
