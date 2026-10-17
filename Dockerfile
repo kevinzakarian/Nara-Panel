@@ -1,8 +1,10 @@
-FROM golang:1.27.1-bookworm AS core
-RUN apt-get update && apt-get install -y --no-install-recommends python3 \
+FROM python:3.12-slim-bookworm AS core
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY scripts/build-core.sh scripts/build-step.py /
-RUN sh /build-core.sh /sing-box
+COPY scripts/fetch-core.py /fetch-core.py
+COPY core-release.json /core-release.json
+ARG TARGETARCH
+RUN python /fetch-core.py --arch "$TARGETARCH" --output /core
 
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates iproute2 \
@@ -11,9 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY --from=core /sing-box /usr/local/bin/sing-box
-COPY --from=core /libcronet.so /usr/local/bin/libcronet.so
-COPY --from=core /libcronet.LICENSE /usr/local/bin/libcronet.LICENSE
+COPY --from=core /core/sing-box /usr/local/bin/sing-box
+COPY --from=core /core/libcronet.so /usr/local/bin/libcronet.so
+COPY --from=core /core/libcronet.LICENSE /usr/local/bin/libcronet.LICENSE
+COPY --from=core /core/SING-BOX-LICENSE /core/SING-BOX-COPYING /core/build.json /usr/local/share/nara-core/
 COPY nara ./nara
 COPY web ./web
 RUN mkdir /data && chown nara:nara /data

@@ -56,14 +56,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 if [ -f /etc/nara-panel.env ]; then cp /etc/nara-panel.env "$setup_dir/panel.env"; fi
 cd "$source_dir"
-core=${NARA_INSTALL_CORE:-$source_dir/dist/sing-box}
-if [ ! -x "$core" ]; then
-    ui_info "Building the compatible Sing-box core. The existing service keeps running during this build."
-    CGO_ENABLED=0 sh "$source_dir/scripts/build-core.sh" "$core" </dev/null
+if [ -n "${NARA_INSTALL_CORE:-}" ]; then
+    core=$NARA_INSTALL_CORE
+else
+    ui_info "Downloading the prebuilt compatible core. No Go compiler is installed or required."
+    python3 "$source_dir/scripts/fetch-core.py" --output "$setup_dir/core" </dev/null
+    core=$setup_dir/core/sing-box
 fi
+[ -x "$core" ] || { ui_error 'A compatible prebuilt core is required; compilation is not used as a fallback.'; exit 1; }
 "$core" version | grep -q with_v2ray_api || { echo "The core requires with_v2ray_api." >&2; exit 1; }
 "$core" version | grep -q with_quic || { echo "The core requires with_quic." >&2; exit 1; }
-# Build/verify first, then snapshot before changing the installed application.
+# Download/verify first, then snapshot before changing the installed application.
 mkdir "$setup_dir/previous"
 for item in nara web scripts bin .venv requirements.txt; do
     if [ -e "/opt/nara-panel/$item" ]; then cp -R "/opt/nara-panel/$item" "$setup_dir/previous/"; fi
@@ -105,8 +108,12 @@ cp "$source_dir/requirements.txt" /opt/nara-panel/
 install -m 755 "$core" /opt/nara-panel/bin/sing-box
 if [ -f "$(dirname "$core")/libcronet.so" ]; then
     install -m 755 "$(dirname "$core")/libcronet.so" /opt/nara-panel/bin/libcronet.so
-    install -m 644 "$(dirname "$core")/libcronet.LICENSE" /opt/nara-panel/bin/libcronet.LICENSE
 fi
+for notice in libcronet.LICENSE SING-BOX-LICENSE SING-BOX-COPYING build.json; do
+    if [ -f "$(dirname "$core")/$notice" ]; then
+        install -m 644 "$(dirname "$core")/$notice" "/opt/nara-panel/bin/$notice"
+    fi
+done
 install -m 644 "$source_dir/deploy/nara-panel.service" /etc/systemd/system/nara-panel.service
 install -m 644 "$source_dir/deploy/nara-panel-access.path" /etc/systemd/system/nara-panel-access.path
 install -m 644 "$source_dir/deploy/nara-panel-access.service" /etc/systemd/system/nara-panel-access.service

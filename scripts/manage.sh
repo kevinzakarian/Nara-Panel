@@ -26,28 +26,14 @@ latest_source() {
     latest_dir="$manager_work/Nara-Panel-main"
     [[ -f "$latest_dir/scripts/install.sh" && -f "$latest_dir/nara/server.py" && -f "$latest_dir/scripts/manage.sh" ]] || { ui_error 'Invalid source archive.'; return 1; }
 }
-prepare_build() {
-    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv openssl git </dev/null
+prepare_install() {
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv openssl </dev/null
     python3 -c 'import sys; assert sys.version_info >= (3,10), "Python 3.10+ is required"'
-    local arch digest
-    case $(uname -m) in
-        x86_64) arch=amd64; digest=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 ;;
-        aarch64|arm64) arch=arm64; digest=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 ;;
-        *) ui_error 'Automatic builds support amd64 and arm64.'; return 1 ;;
-    esac
-    if [[ ! -x "$manager_work/go/bin/go" ]]; then
-        ui_info 'Downloading the verified, isolated Go toolchain...'
-        curl --proto '=https' --tlsv1.2 -fLsS --retry 3 "https://go.dev/dl/go1.27.2.linux-${arch}.tar.gz" -o "$manager_work/go.tar.gz"
-        printf '%s  %s\n' "$digest" "$manager_work/go.tar.gz" | sha256sum -c -
-        tar -xzf "$manager_work/go.tar.gz" -C "$manager_work"
-    fi
 }
 full_install() {
     latest_source
-    prepare_build
-    # Keep verified dependencies across failed builds/menu retries.
-    install -d -m 700 /var/cache/nara-panel /var/cache/nara-panel/go /var/cache/nara-panel/go-build
-    PATH="$manager_work/go/bin:$PATH" GOPATH=/var/cache/nara-panel/go GOCACHE=/var/cache/nara-panel/go-build NARA_BUILD_LOG=/var/cache/nara-panel/build.log NARA_KEEP_ENTRY=1 NARA_MANAGER_LOCK_HELD=1 sh "$latest_dir/scripts/install.sh" </dev/tty
+    prepare_install
+    NARA_KEEP_ENTRY=1 NARA_MANAGER_LOCK_HELD=1 sh "$latest_dir/scripts/install.sh" </dev/tty
 }
 backup_installed() {
     # Old versions do not yet include the maintenance module.
@@ -113,7 +99,7 @@ show_menu() {
     ui_title 'Server manager'
     if [[ -x "$app_dir/.venv/bin/python" ]]; then manager_python versions || true; else ui_info 'NARA is not installed.'; fi
     if [[ -f /var/run/reboot-required ]]; then ui_warn 'System updates require a reboot. Reboot manually when convenient.'; fi
-    printf '\n  1   New installation\n  2   Upgrade panel only (keep current core)\n  3   Upgrade panel + rebuild bundled compatible core\n  4   Panel HTTPS / Certificate\n  5   Service status and entry URL\n  6   Restart panel service\n  7   Stop panel and core\n  8   Start panel service\n  9   Recent logs\n  10  Create a private backup\n  11  Change administrator password\n  12  Uninstall NARA\n  0   Exit\n'
+    printf '\n  1   New installation\n  2   Upgrade panel only (keep current core)\n  3   Upgrade panel + download compatible core\n  4   Panel HTTPS / Certificate\n  5   Service status and entry URL\n  6   Restart panel service\n  7   Stop panel and core\n  8   Start panel service\n  9   Recent logs\n  10  Create a private backup\n  11  Change administrator password\n  12  Uninstall NARA\n  0   Exit\n'
 }
 manager_main() {
     [[ $(uname -s) == Linux && $(id -u) == 0 ]] || { ui_error 'Run as root on a Linux server.'; return 1; }

@@ -22,7 +22,7 @@ The interface defaults to **English and left-to-right**, with a 16 px body/input
 ## Requirements
 
 - Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, CA certificates and iproute2 for interface discovery. Minimal older Linux installs can fall back to `hostname -I`.
-- Sing-box **1.14.3**, built with the **upstream standard capabilities plus `with_v2ray_api`**. Default official release builds do not include V2Ray API. The supplied build script pins the official source commit and uses its Go module checksums. Building requires Go 1.27.1 or a compatible newer toolchain, Git, and Internet access.
+- Sing-box **1.14.3** with upstream standard capabilities plus `with_v2ray_api`. The installer downloads a prebuilt NARA-compatible core for Linux amd64/arm64. **Go, Git and a compiler are not required on the server.** Default SagerNet binaries omit the accounting capability, so the NARA builds are published separately with upstream notices and source.
 - Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS. The server manager can set up a dedicated HTTPS reverse proxy, or you can use an existing one.
 
 The panel owns its Sing-box child process and configuration. Give it separate ports from any existing installation. The installer leaves host firewall, routes, DNS and other Sing-box services untouched. Native TUN/transparent/network-namespace features can change networking when you explicitly configure them and provide the required capabilities; see [host requirements](FEATURE_REVIEW.md#builds-and-host-requirements).
@@ -39,11 +39,13 @@ For an account with sudo access, replace the last `bash` with `sudo bash`.
 
 The launcher **first refreshes apt package lists and upgrades installed system packages**, keeping existing package configuration files when a decision is required. This can restart system services. It does not run a distribution release upgrade, remove packages automatically or reboot the server; a pending-reboot notice appears in the menu. It then opens the English **NARA server manager**. Package-update errors stop preparation with an error rather than being reported as success.
 
-Choose **1 — New installation** for a new server or to reinstall previously retained data. For an existing installation, choose **2 — Upgrade panel only** (keep the core) or **3 — Upgrade panel + rebuild bundled compatible core**. Option 3 builds the pinned core supported by this panel, rather than replacing it with an untested release. The verified, isolated Go toolchain is downloaded only when a build is needed. Building can take several minutes; the existing service continues running during the build.
+Choose **1 — New installation** for a new server or to reinstall retained data. For an existing installation, choose **2 — Upgrade panel only** (keep its current core) or **3 — Upgrade panel + download compatible core**. Option 3 retrieves the pinned compatible binary; it does not build on the server. The existing service keeps running until download, checksum, architecture and capability checks pass.
 
-Core builds now resolve dependencies before compilation and retry temporary download failures up to three times, with a 15-minute limit per download attempt. The default module proxy uses `https://proxy.golang.org|direct`, so transport/server errors can fall back to upstream sources; this follows [Go's documented fallback behavior](https://go.dev/ref/mod#goproxy-protocol). Existing `GOPROXY` overrides are respected. TLS and checksum verification remain enabled; integrity failures stop immediately. Compilation defaults to one package at a time, two Go scheduler threads and `GOGC=50` to reduce peak memory; this does not guarantee a build on every low-memory server.
+For an older installed `sudo nara` command, use the fresh one-line launcher above or upgrade the panel first; an old manager still contains its old build procedure.
 
-Manager builds retain verified modules and compilation cache in `/var/cache/nara-panel/`; a failed build can reuse these downloads on the next attempt. Full step diagnostics are saved privately to `/var/cache/nara-panel/build.log`, including download errors and a memory hint when a compiler is killed. The `go: downloading ...` line is normal progress; the following error determines the cause. The cache is local, contains no panel accounts and is retained across upgrades/removal. Manual builds use a private `build.log` next to the output binary unless `NARA_BUILD_LOG` is set. `NARA_BUILD_JOBS` can override the default package parallelism.
+The compatible core is built and tested on native **amd64 and arm64 GitHub Actions runners**, then published in [NARA core releases](https://github.com/kevinzakarian/Nara-Panel/releases). Each archive contains the core, matching Cronet library, upstream licenses and build provenance. `core-release.json` pins each archive's SHA-256 in the panel source, so verification does not rely solely on a checksum downloaded alongside the binary. The downloader checks the complete archive, ELF architecture, payload hashes and pinned build metadata before publishing staged files.
+
+Downloads use HTTPS with retries and bounded timeouts. An unavailable artifact, incorrect checksum or unsupported architecture stops installation **without falling back to compilation**. The server never downloads Go or module dependencies. The source build script remains available for maintainers and CI only. Old caches from earlier releases are not needed by this installer.
 
 Every question has a bold cyan **[INPUT]** marker, with the default in brackets. Password prompts explain that typing is hidden. `NO_COLOR` or a plain terminal disables ANSI colors while preserving the markers. A new installation asks for:
 
@@ -65,17 +67,17 @@ In **Settings → Panel & subscription access**, change all four entry values an
 
 ![Independent panel and subscription settings](screenshots/settings-0.4.jpg)
 
-For a manual source installation on other systemd Linux distributions, install Python/venv, Git, a compatible Go toolchain, OpenSSL, CA certificates and iproute2 first, then run:
+For a manual source installation on other systemd Linux distributions on amd64/arm64, install Python/venv, curl, OpenSSL, CA certificates and iproute2 first, then run:
 
 ```sh
 sudo sh scripts/install.sh
 ```
 
-The local installer asks the same entry questions and builds a missing core. You may supply an already compatible binary with `sudo NARA_INSTALL_CORE=/path/to/sing-box sh scripts/install.sh`.
+The local installer asks the same entry questions and downloads the same verified prebuilt core. You may supply an already compatible binary with `sudo NARA_INSTALL_CORE=/path/to/sing-box sh scripts/install.sh`.
 
 ## Installed server manager
 
-After installing or upgrading to 0.4.0, run:
+After installing or upgrading to 0.5.0, run:
 
 ```sh
 sudo nara
@@ -87,7 +89,7 @@ It performs the same initial system-package update, then offers:
 | --- | --- |
 | 1 | New installation / reinstall retained data |
 | 2 | Upgrade panel only, preserving the installed core |
-| 3 | Upgrade panel and rebuild the bundled compatible core |
+| 3 | Upgrade panel and download the pinned compatible core |
 | 4 | Panel HTTPS: automatic domain certificate, self-signed domain/IP certificate, PEM import, certificate status |
 | 5 | Service status, versions and entry URL |
 | 6 / 7 / 8 | Restart / stop / start panel service; stopping also stops its core |
@@ -131,9 +133,11 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.5.0** removes server-side Go/compiler requirements. Core releases are built and tested in GitHub Actions for amd64 and arm64, with checksums pinned in the source. Installation and full upgrades download the prepared core; Docker builds use it too.
+
 Version **0.4.0** adds independent subscription entry points, four-field entry settings, automatic AnyTLS padding defaults, an unselected protocol chooser and a simpler sidebar. Upgrading from earlier versions asks for missing subscription settings. Existing compatible 1.14.3 cores can be retained with manager option 2.
 
-Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, full DNS forms and daily release checks. Existing data is migrated without removing accounts or settings. The app-only updater keeps your current core binary. **For all new build-dependent features, open the one-line manager above and choose option 3**, which rebuilds the complete compatible core and preserves your accounts and entry settings. Docker users should rebuild.
+Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, full DNS forms and daily release checks. Existing data is migrated without removing accounts or settings. The app-only updater keeps your current core binary. **For the complete compatible core, open the one-line manager above and choose option 3**, which downloads it and preserves your accounts and entry settings. Docker users should rebuild.
 
 Version **0.3.1** adds the interactive server manager, highlighted terminal input, system-package preparation, protected backups/removal and panel HTTPS setup. The short app-only `update.sh` command remains available; it does not perform the system-package upgrade or open the menu.
 
@@ -185,6 +189,12 @@ QR codes contain the private subscription URL, including the account token and s
 - Imported certificate profiles are stored and used locally. Renew them by editing their TLS profile, or configure an upstream certificate provider through the full core editor when appropriate. Rule-set downloads are performed by the core; failed core validation/download does not replace the active generation.
 - There is one administrator identity. Private keys, client credentials, subscription tokens, and the database must stay private. Core diagnostics live in the private data directory as `core.log`; the UI does not display raw core errors that might contain credentials.
 - For a consistent manual backup, stop the panel service and back up the entire `/var/lib/nara-panel` directory including the SQLite database. Restore only to a trusted host with the service stopped. Automatic encrypted backups and multi-server management are outside this release.
+
+## Core build and release maintenance
+
+[The core workflow](.github/workflows/core-release.yml) is dispatched manually after reviewing `core-build.json`. It builds the exact pinned upstream commit on two native Linux runners, runs real traffic/accounting and auto-apply integrations, then publishes both archives together under a new core release tag. A published core tag is never overwritten. Review the workflow output, pin both archive digests in `core-release.json`, then publish the panel update. Run [the Go-free verification workflow](.github/workflows/verify-prebuilt.yml) against the pinned public assets before publishing the installer. It downloads and exercises the actual release in minimal Python containers with neither Go nor Git installed. Panel-only changes reuse the existing core release.
+
+For local maintainer builds, `scripts/build-core.sh` needs a compatible Go toolchain, Git and Python. It preserves upstream tags/linker flags, adds accounting support, validates Go module checksums and packages the matching library. This script is not invoked by either server installation path. Source and original upstream notices accompany the binary release; these are NARA compatibility builds, not official SagerNet binary releases.
 
 ## Development and verification
 

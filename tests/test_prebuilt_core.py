@@ -90,3 +90,67 @@ class PrebuiltCoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):core.architecture('i686')
         self.manifest['assets']['linux-amd64']['name']='../escape'
         with self.assertRaises(ValueError):core.artifact(self.manifest,'amd64')
+
+
+class NoCompilerInstallerTests(unittest.TestCase):
+    def test_download_failure_keeps_existing_installation_running_and_never_calls_go(self):
+        import os
+        import subprocess
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'source';fakebin=root/'fakebin'
+            (source/'scripts').mkdir(parents=True);fakebin.mkdir()
+            (source/'scripts/terminal.sh').write_text(Path('scripts/terminal.sh').read_text())
+            app=root/'opt/nara-panel';app.mkdir(parents=True);(app/'keep').write_text('working installation')
+            calls=root/'commands.log'
+            scripts={'uname':'echo Linux','id':'echo 0','systemctl':'echo "$*" >> "$NARA_TEST_CALLS"; exit 1','python3':'case "$1" in -c) exit 0 ;; *) echo download-failed >&2; exit 47 ;; esac','go':'echo GO-MUST-NOT-RUN >> "$NARA_TEST_CALLS"; exit 99','git':'echo GIT-MUST-NOT-RUN >> "$NARA_TEST_CALLS"; exit 99'}
+            for name,body in scripts.items():
+                path=fakebin/name;path.write_text('#!/bin/sh\n'+body+'\n');path.chmod(0o755)
+            script=Path('scripts/install.sh').read_text()
+            for path in ['/opt/nara-panel','/etc/nara-panel.env','/etc/systemd/system','/usr/local/bin/nara','/var/lib/nara-panel','/etc/nara-panel/https']:
+                script=script.replace(path,str(root)+path)
+            target=source/'scripts/install.sh';target.write_text(script)
+            environment={**os.environ,'PATH':str(fakebin)+':'+os.environ['PATH'],'NARA_MANAGER_LOCK_HELD':'1','NARA_TEST_CALLS':str(calls)}
+            environment.pop('NARA_INSTALL_CORE',None)
+            result=subprocess.run(['sh',str(target)],env=environment,capture_output=True,text=True)
+            self.assertEqual(result.returncode,47,result.stdout+result.stderr)
+            self.assertEqual((app/'keep').read_text(),'working installation')
+            log=calls.read_text();self.assertNotIn('stop ',log);self.assertNotIn('MUST-NOT-RUN',log)
+
+    def test_manager_prepares_runtime_dependencies_without_go_or_git(self):
+        import subprocess,sys,shlex
+        result=subprocess.run(['bash','-c','python3() { '+shlex.quote(sys.executable)+' "$@"; }\nsource scripts/manage.sh\napt-get() { printf "APT %s\\n" "$*"; }\nprepare_install'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('python3-venv openssl',result.stdout)
+        self.assertNotIn('golang',result.stdout);self.assertNotIn(' git',result.stdout)
+
+
+class DiagnosticPrivacyTests(unittest.TestCase):
+    def test_ci_diagnostics_contain_only_fixed_categories_and_integer_counts(self):
+        from tests.test_core import diagnostic_categories
+        secret='private-password-value-should-never-be-printed'
+        categories=diagnostic_categories('ERROR DNS connection refused password='+secret+' uuid=private-user-id')
+        self.assertEqual(categories,{'connection refused':1,'dns':1,'error':1})
+        self.assertNotIn(secret,json.dumps(categories))
+        self.assertTrue(all(type(value) is int for value in categories.values()))
+
+
+class CorePackageTests(unittest.TestCase):
+    def test_release_bundle_has_exact_notices_metadata_and_matching_payload_hashes(self):
+        import subprocess
+        spec=importlib.util.spec_from_file_location('package_core',Path(__file__).resolve().parents[1]/'scripts/package-core.py')
+        package=importlib.util.module_from_spec(spec);spec.loader.exec_module(package)
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'deploy/licenses').mkdir(parents=True)
+            config={'version':'1.14.3','upstream_commit':'a'*40,'release_tag':'core-v1.14.3-nara.1'}
+            (root/'core-build.json').write_text(json.dumps(config));(root/'deploy/licenses/GPL-3.0.txt').write_text('GPL text')
+            source=root/'upstream';source.mkdir();(source/'LICENSE').write_text('Original upstream notice')
+            binary=root/'sing-box';binary.write_bytes(b'core payload');(root/'libcronet.so').write_bytes(b'library payload');(root/'libcronet.LICENSE').write_text('Cronet notice')
+            with mock.patch.object(package.subprocess,'check_output',side_effect=['b'*40,'a'*40,'sing-box version 1.14.3\nTags: with_v2ray_api,with_quic\n']):
+                package.package(root,binary,'amd64',root/'release',source)
+            archive=root/'release/nara-sing-box-1.14.3-linux-amd64.tar.gz'
+            with tarfile.open(archive) as bundle:
+                self.assertEqual(set(bundle.getnames()),core.MEMBERS)
+                metadata=json.load(bundle.extractfile('build.json'))
+                self.assertEqual(metadata['files']['sing-box'],hashlib.sha256(b'core payload').hexdigest())
+                self.assertEqual(bundle.extractfile('SING-BOX-LICENSE').read(),b'Original upstream notice')
+            self.assertTrue((archive.parent/(archive.name+'.sha256')).read_text().startswith(core.digest(archive)))

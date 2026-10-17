@@ -331,3 +331,48 @@ its missing-unit messages came from optional units absent on that installation.
 
 Version consistency, source packaging and whitespace checks passed. No new browser
 check was needed because this change affects terminal maintenance only.
+
+
+## Prebuilt core installation (0.5.0)
+
+The full local regression suite passed **181 Python tests without skips**; all
+**49 Node.js tests passed**. The 12 prebuilt-core tests cover pinned archive and
+payload hashes, architecture/provenance checks, unsafe archive entries, missing
+files, fixed HTTPS download targets, packaging notices, and installer failure
+before stopping an existing service. Tests confirm neither Go nor Git is invoked
+by dependency preparation/download failure. Diagnostic output is restricted to
+fixed category labels and integer counts; private logs/configurations are not
+published.
+
+[Native release build 39005303415](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39005303415)
+built the exact upstream 1.14.3 commit on native Ubuntu amd64 and arm64 runners.
+Both ran **24 real-core/auto-apply integration tests successfully**, loaded the
+matching Cronet shared library, and published the archives together in
+[core-v1.14.3-nara.1](https://github.com/kevinzakarian/Nara-Panel/releases/tag/core-v1.14.3-nara.1).
+Both archive SHA-256 values match the published SHA256SUMS and GitHub asset digests.
+The actual installer downloader also downloaded and verified both architectures
+on the development host without executing the Linux ELF files there.
+
+[Go-free verification 39005476018](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39005476018)
+passed on **both architectures** inside `python:3.12-slim-bookworm` containers.
+The jobs explicitly assert that Go and Git are absent, obtain source through
+checkout's archive fallback, download the actual public core release, validate
+its pinned hashes/metadata/ELF, load Cronet, then pass the same **24 integration
+tests** with real proxy connections, traffic accounting and automatic apply.
+
+The Linux checks exposed fixture assumptions: the DoH fixture now serves
+persistent HTTP/1.1 responses, and Hysteria 1 loopback tests use a bandwidth
+appropriate to microsecond RTT because upstream Brutal derives its congestion
+window from bandwidth times RTT. Both plain and obfuscated Hysteria 1 transfers
+pass in the Go-free jobs, alongside Hysteria2 Salamander/Gecko and the other
+covered protocols. These changes affect test fixtures only; generated user
+profiles and upstream core source remain unchanged. Full payload-length checks
+and traffic counters remain required.
+
+Server installation, manager full upgrade and Docker build stages now download
+prepared binaries with no source-build fallback. Failed downloads/integrity
+checks occur before stopping the installed service. The build script/toolchain
+is retained for maintainers and GitHub runners only. Shell syntax, version
+consistency, whitespace and source archive contents were checked. Full apt/systemd
+installation on a production server and a complete Docker image build were not
+performed; native Ubuntu and minimal Debian runtime checks above were executed.
