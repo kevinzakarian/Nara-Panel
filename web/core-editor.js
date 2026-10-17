@@ -38,7 +38,8 @@ const CoreSchema=(()=>{
  function protocolSchema(direction,type){return branches(byName(direction)).find(x=>x.properties?.type?.const===type);}
  function mount(container,raw,initial={},settings={}){
   let value=clone(initial);let sequence=0;const nodes=new Map();
-  function draw(){sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);}
+  const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
+  function draw(){sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);}
   function render(input,v,set,label,root=false,depth=0,scope=settings.scope||''){
    if(depth>20)return '<p class="note">Nesting limit reached. Use the JSON view for this value.</p>';
    const id=String(sequence++);nodes.set(id,{input,value:v,set,label});
@@ -84,27 +85,34 @@ const CoreSchema=(()=>{
    const content=html.join('');
    return !root&&(s.type==='object'||s.properties)?`<details class="schema-object" open><summary>${e(label)}</summary>${content}</details>`:content;
   }
-  container.addEventListener('input',event=>{
-   const input=event.target,id=input.dataset.coreInput,node=nodes.get(id);if(!node)return;
+  function readInput(input){
+   const node=nodes.get(input.dataset.coreInput);if(!node)return;
+   node.display=displayValue(input);
    const s=choose(node.input,node.value);let v=input.type==='checkbox'?input.checked:input.value;
    if(['integer','number'].includes(s.type)){if(v===''){node.set(undefined);return;}v=Number(v);}
    if(s.enum){v=s.enum.find(x=>String(x)===String(v));}
    node.set(v);
-  });
+  }
+  // Autofill and some input methods can update controls without an input event.
+  // Keep untouched values byte-for-byte; synchronize only changed controls.
+  function syncInputs(){for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
+  container.addEventListener('input',event=>readInput(event.target));
   container.addEventListener('change',event=>{
    const el=event.target;
+   syncInputs();
    if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=branches(node.input)[Number(el.value)],old=node.value||{},fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];node.set(fresh);draw();}
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   });
   container.addEventListener('click',event=>{
    const el=event.target.closest('button');if(!el)return;
+   syncInputs();
    if(el.dataset.coreRemove!==undefined){const node=nodes.get(el.dataset.coreRemove),obj=node.value;delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreItemRemove!==undefined){const node=nodes.get(el.dataset.coreItemRemove),array=node.value;array.splice(Number(el.dataset.index),1);node.set(array);draw();}
    if(el.dataset.coreItemAdd!==undefined){const node=nodes.get(el.dataset.coreItemAdd),s=choose(node.input,node.value),array=Array.isArray(node.value)?node.value:[];array.push(seed(s.items||{}));node.set(array);draw();}
    if(el.dataset.coreMapAdd!==undefined){const node=nodes.get(el.dataset.coreMapAdd),key=container.querySelector(`[data-core-map-key="${el.dataset.coreMapAdd}"]`).value.trim();if(!key)return;const obj=node.value||{};Object.defineProperty(obj,key,{value:seed(choose(node.input,obj).additionalProperties===true?{}:choose(node.input,obj).additionalProperties),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   });
   draw();
-  return {value(){for(const input of container.querySelectorAll('[data-core-json]')){try{nodes.get(input.dataset.coreJson).set(JSON.parse(input.value));}catch{throw new Error('Enter valid JSON for '+nodes.get(input.dataset.coreJson).label);}}return clone(value);},set(next){value=clone(next);draw();}};
+  return {value(){syncInputs();for(const input of container.querySelectorAll('[data-core-json]')){try{nodes.get(input.dataset.coreJson).set(JSON.parse(input.value));}catch{throw new Error('Enter valid JSON for '+nodes.get(input.dataset.coreJson).label);}}return clone(value);},set(next){value=clone(next);draw();}};
  }
  return {configure(value){catalog=value},title,byName,protocolSchema,branches,choose,seed,mount};
 })();

@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.5.2** removes surrounding whitespace/newlines from DNS addresses before validation, storage and generation. Core forms read current displayed values before saving or changing structure, including browser autofill without an input event. DNS errors identify the affected resolver. A hostname still requires a separate bootstrap; plain IP resolvers do not.
+
 Version **0.5.1** supplies a visible bootstrap resolver for new DNS forms, checks hostname/URL/port input with actionable errors, asks for an administrator username and displays colored access details after successful installation. Password resets preserve the current username unless `--username` is provided.
 
 Version **0.5.0** removes server-side Go/compiler requirements. Core releases are built and tested in GitHub Actions for amd64 and arm64, with checksums pinned in the source. Installation and full upgrades download the prepared core; Docker builds use it too.

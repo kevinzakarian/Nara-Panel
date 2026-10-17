@@ -10,6 +10,19 @@ from . import options, native
 PROTOCOLS = ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls")
 TLS_REQUIRED = ("trojan", "hysteria2", "tuic", "anytls")
 COLLECTIONS = ("inbounds", "tls", "dns_servers", "dns_rules", "rule_sets", "clients") + native.EXTRA_COLLECTIONS
+REMOTE_DNS_TYPES = ("udp", "tcp", "tls", "https", "quic", "h3")
+
+
+def normalize_dns_record(row):
+    clean = dict(row)
+    config = clean
+    if row.get("mode") == "native":
+        if not isinstance(row.get("config"), dict):
+            return clean
+        config = clean["config"] = dict(row["config"])
+    if config.get("type") in REMOTE_DNS_TYPES and isinstance(config.get("server"), str):
+        config["server"] = config["server"].strip()
+    return clean
 
 
 def initial_state():
@@ -114,25 +127,27 @@ def validate(state):
         require(isinstance(t.get("certificate"), str) and "BEGIN CERTIFICATE" in t["certificate"], "Certificate is required")
         require(isinstance(t.get("private_key"), str) and "PRIVATE KEY" in t["private_key"], "Private key is required")
     for d in state["dns_servers"]:
+        d = normalize_dns_record(d)
         if d.get("mode") == "native":
             native.validate_record("dns_servers", d)
             resolver = d["config"]
-            if resolver.get("type") in ("udp", "tcp", "tls", "https", "quic", "h3"):
+            if resolver.get("type") in REMOTE_DNS_TYPES:
+                prefix = "DNS resolver " + d["tag"] + ": "
                 address = resolver.get("server")
                 try:
                     host(address)
                 except ValueError:
-                    raise ValueError("DNS Server must be an IP address or domain without a scheme, port or path. Use Server Port and Path separately.") from None
+                    raise ValueError(prefix + "Server must be an IP address or domain without a scheme, port or path. Use Server Port and Path separately.") from None
                 if "server_port" in resolver:
-                    integer(resolver["server_port"], 0, 65535, "DNS port")
+                    integer(resolver["server_port"], 0, 65535, "DNS resolver " + d["tag"] + " port")
                 bootstrap = resolver.get("domain_resolver")
                 bootstrap = bootstrap.get("server") if isinstance(bootstrap, dict) else bootstrap
                 if bootstrap:
-                    require(bootstrap in dns_tags and bootstrap != d["tag"], "Choose a separate configured DNS resolver in Domain Resolver (bootstrap).")
+                    require(bootstrap in dns_tags and bootstrap != d["tag"], prefix + "Choose a separate configured DNS resolver in Domain Resolver (bootstrap).")
                 try:
                     ipaddress.ip_address(address)
                 except ValueError:
-                    require(bootstrap or resolver.get("detour"), "A DNS server domain needs a bootstrap resolver. Select Domain Resolver, for example bootstrap, to resolve its address.")
+                    require(bootstrap or resolver.get("detour"), prefix + "A DNS server domain needs a bootstrap resolver. Select Domain Resolver, for example bootstrap, to resolve its address.")
             continue
         require(d.get("type") in ("udp", "tcp", "tls", "https", "quic", "h3", "local"), "Invalid DNS resolver type")
         if d["type"] != "local":
@@ -295,6 +310,7 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
     for d in state["dns_servers"]:
         if not check_all and not d.get("enabled", True):
             continue
+        d = normalize_dns_record(d)
         if d.get("mode") == "native":
             servers.append(native.record(d))
             continue

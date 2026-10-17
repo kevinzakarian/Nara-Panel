@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 from . import __version__, options
-from .config import COLLECTIONS, build_config, client_config, eligible, host, require, validate
+from .config import COLLECTIONS, build_config, client_config, eligible, host, normalize_dns_record, require, validate
 from . import native
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
@@ -363,6 +363,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                                     row.pop(f["key"], None)
                             row["kind"] = existing.get("kind", "imported")
                             row.update(certificate_info(row))
+                        if collection == "dns_servers":
+                            row = normalize_dns_record(row)
                         if collection == "dns_servers" and row.get("mode") != "native":
                             if row.get("type") == "local":
                                 for key in ("server", "port", "domain_resolver", "path", "server_name"):

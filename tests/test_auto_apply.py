@@ -78,6 +78,23 @@ class AutoApplyTests(unittest.TestCase):
         self.assertEqual(self.store.get('state'), state)
         self.assertEqual(self.runtime.active, state)
 
+    def test_google_udp_pasted_address_saves_without_bootstrap_in_native_and_legacy_forms(self):
+        state = self.seed()
+        for mode in ('native', 'legacy'):
+            with self.subTest(mode=mode):
+                tag = 'google-' + mode
+                config = {'type':'udp', 'tag':tag, 'server':' \t8.8.8.8\r\n', 'server_port':53}
+                record = {'mode':'native', 'config':config} if mode == 'native' else {'type':'udp', 'tag':tag, 'server':config['server'], 'port':53}
+                result = self.save(state, 'dns_servers', record)
+                self.assertEqual(result[0], 200, result[1])
+                state = self.store.get('state')
+                row = next(row for row in state['dns_servers'] if row['tag'] == tag)
+                saved = row['config'] if mode == 'native' else row
+                self.assertEqual(saved['server'], '8.8.8.8')
+                self.assertNotIn('domain_resolver', saved)
+                self.assertEqual(self.runtime.active, state)
+                self.assertTrue(self.runtime.running)
+
     def test_saving_client_starts_listener_without_apply_request(self):
         state = self.seed()
         record = {**state["clients"][0], "enabled": False}

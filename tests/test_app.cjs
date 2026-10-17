@@ -10,7 +10,7 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound,editCoreRecord};`);
+ w.eval(fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))}};`);
  w.TestApp.setup(fixture);
  return {w,dom,close(){w.close()}};
 }
@@ -25,6 +25,24 @@ test('new resolver visibly selects an existing bootstrap and retains it for host
   document.querySelector('#core-to-json').click();
   const config=JSON.parse(document.querySelector('#native-json').value);
   assert.equal(config.server,'dns.google');assert.equal(config.domain_resolver,'bootstrap');
+ }finally{f.close()}
+});
+test('saving UDP Google DNS uses the visible pasted IP even without an input event',async()=>{
+ const f=app();try{
+  let saved;
+  f.w.TestApp.saveWith(async(collection,record)=>{saved=JSON.parse(JSON.stringify(record))});
+  f.w.TestApp.editCoreRecord('dns_servers',{}, {type:'https',tag:'google',server:'dns.google',path:'/dns-query',tls:{enabled:true}});
+  const d=f.w.document;
+  const control=label=>[...d.querySelectorAll('#native-fields label')].find(node=>node.firstChild?.textContent===label)?.querySelector('textarea,input,select');
+  control('Server').value=' \t8.8.8.8\n';
+  const variant=d.querySelector('[data-core-variant]');
+  variant.value=[...variant.options].find(option=>option.textContent==='UDP').value;
+  variant.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  const add=d.querySelector('[data-core-add]');add.value='server_port';add.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  control('Server Port').value='53';
+  await f.w.TestApp.submit();
+  assert.deepEqual(saved.config,{type:'udp',tag:'google',server:'8.8.8.8',server_port:53});
+  assert.equal(saved.mode,'native');
  }finally{f.close()}
 });
 test('new inbound requires choosing a protocol before saving',()=>{

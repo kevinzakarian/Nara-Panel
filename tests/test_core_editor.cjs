@@ -96,3 +96,19 @@ test('rule-set variants clearly identify inline, local and remote formats',()=>{
  const f=fixture('RuleSet',{type:'inline',tag:'domains',rules:[]});
  try{assert.deepEqual([...f.host.querySelector('[data-core-variant]').options].map(o=>o.textContent),['Inline','Local','Remote']);}finally{f.finish()}
 });
+
+test('reading an untouched form preserves multiline values rather than normalizing line endings',()=>{
+ const value={type:'hysteria2',tag:'demo',tls:{enabled:true,certificate:['line 1\r\nline 2\r\n']}};
+ const f=fixture('Inbound',value);
+ try{assert.deepEqual(f.value(),value);}finally{f.finish()}
+});
+
+test('silent edits are captured after a normal input event, including restoring the original value',()=>{
+ const f=fixture('DNSServer',{type:'udp',tag:'dns',server:'8.8.8.8'});
+ try{
+  f.input('Server','1.1.1.1');
+  const input=[...f.host.querySelectorAll('label')].find(label=>label.firstChild?.textContent==='Server').querySelector('textarea');
+  input.value='8.8.8.8';
+  assert.equal(f.value().server,'8.8.8.8');
+ }finally{f.finish()}
+});

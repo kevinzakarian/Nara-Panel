@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from nara import native
-from nara.config import build_config, client_config, initial_state, validate
+from nara.config import build_config, client_config, initial_state, normalize_dns_record, validate
 from nara.store import Store
 from tests.helpers import example_state
 
@@ -15,6 +15,22 @@ def row(config, ident='native'):
 
 
 class NativeTests(unittest.TestCase):
+    def test_dns_address_whitespace_is_normalized_without_changing_secret_or_other_fields(self):
+        for mode in ('native', 'legacy'):
+            with self.subTest(mode=mode):
+                config = {'type':'udp', 'tag':'google', 'server':' \n8.8.8.8\t ', 'server_port':53}
+                record = row(config) if mode == 'native' else {'id':'google', 'type':'udp', 'tag':'google', 'server':config['server'], 'port':53}
+                original = copy.deepcopy(record)
+                state = initial_state();state['dns_servers'].append(record)
+                validate(state)
+                self.assertEqual(build_config(state, {}, Path('/tmp'))['dns']['servers'][1]['server'], '8.8.8.8')
+                self.assertEqual(record, original)
+        record = row({'type':'https','tag':'secure','server':' dns.google\n','headers':{'Authorization':' keep spaces '},'tls':{'key':[' private key ']}})
+        clean = normalize_dns_record(record)['config']
+        self.assertEqual(clean['server'], 'dns.google')
+        self.assertEqual(clean['headers']['Authorization'], ' keep spaces ')
+        self.assertEqual(clean['tls']['key'], [' private key '])
+
     def test_remote_dns_domains_require_bootstrap_and_separate_url_fields(self):
         for kind in ('udp', 'tcp', 'tls', 'https', 'quic', 'h3'):
             with self.subTest(type=kind):
