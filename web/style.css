@@ -104,6 +104,27 @@ dialog { width:min(780px,calc(100% - 32px)); }
 .schema-map-add { display:flex; gap:8px; flex-wrap:wrap; }
 .schema-note { margin:12px 16px; }
 .schema-json { display:block; margin:12px 16px; width:calc(100% - 32px); direction:ltr; font:14px/1.6 ui-monospace,monospace; }
+.dns-identity-grid { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:center; padding-top:18px; }
+.dns-display-settings { border-top:1px solid var(--border); padding-top:16px; }
+.dns-display-settings>summary { cursor:pointer; color:#60767e; font-size:14px; font-weight:600; }
+.dns-editor { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+.dns-editor .schema-variant { margin-bottom:0; align-self:start; }
+.dns-editor>.dns-root-fields { display:contents; }
+.dns-editor>.dns-advanced { grid-column:1/-1; margin-top:0; }
+.dns-field-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
+.dns-field { min-width:0; display:flex; flex-direction:column; gap:5px; }
+.dns-wide { grid-column:1/-1; }
+.dns-field>label:not(.check-field) { display:grid; gap:6px; }
+.dns-editor textarea[rows="1"] { min-height:46px; resize:vertical; }
+.dns-editor .schema-object { padding:16px; background:#fafcfb; }
+.dns-editor .schema-object>summary { margin-bottom:16px; }
+.dns-advanced { border-top:1px solid var(--border); margin-top:22px; padding-top:16px; }
+.dns-advanced>summary { cursor:pointer; font-size:14px; font-weight:600; color:#60767e; }
+.dns-advanced[open]>.dns-field-grid { margin-top:18px; }
+.dns-option-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px 18px; margin-top:18px; }
+.dns-option-grid:empty { display:none; }
+.dns-custom { padding-bottom:8px; font-weight:600; }
+@media(max-width:700px) { .dns-editor,.dns-field-grid,.dns-option-grid,.dns-identity-grid { grid-template-columns:minmax(0,1fr); }.dns-editor>.schema-variant { max-width:none; }.dns-editor .schema-object { padding:12px; } }
 #extra-server-options,#extra-client-options { padding:16px; }
 .brand b .panel-version,.login-brand b .panel-version { font:14px/1.4 ui-monospace,monospace; letter-spacing:0; margin-top:6px; }
 @media(max-width:700px) { .version-strip { gap:12px; }.update-banner>small { margin-left:0; }.schema-object,.schema-array { padding:8px; }.schema-property { gap:4px; } }

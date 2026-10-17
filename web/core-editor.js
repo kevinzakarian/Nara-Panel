@@ -38,8 +38,33 @@ const CoreSchema=(()=>{
  function protocolSchema(direction,type){return branches(byName(direction)).find(x=>x.properties?.type?.const===type);}
  function mount(container,raw,initial={},settings={}){
   let value=clone(initial);let sequence=0;const nodes=new Map();
+  const dnsPorts={udp:53,tcp:53,tls:853,quic:853,https:443,h3:443};
+  const guided=settings.layout==='dns';
   const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
-  function draw(){sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);}
+  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
+  function dnsObject(s,obj,set,id,label,root,depth,scope,variant=''){
+   const props=s.properties||{},required=s.required||[],remote=root&&Object.hasOwn(dnsPorts,obj.type),tls=label==='TLS';
+   const basic=(root?['tag',...(remote?['server','server_port','path','domain_resolver']:['interface','endpoint','service','inet4_range','inet6_range','path','predefined']),...(props.tls?['tls']:[])]:tls?['enabled','server_name','insecure']:Object.keys(obj));
+   const pinned=[...new Set([...basic,...required])].filter(key=>Object.hasOwn(props,key)&&!('const'in props[key]));
+   const defaults={tag:'',server:'',server_port:dnsPorts[obj.type],domain_resolver:'',...(remote?{path:'/dns-query',tls:{enabled:true}}:{}),...(tls?{enabled:true,server_name:'',insecure:false}:{})};
+   const essential=new Set(root?['tag',...(remote?['server','server_port']:[]),...(props.tls?['tls']:[])]:tls?['enabled',...required]:required);
+   function field(key,optional=false){
+    const p=props[key]||{},has=Object.hasOwn(obj,key),item=has?obj[key]:Object.hasOwn(defaults,key)?defaults[key]:seed(p);
+    if(!has&&essential.has(key))obj[key]=item;
+    const put=x=>{if(x===undefined||x==='')delete obj[key];else Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)};
+    const help=({tag:'Unique name used by DNS rules and the default resolver.',server:'IP address or hostname, without a URL or port.',server_port:'Destination port on the DNS server.',domain_resolver:'Only needed when Server is a hostname. An IP address works independently.',path:remote?'HTTPS request path, usually /dns-query.':null,server_name:tls?'Certificate name / SNI. Leave blank to use the server address.':null,insecure:tls?'Skip certificate verification only when required by your resolver.':null}[key])||(catalog.help._documents?.[scope]?.[key]||catalog.help[key])?.description?.replace(/[`*_#]/g,'').slice(0,200)||'';
+    let control=render(p,item,put,title(key),false,depth+1,scope);
+    if(essential.has(key)&&['string','integer','number'].includes(choose(p,item).type))control=control.replace('data-core-input=',`required data-core-input=`);
+    if(key==='server_port')control=control.replace('min="0"','min="1"');
+    return `<div class="dns-field ${['tls','predefined'].includes(key)||(!remote&&key==='path')||(key==='domain_resolver'&&typeof item==='object')?'dns-wide':''}" data-dns-field="${e(key)}">${optional?`<label class="check-field dns-custom"><input type="checkbox" checked data-core-toggle="${id}" data-key="${e(key)}"><span>Custom ${e(title(key))}</span></label>`:''}${control}${help?`<small class="field-hint">${e(help)}</small>`:''}</div>`;
+   }
+   const extras=Object.keys(props).filter(key=>!pinned.includes(key)&&!('const'in props[key])&&!settings.exclude?.includes(key));
+   const configured=extras.filter(key=>Object.hasOwn(obj,key));
+   const unknown=Object.keys(obj).filter(key=>!Object.hasOwn(props,key));
+   const advanced=extras.length?`<details class="dns-advanced" data-core-panel="${id}"><summary>${tls?'Advanced TLS settings':'Advanced settings'}${configured.length?` <span class="badge">${configured.length} configured</span>`:''}</summary><div class="dns-field-grid">${configured.map(key=>field(key,true)).join('')}</div><div class="dns-option-grid">${extras.filter(key=>!Object.hasOwn(obj,key)).map(key=>`<label class="check-field"><input type="checkbox" data-core-toggle="${id}" data-key="${e(key)}"><span>${e(title(key))}</span></label>`).join('')}</div></details>`:'';
+   // Unknown future fields stay in the model and can be edited in JSON view.
+   return `<div class="dns-field-grid ${root?'dns-root-fields':''}">${pinned.map(key=>field(key)+(key==='tag'?variant:'')).join('')}</div>${advanced}${unknown.length?'<p class="note">Additional stored fields are preserved. Use JSON view to edit them.</p>':''}`;
+  }
   function render(input,v,set,label,root=false,depth=0,scope=settings.scope||''){
    if(depth>20)return '<p class="note">Nesting limit reached. Use the JSON view for this value.</p>';
    const id=String(sequence++);nodes.set(id,{input,value:v,set,label});
@@ -47,11 +72,17 @@ const CoreSchema=(()=>{
    if(root&&settings.collection){const type=v?.type||s.properties?.type?.const||'';const base={inbounds:'inbound/',outbounds:'outbound/',dns_servers:'dns/server/',dns_rules:'dns/rule',route_rules:'route/rule',rule_sets:'rule-set/index',endpoints:'endpoint/',services:'service/',certificate_providers:'certificate-provider/',http_clients:'http-client/',network_namespaces:'network-namespace/'}[settings.collection];scope=base?.endsWith('/')?base+type:base||scope;}
    if(label==='TLS')scope='shared/tls';
    if(all.length>1){
-    html.push(`<label class="schema-variant">${e(label)} type<select data-core-variant="${id}">${all.map((b,index)=>{const labels=Object.entries(b.properties||{}).filter(([k,p])=>'const'in p).map(([k,p])=>title(String(p.const)));if(!labels.length&&b.properties?.type?.enum?.[0])labels.push(title(b.properties.type.enum[0]));return `<option value="${index}" ${index===Math.max(0,all.findIndex(x=>compatible(x,v)))?'selected':''}>${e(labels.join(' / ')||'Default')}</option>`}).join('')}</select></label>`);
+    html.push(`<label class="schema-variant">${e(guided&&root?'Resolver type':label+' type')}<select data-core-variant="${id}">${all.map((b,index)=>{const labels=Object.entries(b.properties||{}).filter(([k,p])=>'const'in p).map(([k,p])=>title(String(p.const)));if(!labels.length&&b.properties?.type?.enum?.[0])labels.push(title(b.properties.type.enum[0]));return `<option value="${index}" ${index===Math.max(0,all.findIndex(x=>compatible(x,v)))?'selected':''}>${e(labels.join(' / ')||'Default')}</option>`}).join('')}</select></label>`);
    }
    const common=`data-core-input="${id}"`;
    if(s.type==='object'||s.properties){
     const props=s.properties||{},obj=v&&typeof v==='object'&&!Array.isArray(v)?v:{},required=s.required||[];
+    if(guided&&!s.additionalProperties){
+     for(const [key,p] of Object.entries(props))if('const'in p&&!Object.hasOwn(obj,key))obj[key]=p.const;
+     const variant=root&&all.length>1?html.pop():'';
+     html.push(dnsObject(s,obj,set,id,label,root,depth,scope,variant));
+     if(!v||typeof v!=='object'||Array.isArray(v))set(obj);
+    }else{
     const shown=new Set([...Object.keys(obj),...required,...Object.entries(props).filter(([k,p])=>'const'in p).map(([k])=>k)]);
     html.push('<div class="schema-fields">');
     for(const key of shown){
@@ -70,13 +101,14 @@ const CoreSchema=(()=>{
     if(s.additionalProperties)html.push(`<div class="schema-map-add"><input data-core-map-key="${id}" aria-label="New key in ${e(label)}" placeholder="New name"><button type="button" class="btn sm" data-core-map-add="${id}">Add entry</button></div>`);
     html.push('</div>');
     if(!v||typeof v!=='object'||Array.isArray(v))set(obj);
+    }
    }else if(s.type==='array'){
     const array=Array.isArray(v)?v:v===undefined?[]:[v];
     html.push(`<fieldset class="schema-array"><legend>${e(label)}</legend>`);
     array.forEach((item,index)=>html.push(`<div class="schema-array-item">${render(s.items||{},item,x=>{array[index]=x;set(array)},`${label} ${index+1}`,false,depth+1,scope)}<button type="button" class="schema-remove" aria-label="Remove item ${index+1}" data-core-item-remove="${id}" data-index="${index}">×</button></div>`));
     html.push(`<button type="button" class="btn sm" data-core-item-add="${id}">Add ${e(label)} item</button></fieldset>`);
     if(!Array.isArray(v))set(array);
-   }else if(s['x-tag-reference']&&settings.references){const choices=[...new Set([...(settings.references[s['x-tag-reference']]||[]),...(v?[v]:[])])];html.push(`<label>${e(label)}<select ${common}><option value="">Choose…</option>${choices.map(tag=>`<option value="${e(tag)}" ${tag===v?'selected':''}>${e(tag)}</option>`).join('')}</select></label>`);
+   }else if(s['x-tag-reference']&&settings.references){const choices=[...new Set([...(settings.references[s['x-tag-reference']]||[]),...(v?[v]:[])])];html.push(`<label>${e(label)}<select ${common}><option value="">${guided?'None / default':'Choose…'}</option>${choices.map(tag=>`<option value="${e(tag)}" ${tag===v?'selected':''}>${e(tag)}</option>`).join('')}</select></label>`);
    }else if(s.enum){html.push(`<label>${e(label)}<select ${common}>${s.enum.map(x=>`<option value="${e(x)}" ${x===v?'selected':''}>${e(catalog.labels?.[x]||String(x))}</option>`).join('')}</select></label>`);
    }else if(s.type==='boolean')html.push(`<label class="check-field"><input type="checkbox" ${common} ${v?'checked':''}><span>${e(label)}</span></label>`);
    else if(['integer','number'].includes(s.type))html.push(`<label>${e(label)}<input type="number" ${common} value="${e(v??'')}" step="${s.type==='integer'?'1':'any'}" ${s.minimum!==undefined?`min="${s.minimum}"`:''} ${s.maximum!==undefined?`max="${s.maximum}"`:''}></label>`);
@@ -100,7 +132,8 @@ const CoreSchema=(()=>{
   container.addEventListener('change',event=>{
    const el=event.target;
    syncInputs();
-   if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=branches(node.input)[Number(el.value)],old=node.value||{},fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];node.set(fresh);draw();}
+   if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=branches(node.input)[Number(el.value)],old=node.value||{},fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];if(guided&&node.label==='Configuration'&&dnsPorts[fresh.type]&&old.server_port===dnsPorts[old.type])fresh.server_port=dnsPorts[fresh.type];node.set(fresh);draw();}
+   if(el.dataset.coreToggle!==undefined){const node=nodes.get(el.dataset.coreToggle),s=choose(node.input,node.value),obj=node.value||{};if(el.checked)Object.defineProperty(obj,el.dataset.key,{value:seed(s.properties[el.dataset.key]),writable:true,enumerable:true,configurable:true});else delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   });
   container.addEventListener('click',event=>{

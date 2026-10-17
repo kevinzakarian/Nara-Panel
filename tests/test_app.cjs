@@ -23,8 +23,7 @@ test('new IP resolver is independent and hostname resolver can be explicitly sel
   assert.ok(!Object.hasOwn(JSON.parse(document.querySelector('#native-json').value),'domain_resolver'));
   const server=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Server').querySelector('textarea');
   server.value='dns.google';server.dispatchEvent(new f.w.Event('input',{bubbles:true}));
-  const add=document.querySelector('[data-core-add]');
-  add.value='domain_resolver';add.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  assert.equal(document.querySelector('[data-core-add]'),null);
   const resolver=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Domain Resolver').querySelector('select');
   resolver.value='bootstrap';resolver.dispatchEvent(new f.w.Event('input',{bubbles:true}));
   document.querySelector('#core-to-json').click();
@@ -43,11 +42,44 @@ test('saving UDP Google DNS uses the visible pasted IP even without an input eve
   const variant=d.querySelector('[data-core-variant]');
   variant.value=[...variant.options].find(option=>option.textContent==='UDP').value;
   variant.dispatchEvent(new f.w.Event('change',{bubbles:true}));
-  const add=d.querySelector('[data-core-add]');add.value='server_port';add.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  assert.equal(control('Server Port').value,'53');
   control('Server Port').value='53';
   await f.w.TestApp.submit();
   assert.deepEqual(saved.config,{type:'udp',tag:'google',server:'8.8.8.8',server_port:53});
   assert.equal(saved.mode,'native');
+ }finally{f.close()}
+});
+test('DNS port is always visible, essential fields are protected and invalid ports cannot be saved',async()=>{
+ const f=app();try{
+  let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=r});
+  f.w.TestApp.editCoreRecord('dns_servers',{}, {type:'udp',tag:'google',server:'8.8.8.8'});
+  const d=f.w.document,control=key=>d.querySelector(`[data-dns-field="${key}"] [data-core-input]`);
+  for(const key of ['tag','server','server_port']){assert.ok(control(key).required);assert.equal(d.querySelector(`[data-core-remove][data-key="${key}"]`),null);}
+  assert.equal(d.querySelector('[data-core-add]'),null);
+  control('server_port').value='5353';await f.w.TestApp.submit();assert.equal(saved.config.server_port,5353);
+  for(const invalid of ['','0','65536','53.5']){control('server_port').value=invalid;await assert.rejects(f.w.TestApp.submit(),/Server Port/);}
+  control('server_port').value='53';control('server').value=' ';await assert.rejects(f.w.TestApp.submit(),/Server address/);
+ }finally{f.close()}
+});
+test('DNS protocol switching supplies correct ports, preserves a custom port and drops incompatible TLS',()=>{
+ const f=app();try{
+  f.w.TestApp.editCoreRecord('dns_servers',{}, {type:'udp',tag:'test',server:'8.8.8.8'});
+  const d=f.w.document,read=()=>{d.querySelector('#core-to-json').click();return JSON.parse(d.querySelector('#native-json').value)};
+  const change=name=>{const select=d.querySelector('[data-core-variant]');select.value=[...select.options].find(x=>x.textContent===name).value;select.dispatchEvent(new f.w.Event('change',{bubbles:true}));};
+  for(const [name,port] of [['TCP',53],['TLS',853],['QUIC',853],['HTTPS',443],['HTTP/3',443]]){change(name);assert.equal(read().server_port,port);}
+  const port=d.querySelector('[data-dns-field="server_port"] input');port.value='8443';change('TLS');assert.equal(read().server_port,8443);
+  change('UDP');assert.equal(read().server_port,8443);assert.ok(!Object.hasOwn(read(),'tls'));assert.equal(d.querySelector('[data-dns-field="tls"]'),null);
+ }finally{f.close()}
+});
+test('DNS advanced controls preserve TLS trust, resolver objects and custom settings across edits',async()=>{
+ const f=app();try{
+  const config={type:'https',tag:'secure',server:'dns.google',server_port:8443,path:'/custom',domain_resolver:{server:'bootstrap',strategy:'ipv4_only',timeout:'3s'},tls:{enabled:true,server_name:'dns.google',certificate:['DEMO CERT'],client_key:['DEMO KEY'],alpn:['h2']},headers:{Authorization:' preserve spaces '},connect_timeout:'5s'};
+  let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=JSON.parse(JSON.stringify(r.config))});
+  f.w.TestApp.editCoreRecord('dns_servers',{}, config);
+  const d=f.w.document;assert.equal(d.querySelector('[data-core-add]'),null);
+  d.querySelector('[data-dns-field="server_port"] input').value='9443';await f.w.TestApp.submit();assert.deepEqual(saved,{...config,server_port:9443});
+  const toggle=[...d.querySelectorAll('[data-core-toggle]')].find(x=>x.dataset.key==='connect_timeout'&&x.checked);toggle.checked=false;toggle.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  await f.w.TestApp.submit();assert.ok(!Object.hasOwn(saved,'connect_timeout'));assert.deepEqual(saved.tls,config.tls);assert.deepEqual(saved.headers,config.headers);
  }finally{f.close()}
 });
 test('new inbound requires choosing a protocol before saving',()=>{

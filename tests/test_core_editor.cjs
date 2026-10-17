@@ -112,3 +112,25 @@ test('silent edits are captured after a normal input event, including restoring 
   assert.equal(f.value().server,'8.8.8.8');
  }finally{f.finish()}
 });
+test('guided DNS supports every resolver type without deleting data or requiring Add option',()=>{
+ const configs=[
+  {type:'udp',tag:'udp',server:'8.8.8.8',server_port:5353},
+  {type:'tcp',tag:'tcp',server:'8.8.8.8',server_port:5353},
+  ...['tls','quic','https','h3'].map(type=>({type,tag:type,server:'8.8.8.8',server_port:8443,tls:{enabled:true,server_name:'dns.google',certificate_path:'/private/ca.pem'}})),
+  {type:'local',tag:'local',prefer_go:true}, {type:'dhcp',tag:'dhcp',interface:'eth0'},
+  {type:'mdns',tag:'mdns',interface:'eth0'}, {type:'hosts',tag:'hosts',predefined:{'demo.test':['192.0.2.1']}},
+  {type:'fakeip',tag:'fake',inet4_range:'198.18.0.0/15'},
+  ...['openconnect','openvpn','tailscale'].map(type=>({type,tag:type,endpoint:'tunnel',accept_default_resolvers:true})),
+  {type:'resolved',tag:'resolved',service:'resolver',accept_default_resolvers:true}
+ ];
+ for(const config of configs){const f=fixture('DNSServer',config,{layout:'dns',collection:'dns_servers',references:{dns_server:['bootstrap']}});try{assert.deepEqual(f.value(),config);assert.equal(f.host.querySelector('[data-core-add]'),null);assert.equal(f.host.querySelector('[data-core-remove][data-key="tag"]'),null);}finally{f.finish()}}
+});
+test('guided DNS Advanced stays open after enabling an option and optional values can be cleared',()=>{
+ const f=fixture('DNSServer',{type:'udp',tag:'dns',server:'8.8.8.8',server_port:53,domain_resolver:'bootstrap'},{layout:'dns',references:{dns_server:['bootstrap']}});
+ try{
+  const panel=f.host.querySelector('.dns-advanced');panel.open=true;
+  const toggle=f.host.querySelector('[data-core-toggle][data-key="connect_timeout"]');toggle.checked=true;toggle.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  assert.equal(f.host.querySelector('.dns-advanced').open,true);
+  f.input('Connect Timeout','5s');f.input('Domain Resolver','');assert.equal(f.value().connect_timeout,'5s');assert.ok(!Object.hasOwn(f.value(),'domain_resolver'));
+ }finally{f.finish()}
+});

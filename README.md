@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.6.3** reorganizes DNS resolver forms around fixed essential fields. Tag, resolver type, Server and Server Port stay visible, with editable protocol defaults and validation. HTTPS path, hostname resolver and TLS settings appear where applicable. Advanced settings use explicit controls rather than Add option dropdowns; all 15 resolver types, stored TLS trust and custom settings remain supported.
+
 Version **0.6.2** makes IP-address DNS resolvers independent. Unused Domain Resolver references from older forms are removed automatically, including on upgrade, so they do not block deleting an otherwise unused bootstrap resolver. Hostname-based DNS still needs a separate resolver. TLS SNI and certificate verification options are preserved.
 
 Version **0.6.1** adds native app mode/System HTTP Proxy controls to exported profiles and connects client DNS to the panel’s current Default DNS and DNS rules. Refresh existing remote profiles once after upgrading, then reconnect. Future resolver changes use the same profile; server restarts may require a reconnect and cached answers follow their TTL.
