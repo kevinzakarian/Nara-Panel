@@ -1,6 +1,8 @@
 import argparse
 import getpass
+import json
 import os
+import re
 import signal
 import sys
 from .store import Store, password_hash
@@ -21,8 +23,11 @@ def main():
     parser.add_argument("--sub-path", default=os.environ.get("NARA_SUB_PATH", "/subscriptions"))
     parser.add_argument("--stats-port", type=int, default=int(os.environ.get("NARA_STATS_PORT", "10085")))
     parser.add_argument("--binary", default=os.environ.get("NARA_CORE", "sing-box"))
-    parser.add_argument("--username", default="admin")
+    parser.add_argument("--username", help="Administrator username (prompted during initialization)")
+    parser.add_argument("--credentials-file", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.credentials_file and args.command != "init":
+        parser.error("Temporary installation credentials are only available during init.")
     try:
         args.web_path = normalize_web_path(args.web_path)
         args.sub_path = normalize_web_path(args.sub_path)
@@ -40,12 +45,30 @@ def main():
         if store.get("admin") and args.command == "init":
             parser.error("Admin already exists. Use reset-password instead.")
         print("\nNARA / Administrator credentials\nPassword input is hidden; no characters will appear while typing.")
+        previous = store.get("admin") or {}
+        username = args.username
+        if username is None:
+            if args.command == "init":
+                while True:
+                    username = input(input_label("Administrator username [admin]: ")).strip() or "admin"
+                    if re.fullmatch(r"[A-Za-z0-9_.@-]{1,64}", username):
+                        break
+                    print("Username must contain 1–64 letters, numbers, dots, underscores, @ or hyphens.")
+            else:
+                username = previous.get("username", "admin")
+        if (args.command == "init" or args.username is not None) and not re.fullmatch(r"[A-Za-z0-9_.@-]{1,64}", username):
+            parser.error("Username must contain 1–64 letters, numbers, dots, underscores, @ or hyphens.")
         password = getpass.getpass(input_label("Admin password (12+ characters): "))
         if len(password) < 12 or len(password) > 256:
             parser.error("Password must be 12–256 characters.")
         if password != getpass.getpass(input_label("Repeat password: ")):
             parser.error("Passwords do not match.")
-        store.set("admin", {"username": args.username, "password": password_hash(password)})
+        if args.credentials_file:
+            # Only the installer supplies this private, short-lived handoff.
+            # Never send the password through arguments, environment or stdout.
+            with open(args.credentials_file, "x", opener=lambda p, f: os.open(p, f, 0o600)) as output:
+                json.dump({"username": username, "password": password}, output)
+        store.set("admin", {"username": username, "password": password_hash(password)})
         with store.connect() as db:
             db.execute("DELETE FROM sessions")
         print("Admin saved.")

@@ -56,6 +56,28 @@ class AutoApplyTests(unittest.TestCase):
     def save(self, state, collection, record):
         return self.request("/api/save", {"revision": state["revision"], "collection": collection, "record": record})
 
+    def test_new_hostname_dns_resolver_saves_with_bootstrap_and_explains_missing_fields(self):
+        state = self.seed()
+        config = {'type':'https', 'tag':'google', 'server':'dns.google'}
+        result = self.save(state, 'dns_servers', {'mode':'native', 'tag':'google', 'config':config})
+        self.assertEqual(result[0], 400, result[1])
+        self.assertIn('bootstrap resolver', result[1]['error'])
+        self.assertEqual(self.store.get('state'), state)
+        self.assertTrue(self.runtime.running)
+        config['domain_resolver'] = 'bootstrap'
+        result = self.save(state, 'dns_servers', {'mode':'native', 'tag':'google', 'config':config})
+        self.assertEqual(result[0], 200, result[1])
+        state = self.store.get('state')
+        self.assertEqual(self.runtime.active, state)
+        self.assertTrue(self.runtime.running)
+        resolver = next(row for row in state['dns_servers'] if row['tag'] == 'google')
+        config['server'] = 'https://dns.google/dns-query'
+        result = self.save(state, 'dns_servers', {**resolver, 'config':config})
+        self.assertEqual(result[0], 400, result[1])
+        self.assertIn('without a scheme', result[1]['error'])
+        self.assertEqual(self.store.get('state'), state)
+        self.assertEqual(self.runtime.active, state)
+
     def test_saving_client_starts_listener_without_apply_request(self):
         state = self.seed()
         record = {**state["clients"][0], "enabled": False}

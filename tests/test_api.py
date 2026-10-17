@@ -85,6 +85,15 @@ class APITests(unittest.TestCase):
         self.assertEqual(self.request("/api/state")[0], 200)
         self.assertEqual(self.request("/api/stop", {}, {"X-CSRF-Token": "wrong"})[0], 403)
 
+    def test_custom_administrator_username_is_used_for_sign_in_and_session(self):
+        admin = self.store.get('admin')
+        self.store.set('admin', {**admin, 'username':'PanelOwner_42'})
+        self.assertEqual(self.request('/api/login', {'username':'admin', 'password':'test-password-123'})[0], 401)
+        status, data, headers = self.request('/api/login', {'username':'PanelOwner_42', 'password':'test-password-123'})
+        self.assertEqual(status, 200)
+        self.cookie = headers['Set-Cookie'].split(';')[0]
+        self.assertEqual(self.request('/api/session')[1]['username'], 'PanelOwner_42')
+
     def test_cross_origin_login_rejected(self):
         self.assertEqual(self.request("/api/login", {"username": "admin", "password": "test-password-123"}, {"Origin": "https://evil.example"})[0], 400)
 

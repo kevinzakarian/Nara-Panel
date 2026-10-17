@@ -116,6 +116,23 @@ def validate(state):
     for d in state["dns_servers"]:
         if d.get("mode") == "native":
             native.validate_record("dns_servers", d)
+            resolver = d["config"]
+            if resolver.get("type") in ("udp", "tcp", "tls", "https", "quic", "h3"):
+                address = resolver.get("server")
+                try:
+                    host(address)
+                except ValueError:
+                    raise ValueError("DNS Server must be an IP address or domain without a scheme, port or path. Use Server Port and Path separately.") from None
+                if "server_port" in resolver:
+                    integer(resolver["server_port"], 0, 65535, "DNS port")
+                bootstrap = resolver.get("domain_resolver")
+                bootstrap = bootstrap.get("server") if isinstance(bootstrap, dict) else bootstrap
+                if bootstrap:
+                    require(bootstrap in dns_tags and bootstrap != d["tag"], "Choose a separate configured DNS resolver in Domain Resolver (bootstrap).")
+                try:
+                    ipaddress.ip_address(address)
+                except ValueError:
+                    require(bootstrap or resolver.get("detour"), "A DNS server domain needs a bootstrap resolver. Select Domain Resolver, for example bootstrap, to resolve its address.")
             continue
         require(d.get("type") in ("udp", "tcp", "tls", "https", "quic", "h3", "local"), "Invalid DNS resolver type")
         if d["type"] != "local":

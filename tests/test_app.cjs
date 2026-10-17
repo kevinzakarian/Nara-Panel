@@ -10,10 +10,23 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound};`);
+ w.eval(fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound,editCoreRecord};`);
  w.TestApp.setup(fixture);
  return {w,dom,close(){w.close()}};
 }
+test('new resolver visibly selects an existing bootstrap and retains it for hostname input',()=>{
+ const f=app();try{
+  f.w.TestApp.editCoreRecord('dns_servers');
+  const document=f.w.document;
+  assert.ok(document.querySelector('#native-fields').textContent.includes('Domain Resolver'));
+  assert.ok([...document.querySelectorAll('#native-fields select')].some(select=>select.value==='bootstrap'));
+  const server=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Server').querySelector('textarea');
+  server.value='dns.google';server.dispatchEvent(new f.w.Event('input',{bubbles:true}));
+  document.querySelector('#core-to-json').click();
+  const config=JSON.parse(document.querySelector('#native-json').value);
+  assert.equal(config.server,'dns.google');assert.equal(config.domain_resolver,'bootstrap');
+ }finally{f.close()}
+});
 test('new inbound requires choosing a protocol before saving',()=>{
  const f=app();try{
   f.w.TestApp.editInbound();const document=f.w.document,select=document.querySelector('[name=type]');

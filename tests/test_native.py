@@ -15,6 +15,35 @@ def row(config, ident='native'):
 
 
 class NativeTests(unittest.TestCase):
+    def test_remote_dns_domains_require_bootstrap_and_separate_url_fields(self):
+        for kind in ('udp', 'tcp', 'tls', 'https', 'quic', 'h3'):
+            with self.subTest(type=kind):
+                state = initial_state()
+                config = {'type':kind, 'tag':'remote', 'server':'dns.google'}
+                state['dns_servers'].append(row(config))
+                with self.assertRaisesRegex(ValueError, 'bootstrap resolver'):
+                    validate(state)
+                config['domain_resolver'] = {'server':'bootstrap', 'strategy':'prefer_ipv4'}
+                validate(state)
+                config['server'] = 'https://dns.google/dns-query'
+                with self.assertRaisesRegex(ValueError, 'without a scheme'):
+                    validate(state)
+                config['server'] = '8.8.8.8'
+                config.pop('domain_resolver')
+                validate(state)
+
+    def test_dns_bootstrap_cycles_still_fail_and_detoured_domains_are_supported(self):
+        state = initial_state()
+        state['dns_servers'].append(row({'type':'https', 'tag':'remote', 'server':'dns.google', 'domain_resolver':'remote'}))
+        with self.assertRaisesRegex(ValueError, 'separate configured'):
+            validate(state)
+        state['dns_servers'][1]['config']['domain_resolver'] = 'missing'
+        with self.assertRaisesRegex(ValueError, 'separate configured'):
+            validate(state)
+        state['dns_servers'][1]['config'].pop('domain_resolver')
+        state['dns_servers'][1]['config']['detour'] = 'proxy'
+        validate(state)
+
     def test_exact_protocols_and_all_top_level_sections_are_exposed(self):
         expected={'anytls','cloudflared','direct','http','hysteria','hysteria2','mixed','naive','redirect','shadowsocks','shadowtls','snell','socks','tproxy','trojan','tuic','tun','vless','vmess'}
         self.assertEqual(set(native.types('Inbound')), expected)

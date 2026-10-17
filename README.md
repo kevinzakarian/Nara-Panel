@@ -53,9 +53,10 @@ Every question has a bold cyan **[INPUT]** marker, with the default in brackets.
 2. **Panel port** — press **Enter** for **10000**, or enter another available port. Invalid, reserved, and occupied ports are rejected.
 3. **subPath** — a different subscription path. Press **Enter** for another mixed-case random **8-letter path**.
 4. **Subscription port** — press **Enter** for **10001** (10002 if the panel uses 10001). It must differ from panel and statistics ports and saved inbound listeners.
-5. **Administrator password** — choose and confirm at least 12 characters. The username is `admin`.
+5. **Administrator username** — choose 1–64 letters, numbers, dots, underscores, `@` or hyphens. Press Enter for `admin`.
+6. **Administrator password** — choose and confirm at least 12 characters.
 
-The panel is then reachable at `http://YOUR_SERVER_IP:PANEL_PORT/webPath/`; profiles use `http://YOUR_SERVER_IP:SUB_PORT/subPath/TOKEN`. Both address bases are printed after readiness checks. Allow both selected TCP ports in your firewall. No administrator password is bundled. The installer does not change firewall rules.
+The panel is then reachable at `http://YOUR_SERVER_IP:PANEL_PORT/webPath/`; profiles use `http://YOUR_SERVER_IP:SUB_PORT/subPath/TOKEN`. After readiness and subscription checks, the terminal displays the panel URL in cyan, username in green and newly chosen password in yellow, followed by the subscription address. The password is displayed only on the controlling terminal; its private temporary handoff is deleted. Upgrades preserve the existing username/password and display Unchanged rather than a password hash. `NO_COLOR` retains readable plain text. Allow both selected TCP ports in your firewall. No administrator password is bundled. The installer does not change firewall rules.
 
 Entry settings are stored with mode 0600 in `/etc/nara-panel.env`. Menu upgrades preserve existing entry values, administrator, accounts and data. The first upgrade from 0.3.1 or earlier asks for the new subscription path/port; later upgrades keep them. Existing managed HTTPS also asks for its separate public subscription port when first migrated. Failed full upgrades attempt to restore the previous application, virtual environment, core, service and entry settings; a private data backup is created before menu upgrades. The panel webPath scopes the UI, assets, administration API and session cookies. Subscriptions use their own subPath and listener. Paths supplement administrator authentication.
 
@@ -77,7 +78,7 @@ The local installer asks the same entry questions and downloads the same verifie
 
 ## Installed server manager
 
-After installing or upgrading to 0.5.0, run:
+After installing or upgrading to 0.5.1, run:
 
 ```sh
 sudo nara
@@ -132,6 +133,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 ```
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
+
+Version **0.5.1** supplies a visible bootstrap resolver for new DNS forms, checks hostname/URL/port input with actionable errors, asks for an administrator username and displays colored access details after successful installation. Password resets preserve the current username unless `--username` is provided.
 
 Version **0.5.0** removes server-side Go/compiler requirements. Core releases are built and tested in GitHub Actions for amd64 and arm64, with checksums pinned in the source. Installation and full upgrades download the prepared core; Docker builds use it too.
 
@@ -190,6 +193,8 @@ QR codes contain the private subscription URL, including the account token and s
 - There is one administrator identity. Private keys, client credentials, subscription tokens, and the database must stay private. Core diagnostics live in the private data directory as `core.log`; the UI does not display raw core errors that might contain credentials.
 - For a consistent manual backup, stop the panel service and back up the entire `/var/lib/nara-panel` directory including the SQLite database. Restore only to a trusted host with the service stopped. Automatic encrypted backups and multi-server management are outside this release.
 
+DNS resolvers using a hostname need a separate **Domain Resolver** (bootstrap), as described in the [upstream HTTPS DNS documentation](https://sing-box.sagernet.org/configuration/dns/server/https/). New resolver forms select the existing default resolver for this purpose. Enter an IP/hostname in **Server**, put the port in **Server Port** and the DoH path in **Path**. Invalid input is rejected before changing saved or active settings.
+
 ## Core build and release maintenance
 
 [The core workflow](.github/workflows/core-release.yml) is dispatched manually after reviewing `core-build.json`. It builds the exact pinned upstream commit on two native Linux runners, runs real traffic/accounting and auto-apply integrations, then publishes both archives together under a new core release tag. A published core tag is never overwritten. Review the workflow output, pin both archive digests in `core-release.json`, then publish the panel update. Run [the Go-free verification workflow](.github/workflows/verify-prebuilt.yml) against the pinned public assets before publishing the installer. It downloads and exercises the actual release in minimal Python containers with neither Go nor Git installed. Panel-only changes reuse the existing core release.
@@ -223,7 +228,7 @@ Reset administrator access on an installed server:
 
 ```sh
 cd /opt/nara-panel
-sudo -u nara-panel .venv/bin/python -m nara reset-password --data /var/lib/nara-panel --username admin
+sudo -u nara-panel .venv/bin/python -m nara reset-password --data /var/lib/nara-panel
 ```
 
 ## Upstream references

@@ -15,6 +15,7 @@ python3 -c 'import sys; assert sys.version_info >= (3,10), "Python 3.10+ is requ
 command -v openssl >/dev/null || { echo "Install OpenSSL first." >&2; exit 1; }
 # Stage configuration: failed installs never overwrite the live entry URL.
 setup_dir=$(mktemp -d)
+credentials_dir=''
 was_running=0
 was_enabled=0
 was_https_running=0
@@ -48,6 +49,7 @@ cleanup() {
         if [ "$was_access_running" = 1 ]; then systemctl start nara-panel-access.path || true; fi
     fi
     if [ "$status" -ne 0 ] && [ "$was_running" = 1 ]; then systemctl start nara-panel || true; fi
+    if [ -n "$credentials_dir" ]; then rm -rf "$credentials_dir"; fi
     rm -rf "$setup_dir"
     exit "$status"
 }
@@ -120,7 +122,11 @@ install -m 644 "$source_dir/deploy/nara-panel-access.service" /etc/systemd/syste
 cd /opt/nara-panel
 # An interrupted earlier installation can leave a database without an administrator.
 if ! runuser -u nara-panel -- .venv/bin/python -c 'from nara.store import Store; import sys; sys.exit(0 if Store("/var/lib/nara-panel").get("admin") else 1)'; then
-    runuser -u nara-panel -- .venv/bin/python -m nara init --data /var/lib/nara-panel </dev/tty
+    # Hand off the newly chosen password only until the final terminal summary.
+    # /run is temporary; this service-owned directory is private and trap-cleaned.
+    credentials_dir=$(mktemp -d /run/nara-panel-credentials.XXXXXX)
+    chown nara-panel:nara-panel "$credentials_dir"
+    runuser -u nara-panel -- .venv/bin/python -m nara init --data /var/lib/nara-panel --credentials-file "$credentials_dir/login.json" </dev/tty
 fi
 install -m 600 "$setup_dir/panel.env" /etc/nara-panel.env
 systemctl daemon-reload
@@ -128,7 +134,7 @@ systemctl enable nara-panel nara-panel-access.path
 systemctl start nara-panel-access.path
 systemctl restart nara-panel
 NARA_SETUP_ENV="$setup_dir/panel.env" PYTHONDONTWRITEBYTECODE=1 .venv/bin/python - <<'PY'
-import ipaddress, os, subprocess, time, urllib.request
+import os, time, urllib.request
 from pathlib import Path
 from nara.install_config import read_env
 settings = read_env(Path(os.environ['NARA_SETUP_ENV']))
@@ -144,31 +150,6 @@ for attempt in range(30):
         time.sleep(1)
 else:
     raise SystemExit('Service did not become ready. Run: journalctl -u nara-panel -n 50')
-print('\nNARA installation complete.')
-try:
-    addresses = subprocess.check_output(['hostname', '-I'], text=True).split()
-    public = [address for address in addresses if ipaddress.ip_address(address).is_global]
-    address = (public or addresses)[0]
-    if ':' in address:
-        address = '[' + address + ']'
-except (OSError, subprocess.SubprocessError, IndexError, ValueError):
-    address = 'YOUR_SERVER_IP'
-if settings.get('NARA_BIND') in ('127.0.0.1', '::1'):
-    address = '127.0.0.1'
-metadata = Path('/etc/nara-panel/https/current/metadata.json')
-if metadata.exists():
-    import json
-    print('Panel URL: ' + json.loads(metadata.read_text())['url'])
-else:
-    print('Panel URL: http://' + address + ':' + port + path + '/')
-if metadata.exists() and json.loads(metadata.read_text()).get('subscription_url'):
-    print('Subscription URL base: ' + json.loads(metadata.read_text())['subscription_url'])
-else:
-    print('Subscription URL base: http://' + address + ':' + settings['NARA_SUB_PORT'] + settings['NARA_SUB_PATH'] + '/')
-print('Allow the subscription TCP port separately when using HTTP.')
-print('Saved entry settings: /etc/nara-panel.env')
-print('Allow TCP port ' + port + ' in your firewall if using direct access.')
-print('Server management menu: sudo nara (includes panel HTTPS setup).')
 PY
 if [ -f /etc/nara-panel/https/current/metadata.json ]; then
     if ! PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m nara.maintenance restore-https; then
@@ -176,5 +157,6 @@ if [ -f /etc/nara-panel/https/current/metadata.json ]; then
     fi
 fi
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -c 'from nara.maintenance import Layout, subscription_health; subscription_health(Layout())'
+NARA_SETUP_ENV="$setup_dir/panel.env" NARA_SETUP_CREDENTIALS="${credentials_dir:+$credentials_dir/login.json}" PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m nara.install_summary
 mutating=0
 ui_success "NARA is ready. Run sudo nara to reopen the management menu."
