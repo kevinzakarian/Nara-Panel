@@ -29,6 +29,7 @@ def run(*args):
 
 
 def broker():
+    print('Broker identity: '+str([line for line in Path('/proc/self/status').read_text().splitlines() if line.startswith(('Uid:','Gid:','Cap','NoNewPrivs:'))]),flush=True)
     from nara import panel_update as update
     def fetch(url, limit):
         base='https://github.com/kevinzakarian/Nara-Panel/releases/download/v'+FUTURE+'/'

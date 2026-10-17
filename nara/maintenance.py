@@ -345,11 +345,17 @@ def _database_owner_worker(owner, operation, timeout=None):
     process = os.fork()
     if process == 0:
         os.close(reader)
+        stage = 'clearing supplementary groups'
         try:
-            os.setgroups([]); os.setgid(owner.st_gid); os.setuid(owner.st_uid)
+            os.setgroups([])
+            stage = 'setting database group'
+            os.setgid(owner.st_gid)
+            stage = 'setting database user'
+            os.setuid(owner.st_uid)
+            stage = 'accessing database'
             result = {'ok': True, 'value': operation()}
         except Exception as exc:
-            result = {'ok': False, 'error': str(exc)}
+            result = {'ok': False, 'error': stage + ': ' + str(exc)}
         with os.fdopen(writer, 'w') as output:
             json.dump(result, output)
         os._exit(0)

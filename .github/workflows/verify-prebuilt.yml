@@ -1,10 +1,16 @@
 name: Verify installation without Go
 on:
   workflow_dispatch:
+    inputs:
+      service_only:
+        description: Run only the systemd maintenance regression
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   verify:
+    if: ${{ !inputs.service_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,5 +61,6 @@ jobs:
       - name: Read fixture diagnostics on failure
         if: failure()
         run: |
+          sudo systemctl show nara-panel-access.service -p User -p CapabilityBoundingSet -p AmbientCapabilities -p NoNewPrivileges -p SecureBits -p PrivateUsers -p SystemCallFilter
           sudo journalctl -u nara-panel-access.service -u nara-panel.service --no-pager -n 100
           sudo test ! -f /var/log/nara-panel-update.log || sudo cat /var/log/nara-panel-update.log
