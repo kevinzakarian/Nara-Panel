@@ -1,0 +1,110 @@
+name: Build and publish compatible core
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nara-core-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install verified Go toolchain on the build runner
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          version=$(python3 -c 'import json;print(json.load(open("core-build.json"))["go_version"])')
+          digest=$(python3 -c 'import json,os;print(json.load(open("core-build.json"))["go_sha256"][os.environ["ARCH"]])')
+          curl --proto '=https' --tlsv1.2 -fLsS --retry 3 "https://go.dev/dl/go${version}.linux-${ARCH}.tar.gz" -o "$RUNNER_TEMP/go.tar.gz"
+          printf '%s  %s\n' "$digest" "$RUNNER_TEMP/go.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: core-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('core-build.json', 'scripts/build-core.sh') }}
+      - name: Build the pinned compatible core
+        env:
+          CGO_ENABLED: '0'
+          NARA_BUILD_JOBS: '2'
+          GOMAXPROCS: '4'
+          GOGC: '75'
+        run: sh scripts/build-core.sh "$PWD/dist/core/sing-box"
+      - name: Check the binary and run real traffic/accounting integration
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          PYTHONDONTWRITEBYTECODE=1 SING_BOX_TEST_BINARY="$PWD/dist/core/sing-box" .venv/bin/python -m unittest tests.test_core tests.test_auto_apply -v
+      - name: Package the binary and matching libraries
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          git clone --quiet --depth 1 --branch v1.14.3 https://github.com/SagerNet/sing-box.git "$RUNNER_TEMP/source"
+          python3 scripts/package-core.py --binary "$PWD/dist/core/sing-box" --arch "$ARCH" --source "$RUNNER_TEMP/source"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: core-${{ matrix.arch }}
+          path: dist/core-release/*
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: core-*
+          path: dist/core-release
+          merge-multiple: true
+      - name: Publish both architectures together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag=$(python3 -c 'import json;print(json.load(open("core-build.json"))["release_tag"])')
+          cd dist/core-release
+          cat *.sha256 > SHA256SUMS
+          sha256sum -c SHA256SUMS
+          test "$(find . -name '*.tar.gz' | wc -l)" -eq 2
+          git clone --quiet --depth 1 --branch v1.14.3 https://github.com/SagerNet/sing-box.git "$RUNNER_TEMP/upstream"
+          expected=$(python3 -c 'import json,os;print(json.load(open(os.environ["GITHUB_WORKSPACE"]+"/core-build.json"))["upstream_commit"])')
+          test "$(git -C "$RUNNER_TEMP/upstream" rev-parse HEAD)" = "$expected"
+          git -C "$RUNNER_TEMP/upstream" archive --format=tar.gz --prefix=sing-box-1.14.3/ HEAD > sing-box-1.14.3-source.tar.gz
+          cp "$GITHUB_WORKSPACE/core-build.json" .
+          cat > release-notes.md <<'NOTES'
+          Compatible Sing-box 1.14.3 binaries for NARA on Linux amd64 and arm64.
+          Built from the pinned, unmodified upstream source with its standard capabilities plus with_v2ray_api and with_purego.
+          Each archive includes sing-box, the matching Cronet library, upstream licenses, and build metadata.
+          Both architectures pass actual traffic/accounting and automatic-apply integration tests before publication.
+          Source, build scripts, and dependency checksums are available in the tagged repository and the upstream source archive.
+          These are NARA compatibility builds, not official SagerNet binary releases.
+          NOTES
+          # Refuse overwriting an existing release or its checksums.
+          if gh release view "$tag" >/dev/null 2>&1; then echo 'Release already exists; choose a new core build revision.' >&2; exit 1; fi
+          gh release create "$tag" --target "$GITHUB_SHA" --draft --title 'Sing-box 1.14.3 — NARA compatible build 1' --notes-file release-notes.md *.tar.gz SHA256SUMS core-build.json
+          gh release edit "$tag" --draft=false --latest=false
