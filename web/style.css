@@ -124,6 +124,10 @@ dialog { width:min(780px,calc(100% - 32px)); }
 .dns-option-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px 18px; margin-top:18px; }
 .dns-option-grid:empty { display:none; }
 .dns-custom { padding-bottom:8px; font-weight:600; }
+.dns-provider-box { border:1px solid var(--border); border-radius:10px; background:#f8fbfa; padding:16px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px 18px; }
+.dns-provider-box>[hidden] { display:none; }
+.dns-provider-box>p { grid-column:1/-1; margin:0; }
+@media(max-width:700px) { .dns-provider-box { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:700px) { .dns-editor,.dns-field-grid,.dns-option-grid,.dns-identity-grid { grid-template-columns:minmax(0,1fr); }.dns-editor>.schema-variant { max-width:none; }.dns-editor .schema-object { padding:12px; } }
 #extra-server-options,#extra-client-options { padding:16px; }
 .brand b .panel-version,.login-brand b .panel-version { font:14px/1.4 ui-monospace,monospace; letter-spacing:0; margin-top:6px; }

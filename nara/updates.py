@@ -1,4 +1,4 @@
-"""Daily, read-only release checks. Never installs or executes downloaded data."""
+"""Panel-entry release checks. Never installs or executes downloaded data."""
 import json
 import re
 import threading
@@ -8,7 +8,6 @@ from . import __version__
 
 PANEL_URL = "https://api.github.com/repos/kevinzakarian/Nara-Panel/contents/release.json?ref=main"
 CORE_URL = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
-DAY = 86400
 MAX_RESPONSE = 2_000_000  # Official releases can contain hundreds of assets.
 
 
@@ -33,14 +32,33 @@ class UpdateChecker:
     def __init__(self, store):
         self.store = store
         self.lock = threading.Lock()
-        self.shutdown = threading.Event()
+        self.check_lock = threading.Lock()
+        self.running = False
+
+    def start(self):
+        """Check once for a panel entry, sharing any check already in flight."""
+        with self.lock:
+            if self.running:
+                return False
+            self.running = True
+        def run():
+            try:
+                self.check()
+            finally:
+                with self.lock:
+                    self.running = False
+        try:
+            threading.Thread(target=run, daemon=True).start()
+        except Exception:
+            with self.lock:
+                self.running = False
+            raise
+        return True
 
     def check(self, now=None):
         now = time.time() if now is None else now
-        with self.lock:
+        with self.check_lock:
             saved = self.store.get("updates", {})
-            if saved.get("attempted_at") and now - saved["attempted_at"] < DAY:
-                return saved
             saved["attempted_at"] = now
             for key, url in (("panel", PANEL_URL), ("core", CORE_URL)):
                 previous = saved.get(key, {})
@@ -52,13 +70,15 @@ class UpdateChecker:
                     saved[key] = {"latest": latest.lstrip("v"), "checked_at": now, "error": ""}
                 except Exception:
                     # Keep last known version; network failure never means up to date.
-                    saved[key] = {**previous, "error": "Could not check for updates. Next automatic check is within 24 hours."}
+                    saved[key] = {**previous, "error": "Could not check for updates. Sign in or reopen the panel to try again."}
             self.store.set("updates", saved)
             return saved
 
     def status(self, installed_core):
         saved = self.store.get("updates", {})
-        result = {"attempted_at": saved.get("attempted_at"), "interval_hours": 24}
+        with self.lock:
+            checking = self.running
+        result = {"attempted_at": saved.get("attempted_at"), "trigger": "panel_entry", "checking": checking}
         for key, installed, url in (("panel", __version__, "https://github.com/kevinzakarian/Nara-Panel"),
                                     ("core", installed_core, "https://github.com/SagerNet/sing-box/releases")):
             item = saved.get(key, {})
@@ -66,8 +86,3 @@ class UpdateChecker:
             result[key] = {**item, "installed": installed, "available": bool(current and latest and latest > current),
                            "known": bool(current and latest), "url": url}
         return result
-
-    def worker(self):
-        while not self.shutdown.is_set():
-            self.check()
-            self.shutdown.wait(60)

@@ -16,11 +16,11 @@ class UpdateTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def test_daily_cache_survives_restart_and_compares_versions(self):
-        with mock.patch('nara.updates.fetch', side_effect=[{'version':'9.0.0'}, {'tag_name':'v9.0.1'}]) as fetch:
+    def test_each_entry_checks_again_and_last_result_survives_restart(self):
+        with mock.patch('nara.updates.fetch', side_effect=[{'version':'9.0.0'}, {'tag_name':'v9.0.1'}]*2) as fetch:
             self.checker.check(100000)
             UpdateChecker(self.store).check(100001)
-            self.assertEqual(fetch.call_count, 2)
+            self.assertEqual(fetch.call_count, 4)
             result = self.checker.status('sing-box version 1.14.3')
             self.assertTrue(result['panel']['available'])
             self.assertTrue(result['core']['available'])

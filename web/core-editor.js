@@ -67,8 +67,9 @@ const CoreSchema=(()=>{
   }
   function render(input,v,set,label,root=false,depth=0,scope=settings.scope||''){
    if(depth>20)return '<p class="note">Nesting limit reached. Use the JSON view for this value.</p>';
-   const id=String(sequence++);nodes.set(id,{input,value:v,set,label});
-   const all=branches(input),s=choose(input,v),html=[];
+   const id=String(sequence++);
+   const all=branches(input).filter(branch=>!root||!settings.types||settings.types.includes(branch.properties?.type?.const)),s=choose(input,v),html=[];
+   nodes.set(id,{input,value:v,set,label,variants:all,root});
    if(root&&settings.collection){const type=v?.type||s.properties?.type?.const||'';const base={inbounds:'inbound/',outbounds:'outbound/',dns_servers:'dns/server/',dns_rules:'dns/rule',route_rules:'route/rule',rule_sets:'rule-set/index',endpoints:'endpoint/',services:'service/',certificate_providers:'certificate-provider/',http_clients:'http-client/',network_namespaces:'network-namespace/'}[settings.collection];scope=base?.endsWith('/')?base+type:base||scope;}
    if(label==='TLS')scope='shared/tls';
    if(all.length>1){
@@ -132,7 +133,7 @@ const CoreSchema=(()=>{
   container.addEventListener('change',event=>{
    const el=event.target;
    syncInputs();
-   if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=branches(node.input)[Number(el.value)],old=node.value||{},fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];if(guided&&node.label==='Configuration'&&dnsPorts[fresh.type]&&old.server_port===dnsPorts[old.type])fresh.server_port=dnsPorts[fresh.type];node.set(fresh);draw();}
+   if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=node.variants[Number(el.value)],old=node.value||{};let fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];if(guided&&node.root&&dnsPorts[fresh.type]&&old.server_port===dnsPorts[old.type])fresh.server_port=dnsPorts[fresh.type];if(node.root&&settings.transformType)fresh=settings.transformType(fresh,old);node.set(fresh);draw();}
    if(el.dataset.coreToggle!==undefined){const node=nodes.get(el.dataset.coreToggle),s=choose(node.input,node.value),obj=node.value||{};if(el.checked)Object.defineProperty(obj,el.dataset.key,{value:seed(s.properties[el.dataset.key]),writable:true,enumerable:true,configurable:true});else delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   });

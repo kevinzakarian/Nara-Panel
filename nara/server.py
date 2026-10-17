@@ -93,6 +93,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
     metrics = Metrics()
     login_attempts = {}
     throttle_lock = threading.Lock()
+    updates = UpdateChecker(store)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "NARA"
@@ -214,7 +215,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     with runtime.lock:
                         status = runtime.status()
                         return self.send(200, {"metrics": metrics.read(store.directory), "core": status,
-                                               "panel_version": __version__, "updates": UpdateChecker(store).status(status["version"]),
+                                               "panel_version": __version__, "updates": updates.status(status["version"]),
                                                "totals": store.totals(), "events": store.events()})
                 if path == "/api/config":
                     return self.send(200, build_config(store.get("state"), store.totals(), runtime.run_dir, runtime.stats_port))
@@ -228,6 +229,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/favicon.svg": "favicon.svg",
                       "/vendor/qrcodegen.js": "vendor/qrcodegen.js", "/subscription-qr.js": "subscription-qr.js", "/options.js": "options.js"}
             assets["/core-editor.js"] = "core-editor.js"
+            assets["/dns-presets.js"] = "dns-presets.js"
             assets["/routing.js"] = "routing.js"
             if path in assets:
                 file = web_dir / assets[path]
@@ -281,6 +283,9 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
+            if path == "/api/check-updates":
+                started = updates.start()
+                return self.send(200, {"started": started, "updates": updates.status(runtime.version())})
             if path == "/api/access":
                 require(isinstance(data.get("current_url"), str), "Panel address is required")
                 parsed = urlsplit(data["current_url"])
@@ -423,8 +428,6 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
     server.daemon_threads = subscription.daemon_threads = True
     threading.Thread(target=subscription.serve_forever, kwargs={"poll_interval": .5}, daemon=True).start()
     threading.Thread(target=runtime.worker, daemon=True).start()
-    updates = UpdateChecker(store)
-    threading.Thread(target=updates.worker, daemon=True).start()
     print("NARA panel: http://" + bind + ":" + str(port) + normalize_web_path(web_path) + "/", flush=True)
     print("Subscriptions: http://" + bind + ":" + str(sub_port) + normalize_web_path(sub_path) + "/", flush=True)
     try:
@@ -435,7 +438,6 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
         subscription.shutdown()
         subscription.server_close()
         runtime.shutdown.set()
-        updates.shutdown.set()
         with runtime.lock:
             runtime.stop()
         server.server_close()

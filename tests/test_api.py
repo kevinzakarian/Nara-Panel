@@ -3,6 +3,7 @@ import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
 import ssl
 from unittest import mock
@@ -214,6 +215,7 @@ class APITests(unittest.TestCase):
         self.assertIn('snell',data['types']['inbounds'])
         self.assertIn('DNSRuleAction',data['schema']['$defs'])
         self.assertEqual(self.request('/core-editor.js')[0],200)
+        self.assertEqual(self.request('/dns-presets.js')[0],200)
         self.assertEqual(self.request('/routing.js')[0],200)
 
     def test_full_dns_save_and_default_resolver_apply_together(self):
@@ -286,9 +288,44 @@ class APITests(unittest.TestCase):
         self.assertEqual(status,200)
         self.assertTrue(data['updates']['panel']['available'])
         self.assertTrue(data['updates']['core']['available'])
-        self.assertEqual(data['updates']['interval_hours'],24)
+        self.assertEqual(data['updates']['trigger'],'panel_entry')
+        self.assertNotIn('interval_hours',data['updates'])
         self.assertIn('panel_version',data)
         self.assertTrue({'cpu_model','ipv4','ipv6'} <= data['metrics'].keys())
+
+    def test_update_checks_only_run_for_authenticated_panel_entries_and_do_not_block(self):
+        entered, release = threading.Event(), threading.Event()
+        def fetch(url):
+            entered.set()
+            release.wait(5)
+            return {'version':'9.0.0'} if 'release.json' in url else {'tag_name':'v9.0.1'}
+        with mock.patch('nara.updates.fetch',side_effect=fetch) as network:
+            self.assertEqual(self.request('/api/check-updates',{})[0],401)
+            self.login()
+            self.request('/api/dashboard');self.request('/api/dashboard')
+            network.assert_not_called()
+            self.assertEqual(self.request('/api/check-updates',{}, {'X-CSRF-Token':'wrong'})[0],403)
+            network.assert_not_called()
+            try:
+                status,data,_=self.request('/api/check-updates',{})
+                self.assertEqual(status,200,data)
+                self.assertTrue(data['started'])
+                self.assertTrue(data['updates']['checking'])
+                self.assertTrue(entered.wait(1))
+                self.assertFalse(self.request('/api/check-updates',{})[1]['started'])
+                self.assertEqual(network.call_count,1)
+                self.assertTrue(self.request('/api/dashboard')[1]['updates']['checking'])
+            finally:
+                release.set()
+            for _ in range(100):
+                if not self.request('/api/dashboard')[1]['updates']['checking']:break
+                time.sleep(.01)
+            self.assertEqual(network.call_count,2)
+            self.assertTrue(self.request('/api/check-updates',{})[1]['started'])
+            for _ in range(100):
+                if not self.request('/api/dashboard')[1]['updates']['checking']:break
+                time.sleep(.01)
+            self.assertEqual(network.call_count,4)
 
 
 class WebPathTests(APITests):

@@ -62,7 +62,7 @@ async function api(path, body) {
 function toast(message, error=false) { const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toasts').append(node);setTimeout(()=>node.remove(),6500); }
 function showLogin() { $('#login').hidden=false;$('#app').hidden=true;csrf=''; }
 async function boot() {
- try { const session=await api('session');[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema')]);CoreSchema.configure(coreCatalog);csrf=session.csrf;$('#admin-name').textContent=session.username;await load();$('#login').hidden=true;$('#app').hidden=false; }
+ try { const session=await api('session');csrf=session.csrf;[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema'),api('check-updates',{}).catch(()=>null)]);CoreSchema.configure(coreCatalog);$('#admin-name').textContent=session.username;await load();$('#login').hidden=true;$('#app').hidden=false; }
  catch(err) { showLogin();if (err.message !== 'Please sign in first') $('#login-error').textContent=err.message; }
 }
 async function load(silent=false) {
@@ -261,11 +261,12 @@ const coreLabels={dns_servers:'Resolvers',dns_rules:'DNS rules',rule_sets:'Rule 
 function updateBanner(){
  const updates=dashboard.updates;
  if(!updates)return '';
- return `<section class="update-banner" aria-label="Daily update checks">${['panel','core'].map(key=>{
+ return `<section class="update-banner" aria-label="Release updates">${['panel','core'].map(key=>{
   const item=updates[key],name=key==='panel'?'NARA':'Sing-box';
+  if(updates.checking)return `<span><b>${name}</b> Checking for updates…</span>`;
   if(item.available)return `<span>${badge('Update available','orange')} <b>${name} ${e(item.latest)}</b> <a class="text-link" href="${e(item.url)}" target="_blank" rel="noopener noreferrer">View update ↗</a></span>`;
-  return `<span><b>${name}</b> ${e(item.error?'Update check unavailable':item.known?'Up to date':'Waiting for first check')}${item.checked_at?` <small>Checked ${e(date(item.checked_at))} ${e(time(item.checked_at))}</small>`:''}</span>`;
- }).join('')}<small>Checks automatically every 24 hours</small></section>`;
+  return `<span><b>${name}</b> ${e(item.error?'Update check unavailable':item.known?'Up to date':'Not checked yet')}${item.checked_at?` <small>Checked ${e(date(item.checked_at))} ${e(time(item.checked_at))}</small>`:''}</span>`;
+ }).join('')}</section>`;
 }
 function legacyCoreConfig(collection,row){
  if(!Object.keys(row).length)return {};
@@ -297,6 +298,9 @@ function coreReferences(){
  const tags=rows=>rows.map(row=>row.tag).filter(Boolean);
  return {inbound:tags([...state.inbounds,...state.endpoints]),outbound:[...new Set(['direct',...tags([...state.outbounds,...state.endpoints])])],dns_server:tags(state.dns_servers),rule_set:tags(state.rule_sets),network_namespace:tags(state.network_namespaces),http_client:tags(state.http_clients),certificate_provider:tags(state.certificate_providers)};
 }
+function dnsProviderControls(selected){
+ return `<section class="dns-provider-box">${selectField('DNS provider','dns_provider',[['custom','Custom / manual'],...Object.entries(DNSPresets.providers).map(([key,p])=>[key,p.name])],selected.provider)}<label id="dns-profile-field" ${selected.provider==='nextdns'?'':'hidden'}>NextDNS Profile ID<input name="dns_profile_id" value="${e(selected.profileId)}" placeholder="e.g. abc123" autocomplete="off" spellcheck="false" maxlength="6"><small class="field-hint">Find this ID in your NextDNS dashboard. It is separate from your NARA account.</small></label><p class="field-hint" id="dns-provider-note"></p></section>`;
+}
 function editCoreRecord(collection,item={},preset){
  if(!coreCatalog.collections[collection])return editCoreOptions(collection);
  const schema=CoreSchema.byName(coreCatalog.collections[collection]);
@@ -311,10 +315,16 @@ function editCoreRecord(collection,item={},preset){
  }
  if(['inbounds','outbounds','dns_servers','rule_sets','endpoints','services','certificate_providers','http_clients','network_namespaces'].includes(collection)&&!Object.hasOwn(config,'tag'))config.tag='';
  const inbound=collection==='inbounds',dns=collection==='dns_servers';
+ const selected=dns?DNSPresets.detect(config):{};let activeProfile=selected.profileId;
+ const editorSettings={collection,...(dns?{layout:'dns',types:DNSPresets.providers[selected.provider]?.types,transformType:next=>selected.provider==='custom'?next:DNSPresets.apply(selected.provider,next,activeProfile)}:{}),references:{...coreReferences(),...(dns?{dns_server:state.dns_servers.filter(row=>row.id!==item.id).map(row=>row.tag)}:{})}};
  if(inbound&&config.type==='anytls'&&!Object.hasOwn(config,'padding_scheme'))config.padding_scheme=structuredClone(optionSchema.server.anytls[0].default);
  const identity=`<div class="${dns?'dns-identity-grid':''}">${field('Display name (optional)','display_name',item.label||'')}${inbound?selectField('TLS profile (optional)','native_tls_id',[['','Custom TLS / no profile'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||''):''}<label class="check-field"><input type="checkbox" name="native_enabled" ${checked(item.enabled!==false)}>Enable this item</label></div>`;
  let editor;
- openModal((item.id?'Edit ':'New ')+(dns?'DNS resolver':coreLabels[collection]||'inbound'),dns?'Saving validates and applies your DNS settings automatically.':`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,`${inbound?'<div class="hint-box">Standalone listener: authentication is configured here. Panel accounts, subscriptions, quotas and expiry do not apply to this listener.</div>':''}${inbound&&optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):''}${dns?'':identity}${inbound?`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label><p class="note">Public listeners need authentication unless this option is explicitly selected.</p>`:''}<div class="schema-editor ${dns?'dns-editor':''}" id="native-fields"></div>${dns?`<details class="dns-display-settings"><summary>Display and status</summary>${identity}</details>`:''}${dns?'':'<p class="note">Choose “Add option” inside any group to access every available field. Arrays and logical groups support multiple items. Blank optional fields can be removed. Stored private key values are kept unless replaced.</p>'}<details class="option-section"><summary>JSON view</summary><p class="note schema-note">Load the current form into JSON, or import JSON into the form.</p><div class="schema-note inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false"></textarea></details>`,async form=>{
+ openModal((item.id?'Edit ':'New ')+(dns?'DNS resolver':coreLabels[collection]||'inbound'),dns?'Saving validates and applies your DNS settings automatically.':`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,`${inbound?'<div class="hint-box">Standalone listener: authentication is configured here. Panel accounts, subscriptions, quotas and expiry do not apply to this listener.</div>':''}${inbound&&optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):''}${dns?dnsProviderControls(selected):identity}${inbound?`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label><p class="note">Public listeners need authentication unless this option is explicitly selected.</p>`:''}<div class="schema-editor ${dns?'dns-editor':''}" id="native-fields"></div>${dns?`<details class="dns-display-settings"><summary>Display and status</summary>${identity}</details>`:''}${dns?'':'<p class="note">Choose “Add option” inside any group to access every available field. Arrays and logical groups support multiple items. Blank optional fields can be removed. Stored private key values are kept unless replaced.</p>'}<details class="option-section"><summary>JSON view</summary><p class="note schema-note">Load the current form into JSON, or import JSON into the form.</p><div class="schema-note inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false"></textarea></details>`,async form=>{
+  if(dns&&selected.provider==='nextdns'){
+   const id=form.elements.dns_profile_id.value.trim().toLowerCase();DNSPresets.validate(selected.provider,id);
+   if(id!==activeProfile){activeProfile=id;editor.set(DNSPresets.apply(selected.provider,editor.value(),id));}
+  }
   const c=editor.value();
   if(dns){
    if(!/^[a-zA-Z0-9_-]{1,64}$/.test(c.tag||''))throw new Error('Enter a unique tag using letters, numbers, hyphens or underscores.');
@@ -326,10 +336,34 @@ function editCoreRecord(collection,item={},preset){
   }
   await saveRecord(collection,{id:item.id,mode:'native',label:form.elements.display_name.value,enabled:form.elements.native_enabled.checked,config:c,tag:c.tag||'',type:c.type||'',...(inbound?{port:c.listen_port||0,listen:c.listen||'',tls_id:form.elements.native_tls_id.value,allow_unauthenticated:form.elements.allow_unauthenticated.checked}:{})});
  });
- editor=CoreSchema.mount($('#native-fields'),schema,config,{collection,...(dns?{layout:'dns'}:{}),references:{...coreReferences(),...(dns?{dns_server:state.dns_servers.filter(row=>row.id!==item.id).map(row=>row.tag)}:{})}});
+ editor=CoreSchema.mount($('#native-fields'),schema,config,editorSettings);
+ function providerNote(){
+  if(!dns)return;
+  const personal=selected.provider==='nextdns';$('#dns-profile-field').hidden=!personal;
+  const input=$('[name=dns_profile_id]');input.disabled=!personal;input.required=personal;
+  $('#dns-provider-note').textContent=DNSPresets.providers[selected.provider]?.note||'Enter your own resolver settings. Every supported Sing-box resolver type is available.';
+ }
+ if(dns){
+  providerNote();
+  $('[name=dns_provider]').addEventListener('change',event=>{
+   const previous=selected.provider;selected.provider=event.target.value;editorSettings.types=DNSPresets.providers[selected.provider]?.types;
+   const current=editor.value();
+   if(selected.provider!=='custom'){
+    const types=editorSettings.types,type=types.includes(current.type)?current.type:types.includes('https')?'https':types[0];
+    activeProfile=$('[name=dns_profile_id]').value.trim().toLowerCase();
+    const tag=!item.id&&current.tag==='dns-'+previous?'':current.tag;
+    editor.set(DNSPresets.build(selected.provider,type,activeProfile,tag));
+   }else editor.set(current);
+   providerNote();
+  });
+  $('[name=dns_profile_id]').addEventListener('input',event=>{
+   activeProfile=event.target.value.trim().toLowerCase();editor.set(DNSPresets.apply(selected.provider,editor.value(),activeProfile));
+  });
+ }
+
  $('#native-json').value=JSON.stringify(config,null,2);
  $('#core-to-json').addEventListener('click',()=>{$('#native-json').value=JSON.stringify(editor.value(),null,2)});
- $('#core-from-json').addEventListener('click',()=>{try{const next=JSON.parse($('#native-json').value);if(!next||Array.isArray(next)||typeof next!=='object')throw Error();editor.set(next);toast('JSON loaded into form. Save to apply.');}catch{toast('Enter a valid JSON object.',true);}});
+ $('#core-from-json').addEventListener('click',()=>{try{const next=JSON.parse($('#native-json').value);if(!next||Array.isArray(next)||typeof next!=='object')throw Error();if(dns){selected.provider='custom';editorSettings.types=undefined;$('[name=dns_provider]').value='custom';providerNote();}editor.set(next);toast('JSON loaded into form. Save to apply.');}catch{toast('Enter a valid JSON object.',true);}});
 }
 function editCoreOptions(key){
  const section=key.replace('_options',''),omit=section==='dns'?['servers','rules','final']:section==='route'?['rules','rule_set']:section==='experimental'?['v2ray_api']:[];

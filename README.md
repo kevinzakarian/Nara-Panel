@@ -12,7 +12,7 @@ An independent English web panel for running **Sing-box on your own Linux server
 - **DNS:** all 15 typed resolvers, complete logical/default rules and actions, races/speculation, predefined replies, optimistic/cache controls and local/remote/inline rule sets.
 - **Routing:** guided traffic rules, readable ordered cards, one-click enable/disable and priority changes, destination groups and shared lists. All specialized 1.14.3 options remain available in advanced JSON editors.
 - **Core features:** five endpoint types, ten service types, certificate providers, HTTP clients, namespaces, logging, NTP, certificate trust and experimental cache/Clash API settings.
-- **Updates:** daily, persisted, read-only checks for panel and stable upstream core releases, shown above a compact version strip in Overview.
+- **Updates:** read-only checks for panel and stable upstream core releases when an authenticated browser enters the panel. Results persist across restarts; there is no daily timer or background polling schedule.
 - **Clients:** multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated QR codes in official Sing-box remote-profile and direct JSON URL formats, with PNG download.
 - **Access settings:** separate panel webPath/port and subscription subPath/port, prompted during installation and editable together in Settings on managed Linux installs. Subscription ports serve profiles only; no login page or admin API.
 - **Operations:** SQLite persistence, admin sign-in, password change, logout, server-side sessions, CSRF checks, sign-in throttling, automatic validation/application on save, managed restarts, attempted rollback after startup failure, and systemd installation. Saved and active settings are committed together; invalid changes preserve the previous settings.
@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.6.4** adds DNS provider templates with protocol choices for Google, Cloudflare, Quad9, AdGuard, OpenDNS and personal NextDNS profiles. Custom retains every resolver type. Version checks now run only on authenticated panel entry; the daily timer and 24-hour Overview line are removed.
+
 Version **0.6.3** reorganizes DNS resolver forms around fixed essential fields. Tag, resolver type, Server and Server Port stay visible, with editable protocol defaults and validation. HTTPS path, hostname resolver and TLS settings appear where applicable. Advanced settings use explicit controls rather than Add option dropdowns; all 15 resolver types, stored TLS trust and custom settings remain supported.
 
 Version **0.6.2** makes IP-address DNS resolvers independent. Unused Domain Resolver references from older forms are removed automatically, including on upgrade, so they do not block deleting an otherwise unused bootstrap resolver. Hostname-based DNS still needs a separate resolver. TLS SNI and certificate verification options are preserved.
@@ -186,7 +188,7 @@ Use **Add option** within any object to add a field, including nested TLS/QUIC s
 
 The routing model follows the official [route options](https://sing-box.sagernet.org/configuration/route/), [matching logic](https://sing-box.sagernet.org/configuration/route/rule/) and [rule actions](https://sing-box.sagernet.org/configuration/route/rule_action/); validation uses the bundled 1.14.3 schema and installed core.
 
-The daily update check runs independently of the browser and core, uses fixed public GitHub endpoints, and persists its cache across restarts. Failed checks show “Update check unavailable”; they do not mean the installed version is current.
+Each authenticated panel entry starts a one-shot version check using fixed public GitHub endpoints. Opening the panel with an existing session also checks again; concurrent entries share a check already in progress. Login does not wait for GitHub, dashboard refreshes only read cached results, and no scheduled check runs while the panel is closed. Results persist across restarts. Failed checks show “Update check unavailable”; they do not mean the installed version is current.
 
 
 ## First connection
