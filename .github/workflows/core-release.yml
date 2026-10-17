@@ -55,6 +55,14 @@ jobs:
           python3 -m venv .venv
           .venv/bin/pip install -r requirements.txt
           NARA_TEST_DIAGNOSTICS=1 PYTHONDONTWRITEBYTECODE=1 SING_BOX_TEST_BINARY="$PWD/dist/core/sing-box" .venv/bin/python -m unittest tests.test_core tests.test_auto_apply -v
+      - name: Diagnose UDP offload compatibility on failed fixtures
+        if: failure()
+        env:
+          QUIC_GO_DISABLE_GSO: '1'
+          NARA_TEST_DIAGNOSTICS: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+          SING_BOX_TEST_BINARY: ${{ github.workspace }}/dist/core/sing-box
+        run: .venv/bin/python -m unittest tests.test_core.CoreTests.test_hysteria2_salamander_client_hijacks_dns_through_proxy tests.test_core.CoreTests.test_new_standalone_protocols_transfer -v
       - name: Package the binary and matching libraries
         env:
           ARCH: ${{ matrix.arch }}

@@ -29,7 +29,9 @@ def diagnostic_categories(text):
     text = text.lower()
     labels = ('network is unreachable','connection refused','operation not permitted',
               'invalid argument','timeout','deadline exceeded','certificate','handshake',
-              'no such host','no route','gso','obfs','dns','read udp','write udp','dial tcp','sendmsg')
+              'no such host','no route','gso','obfs','dns','read udp','write udp','dial tcp','sendmsg',
+              'inbound','outbound','exchange','response','query','cached','rejected','hijack',
+              'eof','error','reset','stream','closed','cancel','not found','failed to','started')
     return {label:text.count(label) for label in labels if label in text}
 
 
@@ -57,7 +59,9 @@ def dns_answer(query):
 
 
 class BootstrapDNS(socketserver.BaseRequestHandler):
+    requests = 0
     def handle(self):
+        BootstrapDNS.requests += 1
         query, sock = self.request
         sock.sendto(dns_answer(query), self.client_address)
 
@@ -133,6 +137,8 @@ class CoreTests(unittest.TestCase):
         # The fixture has no TUN or routing changes. Do not bind its local DNS
         # bootstrap to the host's external default interface on Linux.
         config["route"]["auto_detect_interface"] = False
+        if os.environ.get('NARA_TEST_DIAGNOSTICS') == '1':
+            config['log']['level'] = 'debug'
         port = free_port()
         config["inbounds"][0]["listen_port"] = port
         config["dns"]["servers"][0].update(server="127.0.0.1", server_port=self.bootstrap_dns.server_address[1])
@@ -147,6 +153,8 @@ class CoreTests(unittest.TestCase):
                       "outbounds": [outbound], "route": {"final": outbound["tag"]}}
         else:
             port, config = self.local_client(state)
+        if os.environ.get('NARA_TEST_DIAGNOSTICS') == '1':
+            config['log']['level'] = 'debug'
         path = Path(self.temp.name) / "client.json"
         atomic_write(path, json.dumps(config))
         with open(path.with_suffix('.client.log'), 'w') as client_log:
@@ -192,6 +200,8 @@ class CoreTests(unittest.TestCase):
         state = example_state("hysteria2", self.profile)
         state["settings"]["block_private"] = False
         state["settings"]["server_address"] = "node.nara.test"
+        if os.environ.get('NARA_TEST_DIAGNOSTICS') == '1':
+            state['core_options']['log'] = {'level':'debug'}
         state["inbounds"][0]["server_options"] = {"obfs": {"type": "salamander", "password": "fixture-obfs"}}
         self.runtime.apply(state)
         port, config = self.local_client(state)
@@ -201,6 +211,7 @@ class CoreTests(unittest.TestCase):
             process = subprocess.Popen([CORE, "run", "-c", str(path)], stdout=client_log, stderr=subprocess.STDOUT)
         query = b"\x12\x34" + struct.pack("!HHHHH", 0x100, 1, 0, 0, 0) + b"\x03vpn\x04nara\x04test\x00" + struct.pack("!HH", 1, 1)
         before = len(RemoteDNS.queries)
+        bootstrap_before = BootstrapDNS.requests
         try:
             deadline = time.monotonic()+8
             while True:
@@ -220,7 +231,7 @@ class CoreTests(unittest.TestCase):
                 self.assertEqual(reply.read(10)[:2], b"\x05\x00")
                 sock.sendall(struct.pack("!H", len(query))+query)
                 prefix = reply.read(2)
-                self.assertEqual(len(prefix), 2, "DNS exchange closed before its response")
+                self.assertEqual(len(prefix), 2, "DNS exchange closed before its response; bootstrap queries=" + str(BootstrapDNS.requests-bootstrap_before) + "; DoH queries=" + str(len(RemoteDNS.queries)-before))
                 length = struct.unpack("!H", prefix)[0]
                 answer = reply.read(length)
                 self.assertEqual(answer[:2], query[:2])
@@ -269,6 +280,8 @@ class CoreTests(unittest.TestCase):
                 state = initial_state()
                 state["settings"]["block_private"] = False
                 state["tls"] = [self.profile]
+                if os.environ.get('NARA_TEST_DIAGNOSTICS') == '1':
+                    state['core_options']['log'] = {'level':'debug'}
                 conf = {"type": protocol, "tag": "native", "listen": "127.0.0.1", "listen_port": port, **server}
                 state["inbounds"] = [{"id": "native", "mode": "native", "enabled": True, "tag": "native", "type": protocol,
                                       "config": conf, "tls_id": self.profile["id"] if protocol == "hysteria" else ""}]
