@@ -11,6 +11,8 @@ PROTOCOLS = ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls")
 TLS_REQUIRED = ("trojan", "hysteria2", "tuic", "anytls")
 COLLECTIONS = ("inbounds", "tls", "dns_servers", "dns_rules", "rule_sets", "clients") + native.EXTRA_COLLECTIONS
 REMOTE_DNS_TYPES = ("udp", "tcp", "tls", "https", "quic", "h3")
+# An internal authenticated DNS destination; no socket binds this address.
+CLIENT_DNS_ADDRESS = "198.18.0.1"
 
 
 def normalize_dns_record(row):
@@ -264,6 +266,7 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
     tls = {t["id"]: t for t in state["tls"]}
     clients = [c for c in state["clients"] if check_all or eligible(c, totals)]
     inbounds = []
+    managed_dns_tags = []
     for i in state["inbounds"]:
         if i.get("mode") == "native":
             if check_all or i.get("enabled", True):
@@ -306,6 +309,11 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
             else:
                 obj[key] = value
         inbounds.append(obj)
+        managed_dns_tags.append(obj["tag"])
+    # Handle only the managed client DNS sentinel, before private-IP blocking.
+    # This keeps all resolver settings, rules and private credentials on the server.
+    dns_bridge = ([{"inbound": managed_dns_tags, "ip_cidr": [CLIENT_DNS_ADDRESS + "/32"],
+                    "port": 53, "action": "hijack-dns"}] if managed_dns_tags else [])
     servers = []
     for d in state["dns_servers"]:
         if not check_all and not d.get("enabled", True):
@@ -339,7 +347,7 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
     config = {"log": {"level": "warn", "timestamp": True}, "dns": {"servers": servers,
             "rules": rules, "final": state["settings"]["dns_final"], **state["settings"].get("dns_options", {})}, "inbounds": inbounds,
             "outbounds": [{"type": "direct", "tag": "direct"}],
-            "route": {"rules": ([{"ip_is_private": True, "action": "reject"}] if state["settings"]["block_private"] else []),
+            "route": {"rules": dns_bridge + ([{"ip_is_private": True, "action": "reject"}] if state["settings"]["block_private"] else []),
                       "rule_set": sets, "final": "direct", "default_domain_resolver": state["settings"]["dns_final"]},
             "experimental": {"v2ray_api": {"listen": "127.0.0.1:" + str(stats_port),
                              "stats": {"enabled": True, "users": ["client-" + c["id"] for c in clients]}}}}
@@ -418,27 +426,39 @@ def client_config(state, c, totals):
         used_tags.add(tag)
         return tag
     proxy_tag = managed_tag("proxy")
+    direct_tag = managed_tag("direct")
     return {
         "log": {"level": "info", "timestamp": True},
         "dns": {
             "servers": [
-                # Typed DNS transports dial directly unless a detour is set.
-                {"type": "udp", "tag": "bootstrap", "server": "1.1.1.1"},
-                {"type": "https", "tag": "remote", "server": "1.1.1.1", "path": "/dns-query",
-                 "tls": {"enabled": True, "server_name": "cloudflare-dns.com"}, "detour": proxy_tag},
+                # Resolve only the proxy hostname locally to avoid a bootstrap loop.
+                {"type": "local", "tag": "bootstrap"},
+                # The authenticated server intercepts this sentinel and applies
+                # its current Default DNS and DNS rules; no provider is hardcoded.
+                {"type": "tcp", "tag": "remote", "server": CLIENT_DNS_ADDRESS,
+                 "server_port": 53, "detour": proxy_tag},
             ],
+            "rules": [{"clash_mode": "Direct", "action": "route", "server": "bootstrap"}],
             "final": "remote", "strategy": "prefer_ipv4",
         },
         "inbounds": [
             {"type": "mixed", "tag": "local", "listen": "127.0.0.1", "listen_port": 2080},
             {"type": "tun", "tag": "tun-in", "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-             "mtu": 1400, "auto_route": True, "strict_route": True},
+             "mtu": 1400, "auto_route": True, "strict_route": True,
+             "platform": {"http_proxy": {"enabled": True, "server": "127.0.0.1", "server_port": 2080}}},
         ],
         "outbounds": [{"type": "selector", "tag": proxy_tag, "outbounds": tags, "default": tags[0]}]
-                     + outbounds,
+                     + outbounds + [{"type": "direct", "tag": direct_tag}],
         "route": {
-            "rules": [{"port": 53, "action": "hijack-dns"}],
+            "rules": [{"port": 53, "action": "hijack-dns"},
+                      {"clash_mode": "Direct", "action": "route", "outbound": direct_tag},
+                      {"clash_mode": "Global", "action": "route", "outbound": proxy_tag},
+                      {"ip_is_private": True, "action": "route", "outbound": direct_tag}],
             "final": proxy_tag, "auto_detect_interface": True,
             "default_domain_resolver": {"server": "bootstrap", "strategy": "prefer_ipv4"},
         },
+        # Native app controls use these mode names and the TUN HTTP proxy fields;
+        # no external REST controller or additional listening port is exported.
+        "experimental": {"clash_api": {"default_mode": "Rule"},
+                         "cache_file": {"enabled": True, "cache_id": "nara-" + c["id"]}},
     }

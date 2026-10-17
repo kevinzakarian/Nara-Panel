@@ -30,12 +30,13 @@ function renderRouting(){
  `<div class="route-overview"><div><span class="route-eyebrow">DEFAULT DESTINATION</span><b>${e(routeDestinationName(final))}</b><small>Used when no rule chooses a destination.</small></div><div><span class="route-eyebrow">DOMAIN RESOLVER</span><b>${e(typeof resolver==='object'?resolver.server||'Custom resolver':resolver||'DNS default')}</b><small>Resolves destination hostnames on this server.</small></div><div class="route-overview-actions">${btn('Edit defaults','route-defaults','edit','sm')}<button class="text-link" data-action="route-advanced-options">Advanced settings</button></div></div>`+
  `<nav class="tabs route-tabs" aria-label="Routing sections">${tabs.map(([key,label])=>`<button class="tab ${routingTab===key?'active':''}" data-action="core-tab" data-collection="routing" data-id="${key}" ${routingTab===key?'aria-current="page"':''}>${label} ${badge((state[key]||[]).length)}</button>`).join('')}</nav>`+
  (routingTab==='outbounds'?renderRouteDestinations():routingTab==='rule_sets'?renderRouteSets():renderRouteRules())+
- `<p class="route-footnote">These settings control traffic on this server. Client app routing is configured separately.</p>`;
+ `<p class="route-footnote">These rules control server traffic. Client DNS uses this server’s DNS settings; Rule / Global / Direct in the app control client routing.</p>`;
 }
 function renderRouteRules(){
  const rows=state.route_rules||[];
  let shadow=false;
  return `<section class="card route-rules"><div class="card-header"><div><h2>Traffic rules</h2><p>Run from top to bottom. Routing or blocking ends the search; detection and resolution continue.</p></div>${btn('Advanced rule','route-json-new','code','sm')}</div>
+ ${state.inbounds.some(row=>row.mode!=='native')?`<div class="route-policy route-dns-policy"><span class="route-order">${icon('dns')}</span><div><b>Managed client DNS</b><p>Default DNS: ${e(state.settings.dns_final)} · Handled before traffic rules.</p></div><a class="text-link" href="#dns">DNS settings</a></div>`:''}
  <div class="route-policy"><span class="route-order">${icon('lock')}</span><div><b>Private network protection</b><p>${state.settings.block_private?'Private destinations are blocked before all rules below.':'Private destinations are allowed unless a rule below blocks them.'}</p></div>${badge(state.settings.block_private?'Block first':'Off',state.settings.block_private?'orange':'')}<a class="text-link" href="#settings">Change</a></div>
  ${rows.length?`<ol class="route-rule-list">${rows.map((row,index)=>{
  const c=legacyCoreConfig('route_rules',row),hidden=shadow&&row.enabled!==false;

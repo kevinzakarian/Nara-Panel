@@ -14,7 +14,7 @@ import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from nara.config import build_config, client_config
+from nara.config import CLIENT_DNS_ADDRESS, build_config, client_config
 from nara.runtime import Runtime, atomic_write
 from nara.server import self_signed
 from nara.store import Store
@@ -135,7 +135,7 @@ class CoreTests(unittest.TestCase):
                 print('Fixture error categories: '+json.dumps({'server':diagnostic_categories(text),'client':diagnostic_categories(clients)}))
         self.temp.cleanup()
 
-    def local_client(self, state):
+    def local_client(self, state, fixture_dns=True):
         config = client_config(state, state["clients"][0], {})
         # Exercise the proxy without creating a VPN or changing host routes.
         config["inbounds"] = [i for i in config["inbounds"] if i["type"] != "tun"]
@@ -146,9 +146,15 @@ class CoreTests(unittest.TestCase):
             config['log']['level'] = 'debug'
         port = free_port()
         config["inbounds"][0]["listen_port"] = port
-        config["dns"]["servers"][0].update(server="127.0.0.1", server_port=self.bootstrap_dns.server_address[1])
-        config["dns"]["servers"][1].update(server="127.0.0.1", server_port=self.remote_dns.server_port,
-                                          tls={"enabled": True, "server_name": "127.0.0.1", "certificate": [self.profile["certificate"]]})
+        config["experimental"]["cache_file"]["path"] = str(Path(self.temp.name)/"client-cache.db")
+        # Transport tests intentionally exercise proxy traffic even to loopback.
+        config["experimental"]["clash_api"]["default_mode"] = "Global"
+        config["dns"]["servers"][0] = {"type":"udp", "tag":"bootstrap", "server":"127.0.0.1",
+                                          "server_port":self.bootstrap_dns.server_address[1]}
+        if fixture_dns:
+            config["dns"]["servers"][1] = {"type":"https", "tag":"remote", "server":"127.0.0.1",
+                "server_port":self.remote_dns.server_port, "path":"/dns-query", "detour":config["route"]["final"],
+                "tls":{"enabled":True, "server_name":"127.0.0.1", "certificate":[self.profile["certificate"]]}}
         return port, config
 
     def transfer(self, state, outbound=None):
@@ -255,6 +261,145 @@ class CoreTests(unittest.TestCase):
         finally:
             process.terminate()
             process.wait(timeout=5)
+
+    def start_client(self, config):
+        path = Path(self.temp.name)/"mode-client.json"
+        atomic_write(path, json.dumps(config))
+        log = path.with_suffix('.client.log').open('w')
+        process = subprocess.Popen([CORE, 'run', '-c', str(path)], stdout=log, stderr=subprocess.STDOUT)
+        self.addCleanup(log.close)
+        self.addCleanup(lambda: process.wait(timeout=5))
+        self.addCleanup(process.terminate)
+        ports = [config['inbounds'][0]['listen_port']]
+        controller = config.get('experimental',{}).get('clash_api',{}).get('external_controller')
+        if controller:
+            ports.append(int(controller.rsplit(':',1)[1]))
+        deadline = time.monotonic()+8
+        while True:
+            try:
+                for port in ports:
+                    with socket.create_connection(('127.0.0.1',port),.2):
+                        pass
+                return process
+            except OSError:
+                if process.poll() is not None or time.monotonic()>deadline:
+                    self.fail('Client core did not start')
+                time.sleep(.05)
+
+    def query_client_dns(self, port, name):
+        query = b'\x21\x43'+struct.pack('!HHHHH',0x100,1,0,0,0)+b''.join(bytes([len(part)])+part.encode() for part in name.split('.'))+b'\x00'+struct.pack('!HH',1,1)
+        with socket.create_connection(('127.0.0.1',port),2) as sock:
+            sock.settimeout(10)
+            sock.sendall(b'\x05\x01\x00')
+            self.assertEqual(sock.recv(2),b'\x05\x00')
+            sock.sendall(b'\x05\x01\x00\x01'+socket.inet_aton(CLIENT_DNS_ADDRESS)+struct.pack('!H',53))
+            stream = sock.makefile('rb')
+            self.assertEqual(stream.read(10)[:2],b'\x05\x00')
+            sock.sendall(struct.pack('!H',len(query))+query)
+            try:
+                prefix = stream.read(2)
+                self.assertEqual(len(prefix),2,'DNS bridge closed without a response')
+                answer = stream.read(struct.unpack('!H',prefix)[0])
+            finally:
+                stream.close()
+            self.assertEqual(answer[:2],query[:2])
+            self.assertEqual(answer[3]&15,0)
+            return answer
+
+    def test_client_dns_tracks_server_default_and_rules_without_reimport(self):
+        state = example_state('hysteria2',self.profile)
+        state['dns_servers'] = [
+            {'id':'a','tag':'a','mode':'native','config':{'type':'udp','tag':'a','server':'127.0.0.1','server_port':self.bootstrap_dns.server_address[1]}},
+            {'id':'b','tag':'b','mode':'native','config':{'type':'hosts','tag':'b','predefined':{'second.nara.test':['192.0.2.53'],'policy.nara.test':['192.0.2.54']}}}]
+        state['settings']['dns_final'] = 'a'
+        # Default private-network blocking stays ON throughout the bridge test.
+        self.runtime.apply(state)
+        port,config = self.local_client(state,fixture_dns=False)
+        client = self.start_client(config)
+        before = BootstrapDNS.requests
+        self.assertEqual(self.query_client_dns(port,'first.nara.test')[-4:],socket.inet_aton('127.0.0.1'))
+        self.assertGreater(BootstrapDNS.requests,before)
+        state['settings']['dns_final'] = 'b'
+        self.runtime.apply(state)
+        # Applying server settings restarts the core. Reconnect the same profile
+        # instead of depending on a stale pooled QUIC session's idle timeout.
+        client.terminate();client.wait(timeout=5)
+        client = self.start_client(config)
+        before = BootstrapDNS.requests
+        # Same exported profile, a fresh uncached name, and the new resolver.
+        self.assertEqual(self.query_client_dns(port,'second.nara.test')[-4:],socket.inet_aton('192.0.2.53'))
+        self.assertEqual(BootstrapDNS.requests,before)
+        state['dns_rules'] = [{'id':'policy','mode':'native','config':{'domain':['policy.nara.test'],'action':'route','server':'a'}}]
+        self.runtime.apply(state)
+        client.terminate();client.wait(timeout=5)
+        self.start_client(config)
+        self.assertEqual(self.query_client_dns(port,'policy.nara.test')[-4:],socket.inet_aton('127.0.0.1'))
+        self.assertGreater(BootstrapDNS.requests,before)
+
+    def test_managed_dns_bridge_works_for_every_account_protocol(self):
+        for protocol in ('vless','vmess','trojan','hysteria2','tuic','anytls'):
+            with self.subTest(protocol=protocol):
+                state = example_state(protocol,self.profile)
+                state['dns_servers'][0].update(server='127.0.0.1',port=self.bootstrap_dns.server_address[1])
+                self.runtime.apply(state)
+                port,config = self.local_client(state,fixture_dns=False)
+                process = self.start_client(config)
+                try:
+                    self.assertEqual(self.query_client_dns(port,protocol+'.nara.test')[-4:],socket.inet_aton('127.0.0.1'))
+                finally:
+                    process.terminate();process.wait(timeout=5)
+                self.runtime.stop()
+
+    def test_client_modes_change_traffic_path_and_preserve_selection(self):
+        state = example_state('hysteria2',self.profile)
+        state['settings']['block_private'] = False
+        state['inbounds'].append({**state['inbounds'][0],'id':'backup','tag':'backup','port':free_port()})
+        state['clients'][0]['inbound_ids'].append('backup')
+        self.runtime.apply(state)
+        port,config = self.local_client(state)
+        config['experimental']['clash_api']['default_mode'] = 'Rule'
+        controller = free_port()
+        config['experimental']['clash_api']['external_controller'] = '127.0.0.1:'+str(controller)
+        client = self.start_client(config)
+        def api(method,path,body=None):
+            connection = http.client.HTTPConnection('127.0.0.1',controller,timeout=5)
+            connection.request(method,path,json.dumps(body) if body else None,{'Content-Type':'application/json'})
+            response = connection.getresponse()
+            status,data = response.status,response.read()
+            connection.close()
+            self.assertIn(status,(200,204))
+            return json.loads(data) if data else None
+        def transfer():
+            with socket.create_connection(('127.0.0.1',port),2) as sock:
+                sock.settimeout(8)
+                sock.sendall(('GET http://127.0.0.1:%d/ HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n'%self.target.server_port).encode())
+                response = http.client.HTTPResponse(sock)
+                response.begin()
+                self.assertEqual(response.status,200)
+                self.assertEqual(len(response.read()),len(b'NARA traffic accounting test.\n')*2048)
+            time.sleep(.2)
+            self.runtime.collect()
+            return sum(self.store.totals().get('user1',{}).values())
+        self.assertEqual(api('GET','/configs')['mode'],'Rule')
+        self.assertEqual(api('GET','/proxies/'+config['route']['final'])['type'],'Selector')
+        # LAN addresses bypass in Rule, proxy in Global, and bypass in Direct.
+        self.assertEqual(transfer(),0)
+        api('PUT','/proxies/'+config['route']['final'],{'name':'backup'})
+        self.assertEqual(api('GET','/proxies/'+config['route']['final'])['now'],'backup')
+        api('PATCH','/configs',{'mode':'Global'})
+        proxied = transfer()
+        self.assertGreater(proxied,1000)
+        api('PATCH','/configs',{'mode':'Direct'})
+        self.assertEqual(transfer(),proxied)
+        self.assertEqual(api('GET','/configs')['mode'],'Direct')
+        remote_before,bootstrap_before = len(RemoteDNS.queries),BootstrapDNS.requests
+        self.assertEqual(self.query_client_dns(port,'direct.nara.test')[-4:],socket.inet_aton('127.0.0.1'))
+        self.assertEqual(len(RemoteDNS.queries),remote_before)
+        self.assertGreater(BootstrapDNS.requests,bootstrap_before)
+        client.terminate();client.wait(timeout=5)
+        self.start_client(config)
+        self.assertEqual(api('GET','/configs')['mode'],'Direct')
+        self.assertEqual(api('GET','/proxies/'+config['route']['final'])['now'],'backup')
 
     def test_all_protocols_transfer_and_account(self):
         for protocol in ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls"):

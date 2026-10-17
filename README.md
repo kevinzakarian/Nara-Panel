@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.6.1** adds native app mode/System HTTP Proxy controls to exported profiles and connects client DNS to the panel’s current Default DNS and DNS rules. Refresh existing remote profiles once after upgrading, then reconnect. Future resolver changes use the same profile; server restarts may require a reconnect and cached answers follow their TTL.
+
 Version **0.6.0** reorganizes Routing around traffic flow: defaults, ordered traffic rules, destinations and shared rule sets. Common rules use flat match/action/scope forms instead of nested option menus. Existing specialized rules open in a lossless advanced JSON editor. Moving rules in either direction and toggling them validates and applies immediately.
 
 Version **0.5.2** removes surrounding whitespace/newlines from DNS addresses before validation, storage and generation. Core forms read current displayed values before saving or changing structure, including browser autofill without an input event. DNS errors identify the affected resolver. A hostname still requires a separate bootstrap; plain IP resolvers do not.
@@ -170,9 +172,9 @@ Use **Add option** within any object to add a field, including nested TLS/QUIC s
 2. Under **Destinations**, add an upstream connection if needed. The built-in Direct destination connects from this server. Selector and URLTest groups use existing members; endpoints are managed in Core features.
 3. Choose **Add rule**. Select domains, IPs, ports, a shared list, or all traffic; select a routing/blocking/DNS/detection/resolution action; optionally limit the inbound and network. Lists match any entry, while scope groups are combined with AND. Ports accept comma/newline-separated values and ranges such as `8000-9000`.
 4. Review the actual matches and action on each rule card. Use ↑ / ↓ to change priority, or On / Off to enable/disable. A final catch-all warns when later rules cannot run. Detection and resolution continue to subsequent rules. For domain matches on IP-only requests, place a Detect protocol rule earlier when a hostname can be sniffed.
-5. Review **Private network protection** above the list: its block rule runs before user rules while enabled in Settings. **Everything else** shows the final fallback below the list.
+5. **Managed client DNS** shows the panel resolver used by client profiles. Its authenticated DNS service runs before traffic rules. Review **Private network protection** above the list: its block rule runs before user rules while enabled in Settings. **Everything else** shows the final fallback below the list.
 
-**Shared rule sets** accepts remote lists, local files or inline headless rules; DNS can reuse the same lists. Adding a list alone does not route traffic. Specialized match combinations, logical groups, transports, HTTP clients and other core options remain in **Advanced JSON**; existing advanced records open there without flattening or dropping fields. Invalid changes keep the previous saved and active configuration. These are server-side rules, separate from client-app routing.
+**Shared rule sets** accepts remote lists, local files or inline headless rules; DNS can reuse the same lists. Adding a list alone does not route traffic. Specialized match combinations, logical groups, transports, HTTP clients and other core options remain in **Advanced JSON**; existing advanced records open there without flattening or dropping fields. Invalid changes keep the previous saved and active configuration. These are server-side traffic rules, separate from client-app routing; managed client DNS requests use this server’s DNS policy.
 
 ![Routing workflow with demonstration rules](screenshots/routing-0.6.0.jpg)
 
@@ -194,7 +196,11 @@ The daily update check runs independently of the browser and core, uses fixed pu
 
 **After updating from 0.2.2 or earlier, refresh the remote profile in the Sing-box app before reconnecting.** Previously downloaded/local JSON files must be downloaded and imported again. Changing the panel does not update an already imported local file.
 
-Client DNS uses Cloudflare DoH through the selected proxy; a direct 1.1.1.1 UDP resolver bootstraps proxy-server hostnames only. The panel DNS editor configures server-side DNS. Ordinary client traffic stays on the selected proxy. Client logs use info level to expose startup and connection errors. Generated VPN profiles require a Sing-box graphical app or a core with TUN support and the necessary system privileges; command-line proxy-only use must remove the TUN inbound.
+Client DNS in Rule/Global mode is forwarded through the selected authenticated proxy to the panel’s Default DNS and DNS rules. A narrowly scoped built-in rule handles this service before private-network protection; it does not open a public DNS port. The client JSON uses the internal destination `198.18.0.1:53`, not a hardcoded public provider. Resolver credentials, local file paths and server-only options stay on the server. The device resolver bootstraps only proxy-server hostnames and serves ordinary DNS in Direct mode.
+
+Native app profiles include **Rule / Global / Direct** modes, a selector of assigned servers, persistent mode/selection state and **System HTTP Proxy** pointing to the loopback mixed listener. Rule sends local private destinations directly and other traffic through the selected proxy; Global also sends private destinations through the server, subject to server routing policies; Direct bypasses the proxy and uses device DNS. DNS interception runs before mode routing. The export does not expose a Clash REST controller port. The official app may apply its own UI/override preferences.
+
+Client logs use info level to expose startup and connection errors. Generated VPN profiles require a Sing-box graphical app or a core with TUN support and the necessary system privileges; command-line proxy-only use must remove the TUN inbound.
 
 By default, self-signed client exports include the public certificate as a trusted certificate. Selecting **Allow insecure (client)** explicitly disables certificate verification in that profile’s client exports; it is disabled by default and never added to the server TLS configuration. Public panel HTTPS and inbound TLS are configured independently.
 
@@ -267,3 +273,6 @@ regeneration command and upstream documentation license are recorded there. The
 panel's own code retains its project license; the bundled QR encoder retains its
 MIT notice. The build script downloads the pinned upstream core and its separately
 licensed runtime dependencies from their official sources.
+
+
+Client controls follow the [official TUN HTTP proxy fields](https://sing-box.sagernet.org/configuration/inbound/tun/#platformhttp_proxy), [Clash mode behavior](https://sing-box.sagernet.org/configuration/experimental/clash-api/#default_mode), and the 1.14.3 core’s [mode-list calculation](https://github.com/SagerNet/sing-box/blob/v1.14.3/experimental/clashmode/mode_list.go). Native-app button visibility also depends on the app’s UI preferences. System HTTP Proxy is a separate control from starting/stopping the VPN.

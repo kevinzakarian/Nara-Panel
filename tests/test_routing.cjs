@@ -89,3 +89,7 @@ test('shared list advanced options survive JSON edits and guided return',async()
  const item={id:'s',config:{type:'remote',tag:'shared',url:'https://example.com/list.srs',format:'binary',http_client:'fetcher'}};
  const f=app();try{f.w.TestApp.editRouteSet(item);assert.ok(f.el('route_json'));f.w.document.querySelector('#route-guided').click();assert.ok(f.el('route_json'));await f.w.TestApp.submit();assert.deepEqual(f.saved().record.config,item.config);}finally{f.close()}
 });
+
+test('managed DNS forwarding is visible ahead of private-network protection',()=>{
+ const f=app({inbounds:[{tag:'managed',type:'hysteria2'}],settings:{...fixture.state.settings,dns_final:'dns-google'}});try{f.w.TestApp.render();const policies=f.w.document.querySelectorAll('.route-policy');assert.match(policies[0].textContent,/Managed client DNS/);assert.match(policies[0].textContent,/dns-google/);assert.match(policies[1].textContent,/Private network protection/);}finally{f.close()}
+});

@@ -6,7 +6,7 @@ import ssl
 import subprocess
 from unittest import mock
 from pathlib import Path
-from nara.config import build_config, client_config, eligible, initial_state, validate
+from nara.config import CLIENT_DNS_ADDRESS, build_config, client_config, eligible, initial_state, validate
 from nara.server import certificate_info, self_signed
 from nara.store import Store, password_hash, password_matches
 from nara.stats import decode_stats
@@ -116,7 +116,10 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(tun["strict_route"])
         self.assertTrue(any(":" in address for address in tun["address"]))
         self.assertTrue(any("." in address for address in tun["address"]))
-        self.assertEqual(config["route"]["rules"], [{"port": 53, "action": "hijack-dns"}])
+        self.assertEqual(config["route"]["rules"][0], {"port": 53, "action": "hijack-dns"})
+        self.assertEqual([r["clash_mode"] for r in config["route"]["rules"] if "clash_mode" in r], ["Direct","Global"])
+        self.assertEqual(config["experimental"]["clash_api"], {"default_mode":"Rule"})
+        self.assertEqual(tun["platform"]["http_proxy"], {"enabled":True,"server":"127.0.0.1","server_port":2080})
         self.assertTrue(config["route"]["auto_detect_interface"])
         self.assertEqual(config["log"]["level"], "info")
         dns = {d["tag"]: d for d in config["dns"]["servers"]}
@@ -125,10 +128,36 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(proxy["type"], "selector")
         self.assertEqual(proxy["default"], state["inbounds"][0]["tag"])
         self.assertEqual(dns[config["dns"]["final"]]["detour"], proxy["tag"])
-        self.assertEqual(dns["remote"]["type"], "https")
-        self.assertTrue(dns["remote"]["tls"]["enabled"])
+        self.assertEqual(dns["remote"]["type"], "tcp")
+        self.assertEqual(dns["remote"]["server"], CLIENT_DNS_ADDRESS)
+        self.assertEqual(dns["remote"]["server_port"], 53)
         bootstrap = dns[config["route"]["default_domain_resolver"]["server"]]
         self.assertNotIn("detour", bootstrap)
+        self.assertEqual(bootstrap["type"], "local")
+
+    def test_dns_bridge_is_scoped_and_precedes_private_network_protection(self):
+        state = example_state()
+        config = build_config(state,{},Path('/tmp'))
+        self.assertEqual(config['route']['rules'][:2],[
+            {'inbound':[state['inbounds'][0]['tag']], 'ip_cidr':[CLIENT_DNS_ADDRESS+'/32'], 'port':53, 'action':'hijack-dns'},
+            {'ip_is_private':True,'action':'reject'}])
+        state['clients'][0]['enabled'] = False
+        self.assertEqual(build_config(state,{},Path('/tmp'))['route']['rules'],[{'ip_is_private':True,'action':'reject'}])
+
+    def test_client_dns_does_not_copy_server_private_files_or_resolver_credentials(self):
+        import json
+        state = example_state()
+        state['dns_servers'].append({'id':'private','tag':'private','mode':'native','config':{
+            'type':'hosts','tag':'private','path':['/server/private/hosts']}})
+        state['settings']['dns_final'] = 'private'
+        state['core_options']['dns'] = {'client_subnet':'198.51.100.7/32'}
+        before = copy.deepcopy(state)
+        profile = client_config(state,state['clients'][0],{})
+        self.assertNotIn('/server/private/hosts',json.dumps(profile))
+        self.assertNotIn('198.51.100.7',json.dumps(profile))
+        self.assertNotIn('1.1.1.1',json.dumps(profile))
+        self.assertEqual(state,before)
+        self.assertEqual(profile['dns']['rules'],[{'clash_mode':'Direct','action':'route','server':'bootstrap'}])
 
     def test_client_managed_tags_cannot_collide_with_inbound_names(self):
         state = example_state()
