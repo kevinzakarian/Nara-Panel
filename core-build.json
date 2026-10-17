@@ -1,0 +1,10 @@
+{
+  "version": "1.14.3",
+  "upstream_commit": "7054cac5124465ffdb145870d7c01885566711b1",
+  "release_tag": "core-v1.14.3-nara.1",
+  "go_version": "1.27.2",
+  "go_sha256": {
+    "amd64": "ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5",
+    "arm64": "94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8"
+  }
+}
