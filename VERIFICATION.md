@@ -376,3 +376,43 @@ is retained for maintainers and GitHub runners only. Shell syntax, version
 consistency, whitespace and source archive contents were checked. Full apt/systemd
 installation on a production server and a complete Docker image build were not
 performed; native Ubuntu and minimal Debian runtime checks above were executed.
+
+## DNS bootstrap and installation credentials (0.5.1)
+
+The full suite passed **196 Python tests without skips** and **50 Node.js tests**.
+After the final database-owner safeguard, all **11 credential/summary tests**
+passed again. Shell/JavaScript syntax and whitespace checks passed.
+
+The supplied UI error was generic; the original resolver settings/private server
+log were not available. A new HTTPS resolver with `server: dns.google` and no
+`domain_resolver` reproduced the exact core rejection path (missing domain
+resolver). The new form visibly seeds the existing default DNS as its bootstrap.
+Real-core API tests verify missing-bootstrap and URL-in-Server errors return
+specific messages and preserve saved/active state, while the corrected hostname
+resolver saves and starts successfully. UDP/TCP/TLS/HTTPS/QUIC/HTTP3 validation,
+IP-only resolvers, object-form bootstrap settings, invalid references, self
+references and detoured domains are covered. Existing cycle checks remain active.
+
+Credential tests cover a prompted custom username, explicit username, Enter's
+admin default, reprompting invalid interactive input, confirmation failures,
+case-sensitive custom-name login/session identity, and retaining the name during
+password reset. New names are validated; existing names remain preserved when
+resetting only a password. The sign-in form no longer pre-fills admin.
+
+Terminal stream tests verify distinct cyan URL, green username and yellow new
+password output, NO_COLOR/plain output, HTTPS public URLs, IPv6 brackets, and
+escaped terminal controls. A newly chosen password is handed off in an exclusive
+0600 file inside a private temporary /run directory. The success summary reads it
+only after readiness/HTTPS/subscription checks, writes the password only to the
+controlling terminal, deletes the handoff, and never prints hashes or passwords
+into redirected stdout. The shell trap also removes the directory on failures.
+Existing installations show the retained username and an unchanged-password
+notice. The summary uses the existing database-owner helper rather than opening
+service SQLite/WAL files as root; delegation is tested.
+
+Both Linux amd64 and arm64 jobs passed **36 tests each**, covering real core
+traffic, DNS saves, automatic apply and installation credential flows, in
+[Go-free verification 39007779691](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39007779691).
+The pinned compatible core release is reused. Full root apt/systemd installation
+on a production host was not performed; installer rollback, credential flows and
+terminal rendering were tested using isolated layouts/streams.
