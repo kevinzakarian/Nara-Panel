@@ -6,7 +6,7 @@ import time
 import urllib.request
 from . import __version__
 
-PANEL_URL = "https://api.github.com/repos/kevinzakarian/Nara-Panel/contents/release.json?ref=main"
+PANEL_URL = "https://api.github.com/repos/kevinzakarian/Nara-Panel/releases/latest"
 CORE_URL = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 MAX_RESPONSE = 2_000_000  # Official releases can contain hundreds of assets.
 
@@ -17,8 +17,7 @@ def version(value):
 
 
 def fetch(url):
-    accept = "application/vnd.github.raw+json" if url == PANEL_URL else "application/json"
-    request = urllib.request.Request(url, headers={"User-Agent": "Nara-Panel/" + __version__, "Accept": accept})
+    request = urllib.request.Request(url, headers={"User-Agent": "Nara-Panel/" + __version__, "Accept": "application/json"})
     with urllib.request.urlopen(request, timeout=10) as response:
         if not response.url.startswith("https://"):
             raise ValueError("An HTTPS response is required")
@@ -64,7 +63,7 @@ class UpdateChecker:
                 previous = saved.get(key, {})
                 try:
                     data = fetch(url)
-                    latest = data.get("version") if key == "panel" else data.get("tag_name")
+                    latest = data.get("tag_name")
                     if not version(latest) or data.get("prerelease") or data.get("draft"):
                         raise ValueError("Invalid stable release")
                     saved[key] = {"latest": latest.lstrip("v"), "checked_at": now, "error": ""}

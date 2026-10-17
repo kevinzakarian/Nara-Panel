@@ -58,10 +58,13 @@ access. These features are not automatically enabled by the panel.
 
 The full panel version appears beneath the logo. Overview replaces the former
 hero with a compact panel/core version strip. Authenticated browser entry starts
-a one-shot check of the public panel manifest and latest stable upstream core release.
+a one-shot check of the latest stable panel and upstream core GitHub releases.
 There is no daily worker or timer. Results persist across restarts and appear at
 the top of Overview; normal dashboard refreshes only read cached results. Failures are reported as unavailable and preserve the previous known
 release. No code is installed automatically and no account credentials are sent.
+Managed Linux installations offer an explicit panel-update button backed by the
+local maintenance broker, a private backup and verified fixed-repository downloads.
+No SSH credentials are collected; the core binary is preserved.
 
 ## Client VPN profiles and QR
 

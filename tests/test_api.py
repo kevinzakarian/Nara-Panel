@@ -298,7 +298,7 @@ class APITests(unittest.TestCase):
         def fetch(url):
             entered.set()
             release.wait(5)
-            return {'version':'9.0.0'} if 'release.json' in url else {'tag_name':'v9.0.1'}
+            return {'tag_name':'v9.0.0'} if 'Nara-Panel' in url else {'tag_name':'v9.0.1'}
         with mock.patch('nara.updates.fetch',side_effect=fetch) as network:
             self.assertEqual(self.request('/api/check-updates',{})[0],401)
             self.login()

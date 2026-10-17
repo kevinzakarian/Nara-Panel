@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 from nara import __version__
 from nara.store import Store
-from nara.updates import UpdateChecker, version, fetch, CORE_URL, MAX_RESPONSE
+from nara.updates import UpdateChecker, version, fetch, CORE_URL, PANEL_URL, MAX_RESPONSE
 
 
 class UpdateTests(unittest.TestCase):
@@ -17,21 +17,23 @@ class UpdateTests(unittest.TestCase):
         self.temp.cleanup()
 
     def test_each_entry_checks_again_and_last_result_survives_restart(self):
-        with mock.patch('nara.updates.fetch', side_effect=[{'version':'9.0.0'}, {'tag_name':'v9.0.1'}]*2) as fetch:
+        with mock.patch('nara.updates.fetch', side_effect=[{'tag_name':'v9.0.0'}, {'tag_name':'v9.0.1'}]*2) as fetch:
             self.checker.check(100000)
             UpdateChecker(self.store).check(100001)
             self.assertEqual(fetch.call_count, 4)
+            self.assertEqual(fetch.call_args_list[0].args, (PANEL_URL,))
+            self.assertTrue(PANEL_URL.endswith("/releases/latest"))
             result = self.checker.status('sing-box version 1.14.3')
             self.assertTrue(result['panel']['available'])
             self.assertTrue(result['core']['available'])
             self.assertEqual(result['panel']['installed'], __version__)
-        with mock.patch('nara.updates.fetch', side_effect=[{'version':__version__}, {'tag_name':'v1.14.3'}]) as fetch:
+        with mock.patch('nara.updates.fetch', side_effect=[{'tag_name':'v'+__version__}, {'tag_name':'v1.14.3'}]) as fetch:
             self.checker.check(186401)
             self.assertEqual(fetch.call_count, 2)
             self.assertFalse(self.checker.status('sing-box version 1.14.3')['core']['available'])
 
     def test_failure_keeps_last_success_and_does_not_claim_up_to_date(self):
-        with mock.patch('nara.updates.fetch', side_effect=[{'version':'9.0.0'}, {'tag_name':'v9.0.0'}]):
+        with mock.patch('nara.updates.fetch', side_effect=[{'tag_name':'v9.0.0'}, {'tag_name':'v9.0.0'}]):
             self.checker.check(100000)
         with mock.patch('nara.updates.fetch', side_effect=OSError('offline')):
             self.checker.check(186401)

@@ -158,7 +158,7 @@ Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, ful
 
 Version **0.3.1** adds the interactive server manager, highlighted terminal input, system-package preparation, protected backups/removal and panel HTTPS setup. The short app-only `update.sh` command remains available; it does not perform the system-package upgrade or open the menu.
 
-The panel only reports available updates; it never installs a newer core automatically. Forms target 1.14.3. Review compatibility before independently moving the core to another version.
+The panel reports available core updates; core upgrades use the installation manager. Panel updates can be installed explicitly with the one-click control on managed Linux installations. Forms target 1.14.3. Review compatibility before independently moving the core to another version.
 
 ## Server information
 
@@ -288,7 +288,7 @@ Client controls follow the [official TUN HTTP proxy fields](https://sing-box.sag
 
 Version **0.6.6** places DNS Display name beside Tag, removes the resolver enable checkbox and shows a compact automatic TLS summary for provider presets. Encrypted DNS still uses TLS; Custom resolvers keep editable server name and certificate verification. Existing hidden TLS trust settings and disabled resolver states are preserved. TLS certificates now use a table, and the footer groups NARA, its version and tagline.
 
-**One-click panel updates:** Linux installations managed by NARA show **Update panel** in Overview and **Panel updates** in Settings when a newer stable panel release is found on entry. No SSH username or password is stored. The existing root maintenance broker accepts only a stable version number, downloads the source asset and SHA256SUMS from this fixed public repository, verifies the checksum and version, creates a private backup, and runs the updater with readiness checks and rollback on failure. The panel briefly restarts; the installed Sing-box core is preserved. Private update logs are in `/var/log/nara-panel-update.log`. A checksum validates downloaded bytes; repository release access remains the trust boundary.
+**One-click panel updates:** Linux installations managed by NARA show **Update panel** in Overview and **Panel updates** in Settings when a newer stable GitHub release is found on entry (the main branch alone does not announce an update). No SSH username or password is stored. The existing root maintenance broker accepts only a stable version number, downloads the source asset and SHA256SUMS from this fixed public repository, verifies the checksum and version, creates a private backup, and runs the updater with readiness checks and rollback on failure. The panel briefly restarts; the installed Sing-box core is preserved. Private update logs are in `/var/log/nara-panel-update.log`. A checksum validates downloaded bytes; repository release access remains the trust boundary.
 
 Existing installations must upgrade once with the command below (or installation manager option 2) to install the new maintenance helper. Later stable releases can use the button. Releases that change Python dependencies require the full installation manager; Docker/manual installations keep their own update process.
 
