@@ -105,11 +105,10 @@ dialog { width:min(780px,calc(100% - 32px)); }
 .schema-note { margin:12px 16px; }
 .schema-json { display:block; margin:12px 16px; width:calc(100% - 32px); direction:ltr; font:14px/1.6 ui-monospace,monospace; }
 .dns-identity-grid { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:center; padding-top:18px; }
-.dns-display-settings { border-top:1px solid var(--border); padding-top:16px; }
-.dns-display-settings>summary { cursor:pointer; color:#60767e; font-size:14px; font-weight:600; }
 .dns-editor { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
 .dns-editor .schema-variant { margin-bottom:0; align-self:start; }
 .dns-editor>.dns-root-fields { display:contents; }
+.dns-editor>.dns-root-fields>[data-dns-field=tag] { grid-column:1/-1; }
 .dns-editor>.dns-advanced { grid-column:1/-1; margin-top:0; }
 .dns-field-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
 .dns-field { min-width:0; display:flex; flex-direction:column; gap:5px; }
@@ -127,6 +126,12 @@ dialog { width:min(780px,calc(100% - 32px)); }
 .dns-provider-box { border:1px solid var(--border); border-radius:10px; background:#f8fbfa; padding:16px; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px 18px; }
 .dns-provider-box>[hidden] { display:none; }
 .dns-provider-box>p { grid-column:1/-1; margin:0; }
+.dns-provider-box .schema-variant { display:grid; gap:7px; }
+.dns-provider-box #dns-profile-field { grid-column:1/-1; }
+.dns-endpoint { grid-column:1/-1; min-width:0; display:flex; flex-direction:column; gap:4px; padding-top:12px; border-top:1px solid var(--border); }
+.dns-endpoint[hidden] { display:none; }
+.dns-endpoint>span,.dns-endpoint>small { font-size:13px; color:var(--muted); }
+.dns-endpoint>code { font:14px/1.6 ui-monospace,monospace; overflow-wrap:anywhere; color:#435c64; }
 @media(max-width:700px) { .dns-provider-box { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:700px) { .dns-editor,.dns-field-grid,.dns-option-grid,.dns-identity-grid { grid-template-columns:minmax(0,1fr); }.dns-editor>.schema-variant { max-width:none; }.dns-editor .schema-object { padding:12px; } }
 #extra-server-options,#extra-client-options { padding:16px; }

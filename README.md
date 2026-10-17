@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.6.5** brings Resolver type into the provider box and Display name into the main DNS form. DNS Advanced sections and JSON view are removed; existing specialized settings are preserved while editing visible fields. A live resolver address shows the protocol-specific URL/endpoint, while Server, Port, Path and TLS names retain the separate fields required by the core.
+
 Version **0.6.4** adds DNS provider templates with protocol choices for Google, Cloudflare, Quad9, AdGuard, OpenDNS and personal NextDNS profiles. Custom retains every resolver type. Version checks now run only on authenticated panel entry; the daily timer and 24-hour Overview line are removed.
 
 Version **0.6.3** reorganizes DNS resolver forms around fixed essential fields. Tag, resolver type, Server and Server Port stay visible, with editable protocol defaults and validation. HTTPS path, hostname resolver and TLS settings appear where applicable. Advanced settings use explicit controls rather than Add option dropdowns; all 15 resolver types, stored TLS trust and custom settings remain supported.

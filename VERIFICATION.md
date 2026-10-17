@@ -513,3 +513,18 @@ The actual browser preview was reviewed at 1440×1000 and 390×844. NextDNS show
 Provider source references: [Google secure transports](https://developers.google.com/speed/public-dns/docs/secure-transports), [Cloudflare encryption](https://developers.cloudflare.com/1.1.1.1/encryption/), [Quad9 services](https://docs.quad9.net/services/), [AdGuard public providers](https://adguard-dns.io/kb/general/dns-providers/), [Cisco OpenDNS encrypted endpoint](https://blogs.cisco.com/security/cisco-interop-discovery-of-designated-resolvers-protocol-implemented), [NextDNS endpoints](https://my.nextdns.io/start) and [NextDNS bootstrap IP](https://github.com/nextdns/nextdns/wiki/Configuration). These are a curated set of documented presets; Custom also supports additional transports and resolver variants.
 
 Full local verification: **211 Python tests passed**, with the bundled 1.14.3 core and existing real-Caddy fixtures; no skips. **85 Node.js tests passed** after the final tag-preservation and JSON-import regressions. No production server was accessed or modified.
+
+
+## Simplified DNS resolver window (0.6.5) — 2026-10-17
+
+Resolver type now lives inside the DNS provider box, using the same schema-driven control and provider-specific choices. Its events are forwarded to the original editor, so defaults, custom ports and protocol-specific fields keep their existing behavior. Display name and enabled status are directly in the main form. The DNS resolver form omits Advanced/TLS Advanced and JSON view rather than hiding existing configuration values in editable JSON. Stored specialized settings remain in the model and are preserved when saving visible fields. Other native editors keep their existing JSON controls.
+
+The provider box displays a live resolver URL/endpoint and the actual connection address. Core Server remains a plain IP/hostname; HTTPS Path and TLS server name stay separate as required by the 1.14.3 format. Full URLs entered into Server get an actionable validation error. Endpoint display follows protocol, TLS name, port and path, supports IPv6 brackets, and does not fetch or execute URLs.
+
+**87 Node.js tests passed**, covering the relocated protocol control, absence of Advanced/JSON in the actual form, visible display-name metadata, endpoint updates, protocol switches, invalid full-URL input, custom ports, existing account tags, NextDNS IDs and retained TLS trust/headers/client keys. The 15-type round-trip test runs in the simplified mode, preserving specialized fields even when those fields are not rendered. Existing schema-editor tests cover the generic mode used elsewhere.
+
+The actual browser page was reviewed at 1440×1000 and 390×844. DOM checks confirm Resolver type inside the provider box, Display name outside collapsed details, zero DNS Advanced sections, no JSON viewer and no horizontal overflow at the mobile width. [Simplified DNS window](screenshots/dns-simple-0.6.5.jpg) shows demonstration resolver data only. Backend/core configuration generation and bundled Sing-box 1.14.3 are unchanged.
+
+The Server/Port/Path distinction was verified against [official HTTPS DNS fields](https://sing-box.sagernet.org/configuration/dns/server/https/).
+
+Targeted backend validation: **75 Python tests passed** (`tests.test_native`, `tests.test_api`, `tests.test_auto_apply`) with the real bundled 1.14.3 core for auto-apply integration. The full Python suite and Linux CI were not repeated for this UI-only change. No production server was accessed or modified.

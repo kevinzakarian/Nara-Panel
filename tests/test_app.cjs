@@ -10,7 +10,7 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
+ w.eval(fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
  w.TestApp.setup(fixture);
  return {w,dom,close(){w.close()}};
 }
@@ -18,16 +18,14 @@ test('new IP resolver is independent and hostname resolver can be explicitly sel
  const f=app();try{
   f.w.TestApp.editCoreRecord('dns_servers');
   const document=f.w.document;
-  document.querySelector('#core-to-json').click();
-  assert.equal(JSON.parse(document.querySelector('#native-json').value).server,'1.1.1.1');
-  assert.ok(!Object.hasOwn(JSON.parse(document.querySelector('#native-json').value),'domain_resolver'));
+  assert.equal(f.w.TestApp.editorValue().server,'1.1.1.1');
+  assert.ok(!Object.hasOwn(f.w.TestApp.editorValue(),'domain_resolver'));
   const server=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Server').querySelector('textarea');
   server.value='dns.google';server.dispatchEvent(new f.w.Event('input',{bubbles:true}));
   assert.equal(document.querySelector('[data-core-add]'),null);
   const resolver=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Domain Resolver').querySelector('select');
   resolver.value='bootstrap';resolver.dispatchEvent(new f.w.Event('input',{bubbles:true}));
-  document.querySelector('#core-to-json').click();
-  const config=JSON.parse(document.querySelector('#native-json').value);
+  const config=f.w.TestApp.editorValue();
   assert.equal(config.server,'dns.google');assert.equal(config.domain_resolver,'bootstrap');
  }finally{f.close()}
 });
@@ -65,22 +63,22 @@ test('DNS protocol switching supplies correct ports, preserves a custom port and
  const f=app();try{
   f.w.TestApp.editCoreRecord('dns_servers',{}, {type:'udp',tag:'test',server:'8.8.8.8'});
   f.w.document.querySelector('[name=dns_provider]').value='custom';f.w.document.querySelector('[name=dns_provider]').dispatchEvent(new f.w.Event('change'));
-  const d=f.w.document,read=()=>{d.querySelector('#core-to-json').click();return JSON.parse(d.querySelector('#native-json').value)};
+  const d=f.w.document,read=()=>f.w.TestApp.editorValue();
   const change=name=>{const select=d.querySelector('[data-core-variant]');select.value=[...select.options].find(x=>x.textContent===name).value;select.dispatchEvent(new f.w.Event('change',{bubbles:true}));};
   for(const [name,port] of [['TCP',53],['TLS',853],['QUIC',853],['HTTPS',443],['HTTP/3',443]]){change(name);assert.equal(read().server_port,port);}
   const port=d.querySelector('[data-dns-field="server_port"] input');port.value='8443';change('TLS');assert.equal(read().server_port,8443);
   change('UDP');assert.equal(read().server_port,8443);assert.ok(!Object.hasOwn(read(),'tls'));assert.equal(d.querySelector('[data-dns-field="tls"]'),null);
  }finally{f.close()}
 });
-test('DNS advanced controls preserve TLS trust, resolver objects and custom settings across edits',async()=>{
+test('simple DNS preserves stored TLS trust, resolver objects and custom settings across edits',async()=>{
  const f=app();try{
   const config={type:'https',tag:'secure',server:'dns.google',server_port:8443,path:'/custom',domain_resolver:{server:'bootstrap',strategy:'ipv4_only',timeout:'3s'},tls:{enabled:true,server_name:'dns.google',certificate:['DEMO CERT'],client_key:['DEMO KEY'],alpn:['h2']},headers:{Authorization:' preserve spaces '},connect_timeout:'5s'};
   let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=JSON.parse(JSON.stringify(r.config))});
   f.w.TestApp.editCoreRecord('dns_servers',{}, config);
   const d=f.w.document;assert.equal(d.querySelector('[data-core-add]'),null);
   d.querySelector('[data-dns-field="server_port"] input').value='9443';await f.w.TestApp.submit();assert.deepEqual(saved,{...config,server_port:9443});
-  const toggle=[...d.querySelectorAll('[data-core-toggle]')].find(x=>x.dataset.key==='connect_timeout'&&x.checked);toggle.checked=false;toggle.dispatchEvent(new f.w.Event('change',{bubbles:true}));
-  await f.w.TestApp.submit();assert.ok(!Object.hasOwn(saved,'connect_timeout'));assert.deepEqual(saved.tls,config.tls);assert.deepEqual(saved.headers,config.headers);
+  assert.equal(d.querySelector('.dns-advanced'),null);assert.equal(d.querySelector('#native-json'),null);assert.equal(d.querySelector('[data-core-toggle]'),null);
+  assert.equal(saved.connect_timeout,'5s');assert.deepEqual(saved.tls,config.tls);assert.deepEqual(saved.headers,config.headers);
  }finally{f.close()}
 });
 test('DNS provider templates fill endpoints and offer only supported protocols while Custom keeps all types',async()=>{
@@ -111,14 +109,26 @@ test('NextDNS needs a profile and preserves it for HTTPS, TLS and QUIC, includin
   provider.value='custom';provider.dispatchEvent(new f.w.Event('change'));assert.equal(d.querySelector('[name=dns_profile_id]').disabled,true);
  }finally{f.close()}
 });
-test('DNS JSON imports leave provider constraints and preserve custom transports; existing tags are never renamed',async()=>{
+test('simple DNS keeps Display name visible and Resolver type in the provider box without Advanced or JSON',async()=>{
  const f=app();try{
-  let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=JSON.parse(JSON.stringify(r.config))});
-  f.w.TestApp.editCoreRecord('dns_servers',{id:'stored',config:{type:'tls',tag:'dns-google',server:'8.8.8.8',server_port:853,tls:{enabled:true,server_name:'dns.google'}}});
-  const d=f.w.document,provider=d.querySelector('[name=dns_provider]');provider.value='cloudflare';provider.dispatchEvent(new f.w.Event('change'));await f.w.TestApp.submit();assert.equal(saved.tag,'dns-google');
-  const config={type:'h3',tag:'custom-json',server:'192.0.2.1',server_port:8443,path:'/private-dns',tls:{enabled:true,server_name:'resolver.example',certificate:['DEMO CA'],client_key:['DEMO KEY']},headers:{Authorization:' demo only '}};
-  d.querySelector('#native-json').value=JSON.stringify(config);d.querySelector('#core-from-json').click();
-  assert.equal(provider.value,'custom');assert.equal(d.querySelector('[data-core-variant]').options.length,15);await f.w.TestApp.submit();assert.deepEqual(saved,config);
+  let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=JSON.parse(JSON.stringify(r))});
+  const config={type:'h3',tag:'custom',server:'192.0.2.1',server_port:8443,path:'/private-dns',tls:{enabled:true,server_name:'resolver.example',certificate:['DEMO CA'],client_key:['DEMO KEY']},headers:{Authorization:' demo only '}};
+  f.w.TestApp.editCoreRecord('dns_servers',{id:'stored',label:'Personal resolver',config});
+  const d=f.w.document;
+  assert.ok(d.querySelector('.dns-provider-box [data-core-variant]'));assert.equal(d.querySelector('#native-fields [data-core-variant]'),null);
+  assert.equal(d.querySelector('[name=display_name]').closest('details'),null);assert.equal(d.querySelector('[name=display_name]').value,'Personal resolver');
+  assert.equal(d.querySelector('.dns-advanced'),null);assert.equal(d.querySelector('#native-json'),null);assert.equal(d.querySelector('#core-to-json'),null);
+  d.querySelector('[name=display_name]').value='Renamed resolver';await f.w.TestApp.submit();assert.equal(saved.label,'Renamed resolver');assert.deepEqual(saved.config,config);
+ }finally{f.close()}
+});
+test('DNS address preview follows header protocol changes and silent Server edits reject full URLs',async()=>{
+ const f=app();try{
+  f.w.TestApp.saveWith(async()=>{});f.w.TestApp.editCoreRecord('dns_servers');const d=f.w.document,provider=d.querySelector('[name=dns_provider]');
+  provider.value='google';provider.dispatchEvent(new f.w.Event('change'));assert.equal(d.querySelector('#dns-endpoint-url').textContent,'https://dns.google/dns-query');
+  const protocol=d.querySelector('.dns-provider-box [data-core-variant]');protocol.value=[...protocol.options].find(x=>x.textContent==='UDP').value;protocol.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  assert.equal(d.querySelector('#dns-endpoint-url').textContent,'udp://8.8.8.8:53');assert.equal(d.querySelector('#dns-endpoint-address').textContent,'Connects to 8.8.8.8:53');
+  const port=d.querySelector('[data-dns-field="server_port"] input');port.value='5353';port.dispatchEvent(new f.w.Event('input',{bubbles:true}));assert.ok(d.querySelector('#dns-endpoint-url').textContent.endsWith(':5353'));
+  d.querySelector('[data-dns-field="server"] textarea').value='https://dns.google/dns-query';await assert.rejects(f.w.TestApp.submit(),/IP address or hostname/);
  }finally{f.close()}
 });
 test('update status has no daily schedule and displays in-progress checks separately',()=>{

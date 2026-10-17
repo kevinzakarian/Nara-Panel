@@ -299,7 +299,7 @@ function coreReferences(){
  return {inbound:tags([...state.inbounds,...state.endpoints]),outbound:[...new Set(['direct',...tags([...state.outbounds,...state.endpoints])])],dns_server:tags(state.dns_servers),rule_set:tags(state.rule_sets),network_namespace:tags(state.network_namespaces),http_client:tags(state.http_clients),certificate_provider:tags(state.certificate_providers)};
 }
 function dnsProviderControls(selected){
- return `<section class="dns-provider-box">${selectField('DNS provider','dns_provider',[['custom','Custom / manual'],...Object.entries(DNSPresets.providers).map(([key,p])=>[key,p.name])],selected.provider)}<label id="dns-profile-field" ${selected.provider==='nextdns'?'':'hidden'}>NextDNS Profile ID<input name="dns_profile_id" value="${e(selected.profileId)}" placeholder="e.g. abc123" autocomplete="off" spellcheck="false" maxlength="6"><small class="field-hint">Find this ID in your NextDNS dashboard. It is separate from your NARA account.</small></label><p class="field-hint" id="dns-provider-note"></p></section>`;
+ return `<section class="dns-provider-box">${selectField('DNS provider','dns_provider',[['custom','Custom / manual'],...Object.entries(DNSPresets.providers).map(([key,p])=>[key,p.name])],selected.provider)}<div id="dns-type-slot"></div><label id="dns-profile-field" ${selected.provider==='nextdns'?'':'hidden'}>NextDNS Profile ID<input name="dns_profile_id" value="${e(selected.profileId)}" placeholder="e.g. abc123" autocomplete="off" spellcheck="false" maxlength="6"><small class="field-hint">Find this ID in your NextDNS dashboard. It is separate from your NARA account.</small></label><p class="field-hint" id="dns-provider-note"></p><div class="dns-endpoint" id="dns-endpoint" hidden><span>Resolver address</span><code id="dns-endpoint-url"></code><small id="dns-endpoint-address"></small></div></section>`;
 }
 function editCoreRecord(collection,item={},preset){
  if(!coreCatalog.collections[collection])return editCoreOptions(collection);
@@ -316,14 +316,14 @@ function editCoreRecord(collection,item={},preset){
  if(['inbounds','outbounds','dns_servers','rule_sets','endpoints','services','certificate_providers','http_clients','network_namespaces'].includes(collection)&&!Object.hasOwn(config,'tag'))config.tag='';
  const inbound=collection==='inbounds',dns=collection==='dns_servers';
  const selected=dns?DNSPresets.detect(config):{};let activeProfile=selected.profileId;
- const editorSettings={collection,...(dns?{layout:'dns',types:DNSPresets.providers[selected.provider]?.types,transformType:next=>selected.provider==='custom'?next:DNSPresets.apply(selected.provider,next,activeProfile)}:{}),references:{...coreReferences(),...(dns?{dns_server:state.dns_servers.filter(row=>row.id!==item.id).map(row=>row.tag)}:{})}};
+ const editorSettings={collection,...(dns?{layout:'dns',simple:true,types:DNSPresets.providers[selected.provider]?.types,transformType:next=>selected.provider==='custom'?next:DNSPresets.apply(selected.provider,next,activeProfile)}:{}),references:{...coreReferences(),...(dns?{dns_server:state.dns_servers.filter(row=>row.id!==item.id).map(row=>row.tag)}:{})}};
  if(inbound&&config.type==='anytls'&&!Object.hasOwn(config,'padding_scheme'))config.padding_scheme=structuredClone(optionSchema.server.anytls[0].default);
  const identity=`<div class="${dns?'dns-identity-grid':''}">${field('Display name (optional)','display_name',item.label||'')}${inbound?selectField('TLS profile (optional)','native_tls_id',[['','Custom TLS / no profile'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||''):''}<label class="check-field"><input type="checkbox" name="native_enabled" ${checked(item.enabled!==false)}>Enable this item</label></div>`;
  let editor;
- openModal((item.id?'Edit ':'New ')+(dns?'DNS resolver':coreLabels[collection]||'inbound'),dns?'Saving validates and applies your DNS settings automatically.':`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,`${inbound?'<div class="hint-box">Standalone listener: authentication is configured here. Panel accounts, subscriptions, quotas and expiry do not apply to this listener.</div>':''}${inbound&&optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):''}${dns?dnsProviderControls(selected):identity}${inbound?`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label><p class="note">Public listeners need authentication unless this option is explicitly selected.</p>`:''}<div class="schema-editor ${dns?'dns-editor':''}" id="native-fields"></div>${dns?`<details class="dns-display-settings"><summary>Display and status</summary>${identity}</details>`:''}${dns?'':'<p class="note">Choose “Add option” inside any group to access every available field. Arrays and logical groups support multiple items. Blank optional fields can be removed. Stored private key values are kept unless replaced.</p>'}<details class="option-section"><summary>JSON view</summary><p class="note schema-note">Load the current form into JSON, or import JSON into the form.</p><div class="schema-note inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false"></textarea></details>`,async form=>{
+ openModal((item.id?'Edit ':'New ')+(dns?'DNS resolver':coreLabels[collection]||'inbound'),dns?'Saving validates and applies your DNS settings automatically.':`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,`${inbound?'<div class="hint-box">Standalone listener: authentication is configured here. Panel accounts, subscriptions, quotas and expiry do not apply to this listener.</div>':''}${inbound&&optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):''}${dns?dnsProviderControls(selected)+identity:identity}${inbound?`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label><p class="note">Public listeners need authentication unless this option is explicitly selected.</p>`:''}<div class="schema-editor ${dns?'dns-editor':''}" id="native-fields"></div>${dns?'':'<p class="note">Choose “Add option” inside any group to access every available field. Arrays and logical groups support multiple items. Blank optional fields can be removed. Stored private key values are kept unless replaced.</p>'}${dns?'':`<details class="option-section"><summary>JSON view</summary><p class="note schema-note">Load the current form into JSON, or import JSON into the form.</p><div class="schema-note inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false"></textarea></details>`}`,async form=>{
   if(dns&&selected.provider==='nextdns'){
    const id=form.elements.dns_profile_id.value.trim().toLowerCase();DNSPresets.validate(selected.provider,id);
-   if(id!==activeProfile){activeProfile=id;editor.set(DNSPresets.apply(selected.provider,editor.value(),id));}
+   if(id!==activeProfile){activeProfile=id;editor.set(DNSPresets.apply(selected.provider,editor.value(),id));refreshEndpoint();}
   }
   const c=editor.value();
   if(dns){
@@ -331,17 +331,24 @@ function editCoreRecord(collection,item={},preset){
    if(['udp','tcp','tls','https','quic','h3'].includes(c.type)){
     c.server=typeof c.server==='string'?c.server.trim():'';
     if(!c.server)throw new Error('Server address is required.');
+    if(c.server.includes('://'))throw new Error('Server accepts an IP address or hostname. Use Path and TLS Server Name separately for encrypted DNS.');
     if(!Number.isInteger(c.server_port)||c.server_port<1||c.server_port>65535)throw new Error('Server Port must be between 1 and 65535.');
    }
   }
   await saveRecord(collection,{id:item.id,mode:'native',label:form.elements.display_name.value,enabled:form.elements.native_enabled.checked,config:c,tag:c.tag||'',type:c.type||'',...(inbound?{port:c.listen_port||0,listen:c.listen||'',tls_id:form.elements.native_tls_id.value,allow_unauthenticated:form.elements.allow_unauthenticated.checked}:{})});
  });
+ if(dns)editorSettings.typeContainer=$('#dns-type-slot');
  editor=CoreSchema.mount($('#native-fields'),schema,config,editorSettings);
+ function refreshEndpoint(){
+  const details=DNSPresets.endpoint(editor.value());$('#dns-endpoint').hidden=!details;
+  $('#dns-endpoint-url').textContent=details?.url||'';$('#dns-endpoint-address').textContent=details?'Connects to '+details.address:'';
+ }
  function providerNote(){
   if(!dns)return;
   const personal=selected.provider==='nextdns';$('#dns-profile-field').hidden=!personal;
   const input=$('[name=dns_profile_id]');input.disabled=!personal;input.required=personal;
   $('#dns-provider-note').textContent=DNSPresets.providers[selected.provider]?.note||'Enter your own resolver settings. Every supported Sing-box resolver type is available.';
+  refreshEndpoint();
  }
  if(dns){
   providerNote();
@@ -357,13 +364,16 @@ function editCoreRecord(collection,item={},preset){
    providerNote();
   });
   $('[name=dns_profile_id]').addEventListener('input',event=>{
-   activeProfile=event.target.value.trim().toLowerCase();editor.set(DNSPresets.apply(selected.provider,editor.value(),activeProfile));
+   activeProfile=event.target.value.trim().toLowerCase();editor.set(DNSPresets.apply(selected.provider,editor.value(),activeProfile));refreshEndpoint();
   });
+  $('#native-fields').addEventListener('input',refreshEndpoint);$('#native-fields').addEventListener('change',refreshEndpoint);$('#dns-type-slot').addEventListener('change',refreshEndpoint);
  }
 
+ if(!dns){
  $('#native-json').value=JSON.stringify(config,null,2);
  $('#core-to-json').addEventListener('click',()=>{$('#native-json').value=JSON.stringify(editor.value(),null,2)});
- $('#core-from-json').addEventListener('click',()=>{try{const next=JSON.parse($('#native-json').value);if(!next||Array.isArray(next)||typeof next!=='object')throw Error();if(dns){selected.provider='custom';editorSettings.types=undefined;$('[name=dns_provider]').value='custom';providerNote();}editor.set(next);toast('JSON loaded into form. Save to apply.');}catch{toast('Enter a valid JSON object.',true);}});
+ $('#core-from-json').addEventListener('click',()=>{try{const next=JSON.parse($('#native-json').value);if(!next||Array.isArray(next)||typeof next!=='object')throw Error();editor.set(next);toast('JSON loaded into form. Save to apply.');}catch{toast('Enter a valid JSON object.',true);}});
+ }
 }
 function editCoreOptions(key){
  const section=key.replace('_options',''),omit=section==='dns'?['servers','rules','final']:section==='route'?['rules','rule_set']:section==='experimental'?['v2ray_api']:[];

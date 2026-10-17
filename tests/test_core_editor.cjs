@@ -123,7 +123,7 @@ test('guided DNS supports every resolver type without deleting data or requiring
   ...['openconnect','openvpn','tailscale'].map(type=>({type,tag:type,endpoint:'tunnel',accept_default_resolvers:true})),
   {type:'resolved',tag:'resolved',service:'resolver',accept_default_resolvers:true}
  ];
- for(const config of configs){const f=fixture('DNSServer',config,{layout:'dns',collection:'dns_servers',references:{dns_server:['bootstrap']}});try{assert.deepEqual(f.value(),config);assert.equal(f.host.querySelector('[data-core-add]'),null);assert.equal(f.host.querySelector('[data-core-remove][data-key="tag"]'),null);}finally{f.finish()}}
+ for(const config of configs){const f=fixture('DNSServer',config,{layout:'dns',simple:true,collection:'dns_servers',references:{dns_server:['bootstrap']}});try{assert.deepEqual(f.value(),config);assert.equal(f.host.querySelector('[data-core-add]'),null);assert.equal(f.host.querySelector('.dns-advanced'),null);assert.equal(f.host.querySelector('[data-core-remove][data-key="tag"]'),null);}finally{f.finish()}}
 });
 test('guided DNS Advanced stays open after enabling an option and optional values can be cleared',()=>{
  const f=fixture('DNSServer',{type:'udp',tag:'dns',server:'8.8.8.8',server_port:53,domain_resolver:'bootstrap'},{layout:'dns',references:{dns_server:['bootstrap']}});

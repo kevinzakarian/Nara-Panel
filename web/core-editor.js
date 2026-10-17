@@ -41,7 +41,7 @@ const CoreSchema=(()=>{
   const dnsPorts={udp:53,tcp:53,tls:853,quic:853,https:443,h3:443};
   const guided=settings.layout==='dns';
   const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
-  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
+  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
   function dnsObject(s,obj,set,id,label,root,depth,scope,variant=''){
    const props=s.properties||{},required=s.required||[],remote=root&&Object.hasOwn(dnsPorts,obj.type),tls=label==='TLS';
    const basic=(root?['tag',...(remote?['server','server_port','path','domain_resolver']:['interface','endpoint','service','inet4_range','inet6_range','path','predefined']),...(props.tls?['tls']:[])]:tls?['enabled','server_name','insecure']:Object.keys(obj));
@@ -61,9 +61,9 @@ const CoreSchema=(()=>{
    const extras=Object.keys(props).filter(key=>!pinned.includes(key)&&!('const'in props[key])&&!settings.exclude?.includes(key));
    const configured=extras.filter(key=>Object.hasOwn(obj,key));
    const unknown=Object.keys(obj).filter(key=>!Object.hasOwn(props,key));
-   const advanced=extras.length?`<details class="dns-advanced" data-core-panel="${id}"><summary>${tls?'Advanced TLS settings':'Advanced settings'}${configured.length?` <span class="badge">${configured.length} configured</span>`:''}</summary><div class="dns-field-grid">${configured.map(key=>field(key,true)).join('')}</div><div class="dns-option-grid">${extras.filter(key=>!Object.hasOwn(obj,key)).map(key=>`<label class="check-field"><input type="checkbox" data-core-toggle="${id}" data-key="${e(key)}"><span>${e(title(key))}</span></label>`).join('')}</div></details>`:'';
+   const advanced=!settings.simple&&extras.length?`<details class="dns-advanced" data-core-panel="${id}"><summary>${tls?'Advanced TLS settings':'Advanced settings'}${configured.length?` <span class="badge">${configured.length} configured</span>`:''}</summary><div class="dns-field-grid">${configured.map(key=>field(key,true)).join('')}</div><div class="dns-option-grid">${extras.filter(key=>!Object.hasOwn(obj,key)).map(key=>`<label class="check-field"><input type="checkbox" data-core-toggle="${id}" data-key="${e(key)}"><span>${e(title(key))}</span></label>`).join('')}</div></details>`:'';
    // Unknown future fields stay in the model and can be edited in JSON view.
-   return `<div class="dns-field-grid ${root?'dns-root-fields':''}">${pinned.map(key=>field(key)+(key==='tag'?variant:'')).join('')}</div>${advanced}${unknown.length?'<p class="note">Additional stored fields are preserved. Use JSON view to edit them.</p>':''}`;
+   return `<div class="dns-field-grid ${root?'dns-root-fields':''}">${pinned.map(key=>field(key)+(key==='tag'?variant:'')).join('')}</div>${advanced}${!settings.simple&&unknown.length?'<p class="note">Additional stored fields are preserved. Use JSON view to edit them.</p>':''}`;
   }
   function render(input,v,set,label,root=false,depth=0,scope=settings.scope||''){
    if(depth>20)return '<p class="note">Nesting limit reached. Use the JSON view for this value.</p>';
@@ -130,13 +130,15 @@ const CoreSchema=(()=>{
   // Keep untouched values byte-for-byte; synchronize only changed controls.
   function syncInputs(){for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
   container.addEventListener('input',event=>readInput(event.target));
-  container.addEventListener('change',event=>{
+  function change(event){
    const el=event.target;
    syncInputs();
    if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=node.variants[Number(el.value)],old=node.value||{};let fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];if(guided&&node.root&&dnsPorts[fresh.type]&&old.server_port===dnsPorts[old.type])fresh.server_port=dnsPorts[fresh.type];if(node.root&&settings.transformType)fresh=settings.transformType(fresh,old);node.set(fresh);draw();}
    if(el.dataset.coreToggle!==undefined){const node=nodes.get(el.dataset.coreToggle),s=choose(node.input,node.value),obj=node.value||{};if(el.checked)Object.defineProperty(obj,el.dataset.key,{value:seed(s.properties[el.dataset.key]),writable:true,enumerable:true,configurable:true});else delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
-  });
+  }
+  container.addEventListener('change',change);
+  if(settings.typeContainer)settings.typeContainer.addEventListener('change',change);
   container.addEventListener('click',event=>{
    const el=event.target.closest('button');if(!el)return;
    syncInputs();

@@ -34,5 +34,13 @@ const DNSPresets=(()=>{
   return {...config,...generated,tag:config.tag,server_port:config.server_port??generated.server_port,...(generated.tls?{tls:{...config.tls,...generated.tls}}:{})};
  }
  function validate(provider,profileId){if(provider==='nextdns'&&!/^[a-f0-9]{6}$/i.test(profileId.trim()))throw new Error('Enter the six-character NextDNS Profile ID from your NextDNS dashboard.');}
- return {providers,build,detect,apply,validate};
+ function endpoint(config){
+  if(!['udp','tcp','tls','https','h3','quic'].includes(config.type)||typeof config.server!=='string'||!config.server.trim()||config.server.includes('://'))return null;
+  const bracket=host=>host.includes(':')?'['+host.replace(/^\[|\]$/g,'')+']':host;
+  const port=config.server_port||({udp:53,tcp:53,tls:853,quic:853,https:443,h3:443}[config.type]);
+  const secure=['tls','https','h3','quic'].includes(config.type),host=(secure&&config.tls?.server_name||config.server).trim();
+  const https=['https','h3'].includes(config.type),scheme=https?'https':config.type;
+  return {url:scheme+'://'+bracket(host)+(https&&port===443?'':':'+port)+(https?(config.path||'/dns-query'):''),address:bracket(config.server.trim())+':'+port};
+ }
+ return {providers,build,detect,apply,validate,endpoint};
 })();

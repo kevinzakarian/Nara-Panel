@@ -24,3 +24,12 @@ test('custom settings are not silently recognized as provider templates and Next
  const result=plain(p.apply('nextdns',{type:'https',tag:'private',server_port:8443,tls:{certificate:['DEMO CA'],insecure:false}},'abc123'));
  assert.equal(result.server_port,8443);assert.equal(result.tag,'private');assert.deepEqual(result.tls.certificate,['DEMO CA']);assert.equal(result.tls.insecure,false);
 });
+test('resolver addresses follow protocol, path, TLS name and custom ports without changing core Server',()=>{
+ const c=plain(p.build('google','https'));
+ assert.deepEqual(plain(p.endpoint(c)),{url:'https://dns.google/dns-query',address:'8.8.8.8:443'});assert.equal(c.server,'8.8.8.8');
+ assert.equal(p.endpoint(p.build('cloudflare','tls')).url,'tls://one.one.one.one:853');
+ assert.equal(p.endpoint(p.build('nextdns','quic','abc123')).url,'quic://abc123.dns.nextdns.io:853');
+ assert.equal(p.endpoint(p.build('quad9','udp')).url,'udp://9.9.9.9:53');
+ assert.deepEqual(plain(p.endpoint({type:'h3',server:'2001:db8::1',server_port:8443,path:'/custom'})),{url:'https://[2001:db8::1]:8443/custom',address:'[2001:db8::1]:8443'});
+ assert.equal(p.endpoint({type:'local',tag:'local'}),null);assert.equal(p.endpoint({type:'https',server:'https://dns.google/dns-query'}),null);
+});
