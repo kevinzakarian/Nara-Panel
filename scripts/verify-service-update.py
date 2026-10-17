@@ -112,12 +112,12 @@ def controller(source):
         (override/'fixture.conf').write_text('[Service]\nEnvironment=GITHUB_ACTIONS=true\nEnvironment=PATH='+str(FIXTURE/'blocked')+':/usr/sbin:/usr/bin:/sbin:/bin\nExecStart=\nExecStart='+str(APP/'.venv/bin/python')+' '+str(FIXTURE/'driver.py')+' --broker\n')
         run('systemctl','daemon-reload');run('systemctl','start','nara-panel.service','nara-panel-access.path')
         m.panel_health(m.Layout())
-        jar=http.cookiejar.CookieJar();http=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(jar))
+        jar=http.cookiejar.CookieJar();opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),urllib.request.HTTPCookieProcessor(jar))
         base='http://127.0.0.1:'+str(panel)+'/CIEntry/api/'
         def request(path,body=None,csrf=''):
             headers={'Content-Type':'application/json','X-CSRF-Token':csrf}
             req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers=headers)
-            with http.open(req,timeout=5) as response:return json.load(response)
+            with opener.open(req,timeout=5) as response:return json.load(response)
         csrf=request('login',{'username':'fixture','password':'fixture-only-password'})['csrf']
         job=request('update-panel',{'version':FUTURE},csrf)
         deadline=time.monotonic()+180
