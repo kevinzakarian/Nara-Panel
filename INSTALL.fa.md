@@ -287,3 +287,14 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 ## Family Safe و نام‌گذاری خودکار DNS — 0.6.7
 
 گزینه‌های خانوادگیِ AdGuard DNS، Cloudflare، CleanBrowsing و OpenDNS FamilyShield اضافه شده‌اند. لیست پرووایدرها الفبایی است و Custom / Manual در انتهای آن قرار دارد. فرم DNS جدید با Cloudflare و HTTPS باز می‌شود و Display name با نام پرووایدر پر می‌شود. نام خودکار با تغییر پرووایدر تغییر می‌کند؛ نام سفارشیِ کاربر حفظ می‌شود. این پیش‌فرض، resolverهای موجود یا Default DNS سرور را عوض نمی‌کند. هر preset فقط پروتکل‌های پشتیبانی‌شدهٔ خودش را نمایش می‌دهد.
+
+
+## اصلاح بکاپ هنگام آپدیت — 0.6.8
+
+اگر Update panel با خطای `runuser: cannot set user id: Operation not permitted` متوقف می‌شود، نسخهٔ ۰٫۶٫۸ روش بکاپ را اصلاح می‌کند. بکاپ با مالک دیتابیس و بدون وابستگی به runuser/PAM اجرا می‌شود. در صورت شکست بکاپ، نصب شروع نمی‌شود و جزئیات در `/var/log/nara-panel-update.log` ثبت می‌شود.
+
+چون آپدیترِ نسخهٔ نصب‌شده پیش از نصب اصلاح در مرحلهٔ بکاپ متوقف می‌شود، این بار یک بار با کاربر root اجرا کنید؛ سپس ارتقاهای بعدی از دکمهٔ پنل انجام می‌شوند:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/update.sh | bash
+```

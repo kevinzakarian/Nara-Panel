@@ -10,6 +10,7 @@ import signal
 import subprocess
 import tarfile
 import tempfile
+import traceback
 import urllib.request
 from . import __version__
 from .updates import version
@@ -100,12 +101,16 @@ def apply(paths, job):
         if (source / 'requirements.txt').read_bytes() != (paths.app / 'requirements.txt').read_bytes():
             raise ValueError("Dependencies changed; use the full installation manager for this release")
         from .maintenance import backup, panel_health
-        backup(paths)
         log = paths.root / 'var/log/nara-panel-update.log'
         log.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, 'a') as output:
+            try:
+                backup(paths)
+            except Exception:
+                traceback.print_exc(file=output)
+                raise ValueError('Private backup failed; no update was installed. Review /var/log/nara-panel-update.log') from None
             run_installer(source, output)
         if panel_health(paths).get('version') != release:
             raise ValueError("Updated panel did not report the expected version; review the private server update log")

@@ -61,22 +61,33 @@ class MaintenanceTests(unittest.TestCase):
         from types import SimpleNamespace
         source = self.paths.data / 'panel.sqlite3'
         target = Path(self.temp.name) / 'owner-snapshot.sqlite3'
+        owner = SimpleNamespace(st_uid=12345, st_gid=12345, st_mode=0o100600)
         original_stat = Path.stat
         def stat(path, *args, **kwargs):
-            if path == source:
-                return SimpleNamespace(st_uid=12345, st_gid=12345)
+            if path in (source, source.parent):return owner
             return original_stat(path, *args, **kwargs)
-        def child(command, **kwargs):
-            self.assertEqual(command[:4], ['runuser', '-u', 'fixture-service-user', '--'])
-            self.assertIn('mode=ro', command[-3])
-            with sqlite3.connect(command[-2]) as database, sqlite3.connect(command[-1]) as output:
-                database.backup(output)
-            return subprocess.CompletedProcess(command, 0)
-        with mock.patch.object(Path, 'stat', stat), mock.patch.object(m.os, 'geteuid', return_value=0), mock.patch.object(m.os, 'chown'), mock.patch.object(m.pwd, 'getpwuid', return_value=SimpleNamespace(pw_name='fixture-service-user')), mock.patch.object(m, 'run', side_effect=child):
+        def child(identity, operation, timeout=None):
+            self.assertEqual(identity.st_uid,12345);self.assertEqual(timeout,120)
+            return operation()
+        with mock.patch.object(Path, 'stat', stat), mock.patch.object(m.os, 'geteuid', return_value=0), mock.patch.object(m.os, 'chown'), mock.patch.object(m, '_database_owner_worker', side_effect=child) as worker, mock.patch.object(m, 'run', side_effect=AssertionError('runuser must not be invoked')):
             m.snapshot_database(source, target)
+            worker.assert_called_once()
         with sqlite3.connect(target) as database:
             self.assertIsNotNone(database.execute("SELECT value FROM kv WHERE key='state'").fetchone())
         self.assertEqual(list(self.paths.data.glob('.nara-backup-*')), [])
+
+    def test_database_snapshot_rejects_symlinks_and_does_not_create_a_missing_database(self):
+        source=self.paths.data/'panel.sqlite3';link=self.paths.data/'linked.sqlite3';link.symlink_to(source)
+        target=Path(self.temp.name)/'snapshot.sqlite3'
+        with self.assertRaisesRegex(ValueError,'file type'):m.snapshot_database(link,target)
+        with self.assertRaises(FileNotFoundError):m.snapshot_database(self.paths.data/'missing.sqlite3',target)
+        self.assertFalse(target.exists())
+
+    def test_owner_worker_timeout_reaps_the_child(self):
+        identity=self.paths.data.stat()
+        with mock.patch.object(m.os,'fork',return_value=12345),mock.patch.object(m.select,'select',return_value=([],[],[])),mock.patch.object(m.os,'kill') as kill,mock.patch.object(m.os,'waitpid') as wait,self.assertRaisesRegex(ValueError,'timed out'):
+            m._database_owner_worker(identity,lambda:None,timeout=.01)
+        kill.assert_called_once_with(12345,m.signal.SIGKILL);wait.assert_called_once_with(12345,0)
 
     def test_domain_input_rejects_urls_wildcards_and_configuration_injection(self):
         for value in ('https://a.example.com', 'a.example.com:443', 'a.example.com/foo', '*.example.com', 'x.example.com\n{\nadmin :2019', '-bad.example.com', 'example..com'):

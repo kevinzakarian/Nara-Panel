@@ -11,15 +11,15 @@ import json
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
-import pwd
 import re
+import select
+import signal
 import shutil
 import socket
 import sqlite3
 import ssl
 import stat
 import subprocess
-import sys
 import tarfile
 import tempfile
 import time
@@ -82,21 +82,26 @@ def panel_health(paths, timeout=30):
         time.sleep(1)
 
 
+def _copy_database(source, destination):
+    # Read-only preserves the live service's ownership of WAL/SHM files.
+    with contextlib.closing(sqlite3.connect(source.resolve().as_uri() + '?mode=ro', uri=True)) as database, contextlib.closing(sqlite3.connect(str(destination))) as target:
+        database.backup(target)
+
+
 def snapshot_database(source, destination):
-    owner = source.stat()
+    owner = source.lstat()
+    if not stat.S_ISREG(owner.st_mode) or owner.st_uid != source.parent.stat().st_uid:
+        raise ValueError('Invalid panel database ownership or file type')
     if os.geteuid() == 0 and owner.st_uid != 0:
-        # Connecting to a WAL database as root can create root-owned -wal/-shm
-        # files and temporarily lock the service out. Snapshot as its own user.
-        account = pwd.getpwuid(owner.st_uid).pw_name
+        # Use the already-loaded interpreter and drop identity directly. A
+        # systemd maintenance job must not depend on runuser/PAM login policy.
         with tempfile.TemporaryDirectory(prefix=".nara-backup-", dir=source.parent) as directory:
             os.chown(directory, owner.st_uid, owner.st_gid)
             snapshot = Path(directory) / "panel.sqlite3"
-            worker = "import contextlib,sqlite3,sys; from urllib.parse import quote\nwith contextlib.closing(sqlite3.connect('file:'+quote(sys.argv[1])+'?mode=ro',uri=True)) as source, contextlib.closing(sqlite3.connect(sys.argv[2])) as target: source.backup(target)"
-            run(["runuser", "-u", account, "--", sys.executable, "-c", worker, str(source), str(snapshot)], cwd=source.parent, stdin=subprocess.DEVNULL, timeout=120)
+            _database_owner_worker(owner, lambda: _copy_database(source, snapshot), timeout=120)
             shutil.copyfile(snapshot, destination)
     else:
-        with contextlib.closing(sqlite3.connect(str(source))) as database, contextlib.closing(sqlite3.connect(str(destination))) as target:
-            database.backup(target)
+        _copy_database(source, destination)
 
 
 def backup(paths):
@@ -332,7 +337,10 @@ def needs_database_owner(paths):
 
 
 def database_as_owner(paths, operation):
-    owner = paths.data.stat()
+    return _database_owner_worker(paths.data.stat(), operation)
+
+
+def _database_owner_worker(owner, operation, timeout=None):
     reader, writer = os.pipe()
     process = os.fork()
     if process == 0:
@@ -348,6 +356,9 @@ def database_as_owner(paths, operation):
     os.close(writer)
     try:
         with os.fdopen(reader) as source:
+            if timeout is not None and not select.select([reader], [], [], timeout)[0]:
+                os.kill(process, signal.SIGKILL)
+                raise ValueError('Database backup timed out; no update was installed')
             result = json.load(source)
     finally:
         os.waitpid(process, 0)

@@ -37,12 +37,23 @@ jobs:
           if command -v go; then exit 1; fi
   service-units:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
       - name: Verify panel and maintenance service units
         run: |
-          sudo mkdir -p /opt/nara-panel/.venv/bin
-          sudo ln -s /usr/bin/python3 /opt/nara-panel/.venv/bin/python
+          sudo apt-get update
+          sudo apt-get install -y python3-venv
+          sudo python3 -m venv /opt/nara-panel/.venv
+          sudo /opt/nara-panel/.venv/bin/pip install -r requirements.txt
           systemd-analyze verify deploy/nara-panel.service deploy/nara-panel-access.service deploy/nara-panel-access.path
+      - name: Exercise a real systemd panel upgrade with a live WAL database
+        run: |
+          sudo env GITHUB_ACTIONS=true PYTHONPATH="$GITHUB_WORKSPACE" /opt/nara-panel/.venv/bin/python scripts/verify-service-update.py "$GITHUB_WORKSPACE"
+      - name: Read fixture diagnostics on failure
+        if: failure()
+        run: |
+          sudo journalctl -u nara-panel-access.service -u nara-panel.service --no-pager -n 100
+          sudo test ! -f /var/log/nara-panel-update.log || sudo cat /var/log/nara-panel-update.log

@@ -86,3 +86,9 @@ class PanelUpdateTests(unittest.TestCase):
         with mock.patch.object(u.subprocess,'Popen',return_value=child),mock.patch.object(u.os,'killpg') as kill,self.assertRaisesRegex(ValueError,'timed out'):
             u.run_installer(Path('/private/source'),io.StringIO())
         kill.assert_called_once_with(12345,u.signal.SIGTERM)
+
+    def test_failed_backup_is_logged_privately_and_never_starts_the_installer(self):
+        with mock.patch.object(u,'download',side_effect=self.responses(self.archive())),mock.patch('nara.maintenance.backup',side_effect=PermissionError('fixture private detail')),mock.patch.object(u,'run_installer') as install,self.assertRaisesRegex(ValueError,'Private backup failed; no update was installed') as error:
+            u.apply(self.paths,self.job)
+        install.assert_not_called();self.assertNotIn('fixture private detail',str(error.exception))
+        log=self.paths.root/'var/log/nara-panel-update.log';self.assertIn('fixture private detail',log.read_text());self.assertEqual(log.stat().st_mode&0o777,0o600)
