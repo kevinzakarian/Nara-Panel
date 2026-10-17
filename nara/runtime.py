@@ -178,7 +178,8 @@ class Runtime:
             def usage():
                 totals = self.store.totals()
                 if reset_client:
-                    totals[reset_client] = {"upload": 0, "download": 0}
+                    for client_id in reset_client if isinstance(reset_client, list) else [reset_client]:
+                        totals[client_id] = {"upload": 0, "download": 0}
                 return totals
             generation, config = self.prepare(state, usage())
             old = self.generation

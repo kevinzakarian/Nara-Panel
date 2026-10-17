@@ -137,3 +137,14 @@ class SummaryTests(unittest.TestCase):
             self.assertNotIn("fixture-private-password", capture.getvalue())
             self.assertNotIn("private-hash", capture.getvalue())
             self.assertIn("Owner", capture.getvalue())
+
+class TwoFactorRecoveryTests(unittest.TestCase):
+    def test_local_two_factor_reset_requires_confirmation_and_preserves_identity(self):
+        from nara import security
+        from nara.store import password_hash
+        with tempfile.TemporaryDirectory() as directory:
+            store=Store(directory);original={'username':'Owner','password':password_hash('fixture-password-123'),'avatar':'ocean','totp_secret':security.totp_secret(),'totp_last':1,'recovery_hashes':['hash']}
+            store.set('admin',original);token,_=store.new_session()
+            with mock.patch('sys.argv',['nara','reset-2fa','--data',directory]),mock.patch('builtins.input',return_value='RESET 2FA'),contextlib.redirect_stdout(io.StringIO()):main()
+            after=store.get('admin');self.assertEqual(after,{'username':original['username'],'password':original['password'],'avatar':'ocean'})
+            self.assertIsNone(store.session(token))

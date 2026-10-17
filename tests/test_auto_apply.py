@@ -129,6 +129,39 @@ class AutoApplyTests(unittest.TestCase):
         self.assertEqual(result[0],400);self.assertEqual(self.store.get('state'),state)
         self.assertTrue(self.runtime.running)
 
+    def test_bulk_client_changes_reset_counters_once_and_invalid_batch_rolls_back(self):
+        import json
+        state=self.seed()
+        status,result,_=self.request('/api/clients-bulk-create',{'revision':state['revision'],'count':3,
+            'pattern':'Team-{n:03}','defaults':{'inbound_ids':[state['inbounds'][0]['id']],'quota_bytes':1073741824}})
+        self.assertEqual(status,200,result);state=self.store.get('state');ids=result['ids']
+        config=json.loads((self.runtime.generation/'config.json').read_text())
+        self.assertEqual(len(config['inbounds'][0]['users']),4)
+        for ident in ids:self.store.add_traffic([(ident,'download',500)])
+        status,result,_=self.request('/api/clients-bulk-action',{'revision':state['revision'],'ids':ids,'operation':'reset_traffic'})
+        self.assertEqual(status,200,result);state=self.store.get('state')
+        self.assertTrue(all(ident not in self.store.totals() for ident in ids));self.assertTrue(self.runtime.running)
+        status,result,_=self.request('/api/clients-bulk-action',{'revision':state['revision'],'ids':ids,'operation':'inbounds_set','value':['missing']})
+        self.assertEqual(status,400,result);self.assertEqual(self.store.get('state'),state)
+        status,result,_=self.request('/api/clients-bulk-action',{'revision':state['revision'],'ids':ids,'operation':'disable'})
+        self.assertEqual(status,200,result)
+        config=json.loads((self.runtime.generation/'config.json').read_text());self.assertEqual(len(config['inbounds'][0]['users']),1)
+        self.assertTrue(self.runtime.running)
+
+    def test_rest_client_create_and_invalid_dns_update_use_real_core_validation(self):
+        import http.client
+        from nara import api_keys
+        state=self.seed();key=api_keys.create(self.store,{'name':'Fixture','scopes':['read','clients:write','config:write'],'days':1})['key']
+        def call(path,body):
+            import json
+            connection=http.client.HTTPConnection(*self.server.server_address,timeout=15)
+            connection.request('POST','/api/v1/'+path,json.dumps(body),{'Authorization':'Bearer '+key,'Content-Type':'application/json'})
+            response=connection.getresponse();status=response.status;data=json.loads(response.read());connection.close();return status,data
+        status,result=call('clients',{'revision':state['revision'],'inbound_ids':[state['inbounds'][0]['id']]})
+        self.assertEqual(status,201,result);state=self.store.get('state');self.assertTrue(self.runtime.running)
+        status,result=call('dns/servers',{'revision':state['revision'],'config':{'type':'udp','tag':'invalid','server':'8.8.8.8','server_port':70000}})
+        self.assertEqual(status,400,result);self.assertEqual(self.store.get('state'),state);self.assertTrue(self.runtime.running)
+
     def save(self, state, collection, record):
         return self.request("/api/save", {"revision": state["revision"], "collection": collection, "record": record})
 

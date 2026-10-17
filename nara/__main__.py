@@ -14,7 +14,7 @@ from .terminal import input_label
 
 def main():
     parser = argparse.ArgumentParser(description="NARA · Sing-box server panel")
-    parser.add_argument("command", choices=("init", "serve", "reset-password"))
+    parser.add_argument("command", choices=("init", "serve", "reset-password", "reset-2fa"))
     parser.add_argument("--data", default=os.environ.get("NARA_DATA", "./data"))
     parser.add_argument("--bind", default=os.environ.get("NARA_BIND", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("NARA_PORT", "10000")))
@@ -41,7 +41,17 @@ def main():
         parser.error(str(exc))
     os.umask(0o077)
     store = Store(args.data)
-    if args.command in ("init", "reset-password"):
+    if args.command == "reset-2fa":
+        admin = store.get("admin")
+        if not admin: parser.error("Administrator is not initialized")
+        if input(input_label("Type RESET 2FA to disable administrator two-factor authentication: ")) != 'RESET 2FA':
+            parser.error("Two-factor reset cancelled")
+        for key in ('totp_secret', 'totp_last', 'totp_pending', 'recovery_hashes'): admin.pop(key, None)
+        from .accounts import save
+        save(store, admin)
+        store.audit("Administrator two-factor authentication reset locally")
+        print("Two-factor authentication reset. All browser sessions were revoked.")
+    elif args.command in ("init", "reset-password"):
         if store.get("admin") and args.command == "init":
             parser.error("Admin already exists. Use reset-password instead.")
         print("\nNARA / Administrator credentials\nPassword input is hidden; no characters will appear while typing.")
@@ -68,7 +78,7 @@ def main():
             # Never send the password through arguments, environment or stdout.
             with open(args.credentials_file, "x", opener=lambda p, f: os.open(p, f, 0o600)) as output:
                 json.dump({"username": username, "password": password}, output)
-        store.set("admin", {"username": username, "password": password_hash(password)})
+        store.set("admin", {**previous, "username": username, "password": password_hash(password)})
         with store.connect() as db:
             db.execute("DELETE FROM sessions")
         print("Admin saved.")

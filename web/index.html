@@ -11,31 +11,35 @@
   <script src="dns-presets.js" defer></script>
   <script src="routing.js" defer></script>
   <script src="dns-rules.js" defer></script>
+  <script src="account.js" defer></script>
+  <script src="integrations.js" defer></script>
+  <script src="clients.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
   <section id="login" class="login-screen" hidden>
-    <div class="login-brand"><span class="logo">N</span><b>NARA<span class="panel-version">v0.7.0</span></b></div>
+    <div class="login-brand"><span class="logo">N</span><b>NARA<span class="panel-version">v0.8.0</span></b></div>
     <form id="login-form" class="login-card">
       <span class="eyebrow">WELCOME TO YOUR WORKSPACE</span><h1>Your server. Your rules.</h1>
       <p>Sign in to manage your Sing-box server.</p>
       <label>Username<input name="username" autocomplete="username" required dir="ltr" placeholder="Your administrator username"></label>
       <label>Password<input name="password" type="password" autocomplete="current-password" required dir="ltr"></label>
+      <label id="login-2fa" hidden>Authenticator or recovery code<input name="code" autocomplete="one-time-code" maxlength="32" dir="ltr"></label>
       <p id="login-error" class="error-text" role="alert"></p><button class="btn primary wide" type="submit">Sign in <span>→</span></button>
       <small>Your credentials stay on your server.</small>
     </form><span class="login-footer">NARA / SING-BOX SERVER MANAGEMENT</span>
   </section>
   <div id="app" class="app" hidden>
     <aside class="sidebar">
-      <a class="brand" href="#dashboard"><span class="logo">N</span><b>NARA<span class="panel-version">v0.7.0</span></b></a>
+      <a class="brand" href="#dashboard"><span class="logo">N</span><b>NARA<span class="panel-version">v0.8.0</span></b></a>
       <span class="nav-caption">WORKSPACE</span>
       <nav id="navigation" aria-label="Main navigation"></nav>
-      <div class="sidebar-bottom"><div class="core-label"><span class="status-dot"></span><span id="sidebar-core">Checking core status</span></div><p>Powered by Sing-box.<br>Simplified by NARA.</p><button id="logout" class="profile"><span class="avatar">A</span><span><b id="admin-name">Administrator</b><small>Sign out ↗</small></span></button></div>
+      <div class="sidebar-bottom"><div class="core-label"><span class="status-dot"></span><span id="sidebar-core">Checking core status</span></div><button id="admin-profile" class="profile" data-action="admin-open"><span data-admin-avatar></span><span><b id="admin-name">Administrator</b><small>Account settings →</small></span></button><button id="logout" class="sidebar-signout">Sign out ↗</button></div>
     </aside>
     <div class="workspace-main">
-      <header class="topbar"><button id="mobile-menu" class="icon-btn" aria-label="Open navigation">☰</button><div class="breadcrumb">WORKSPACE <span>/</span> <b id="crumb">Overview</b></div><div class="topbar-end"><span id="updated">Loading server data</span><button id="refresh" class="icon-btn" aria-label="Refresh"></button><span class="avatar small">A</span></div></header>
+      <header class="topbar"><button id="mobile-menu" class="icon-btn" aria-label="Open navigation">☰</button><div class="breadcrumb">WORKSPACE <span>/</span> <b id="crumb">Overview</b></div><div class="topbar-end"><span id="updated">Loading server data</span><button id="refresh" class="icon-btn" aria-label="Refresh"></button><button class="admin-topbar" data-action="admin-open" aria-label="Administrator settings"><span data-admin-avatar="small"></span></button></div></header>
       <main id="content" tabindex="-1"></main>
-      <footer class="footer"><span><b>NARA</b> <span class="panel-version mono">v0.7.0</span> · Made for more control.</span></footer>
+      <footer class="footer"><span><b>NARA</b> <span class="panel-version mono">v0.8.0</span> · Made for more control.</span></footer>
     </div>
   </div>
   <dialog id="modal"><div id="modal-body"></div></dialog>

@@ -9,7 +9,7 @@ from . import options, native
 
 PROTOCOLS = ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls")
 TLS_REQUIRED = ("trojan", "hysteria2", "tuic", "anytls")
-COLLECTIONS = ("inbounds", "tls", "dns_servers", "dns_rules", "rule_sets", "clients") + native.EXTRA_COLLECTIONS
+COLLECTIONS = ("inbounds", "tls", "dns_servers", "dns_rules", "rule_sets", "clients", "client_groups") + native.EXTRA_COLLECTIONS
 REMOTE_DNS_TYPES = ("udp", "tcp", "tls", "https", "quic", "h3")
 # An internal authenticated DNS destination; no socket binds this address.
 CLIENT_DNS_ADDRESS = "198.18.0.1"
@@ -37,7 +37,7 @@ def normalize_dns_record(row):
 
 def initial_state():
     return {**{k: [] for k in native.EXTRA_COLLECTIONS}, "core_options": {}, "revision": 0, "inbounds": [], "tls": [], "dns_rules": [], "rule_sets": [],
-            "clients": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
+            "clients": [], "client_groups": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
             "server": "1.1.1.1", "port": 53}],
             "settings": {"server_address": "", "public_url": "", "subscription_url": "", "dns_final": "bootstrap",
                          "block_private": True}}
@@ -208,7 +208,18 @@ def validate(state):
             require(r.get("server") in dns_tags, "Rule resolver not found")
         if r["match"] == "rule_set":
             require(set(r["values"]) <= rs_tags, "Rule set not found")
+    groups = state.get("client_groups", [])
+    group_ids = {group["id"] for group in groups}
+    group_names = []
+    for group in groups:
+        require(isinstance(group.get("name"), str) and 1 <= len(group["name"].strip()) <= 64, "Group name must contain 1–64 characters")
+        require(isinstance(group.get("description", ""), str) and len(group.get("description", "")) <= 500, "Group description is too long")
+        group_names.append(group["name"].strip().casefold())
+    require(len(group_names) == len(set(group_names)), "Group names must be unique")
     for c in state["clients"]:
+        require(isinstance(c.get("group_ids", []), list) and len(c.get("group_ids", [])) <= 20 and all(isinstance(x, str) for x in c.get("group_ids", [])) and set(c.get("group_ids", [])) <= group_ids, "Choose up to 20 valid client groups")
+        require(isinstance(c.get("tags", []), list) and len(c.get("tags", [])) <= 20 and all(isinstance(x, str) and 1 <= len(x) <= 32 for x in c.get("tags", [])), "Use up to 20 tags of 1–32 characters")
+        require(isinstance(c.get("note", ""), str) and len(c.get("note", "")) <= 1000, "Client note is too long")
         require(type(c.get("enabled", True)) is bool, "Invalid client enabled state")
         require(isinstance(c.get("name"), str) and 0 < len(c["name"]) <= 100, "Client name is required")
         integer(c.get("quota_bytes", 0), 0, 10**18, "Traffic allowance")

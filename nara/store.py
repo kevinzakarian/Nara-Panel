@@ -32,6 +32,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS traffic(id TEXT PRIMARY KEY, upload INTEGER NOT NULL DEFAULT 0,
                     download INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS api_keys(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+                    scopes TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, last_used REAL, revoked INTEGER DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, event TEXT NOT NULL, payload TEXT NOT NULL,
+                    created REAL NOT NULL, attempts INTEGER DEFAULT 0, available REAL DEFAULT 0, status TEXT DEFAULT 'queued');
                 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at REAL, message TEXT);
             """)
             db.execute("INSERT OR IGNORE INTO kv VALUES('state', ?)", (json.dumps(initial_state()),))
@@ -54,6 +58,8 @@ class Store:
                 for name, initial in initial_state().items():
                     value.setdefault(name, initial)
                 value["dns_servers"] = [normalize_dns_record(row) for row in value["dns_servers"]]
+                for client in value.get("clients", []):
+                    if "note" in client and client["note"] is None: client["note"] = ""
             return value
 
     def set(self, key, value):
@@ -69,7 +75,8 @@ class Store:
             for key, value in records:
                 db.execute("INSERT OR REPLACE INTO kv VALUES(?,?)", (key, json.dumps(value)))
             if reset_client:
-                db.execute("DELETE FROM traffic WHERE id=?", (reset_client,))
+                for client_id in reset_client if isinstance(reset_client, list) else [reset_client]:
+                    db.execute("DELETE FROM traffic WHERE id=?", (client_id,))
 
     def audit(self, message):
         with self.connect() as db:
@@ -100,10 +107,13 @@ class Store:
     def new_session(self):
         token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
         with self.connect() as db:
+            db.execute("DELETE FROM kv WHERE key IN (SELECT 'reauth:' || token FROM sessions WHERE expires<?)", (time.time(),))
             db.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
             db.execute("INSERT INTO sessions VALUES(?,?,?)", (hashlib.sha256(token.encode()).hexdigest(), csrf, time.time() + 43200))
         return token, csrf
 
     def logout(self, raw):
         with self.connect() as db:
-            db.execute("DELETE FROM sessions WHERE token=?", (hashlib.sha256(raw.encode()).hexdigest(),))
+            hashed = hashlib.sha256(raw.encode()).hexdigest()
+            db.execute("DELETE FROM kv WHERE key=?", ("reauth:" + hashed,))
+            db.execute("DELETE FROM sessions WHERE token=?", (hashed,))

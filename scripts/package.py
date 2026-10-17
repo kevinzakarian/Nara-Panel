@@ -6,8 +6,8 @@ import tarfile
 root = Path(__file__).resolve().parent.parent
 output = root / "dist"
 output.mkdir(exist_ok=True)
-archive = output / "nara-panel_0.7.0_source.tar.gz"
-included = ["core-build.json", "core-release.json", ".github", "nara", "web", "tests", "scripts", "deploy", "screenshots", "README.md", "INSTALL.fa.md", "release.json",
+archive = output / "nara-panel_0.8.0_source.tar.gz"
+included = ["core-build.json", "core-release.json", ".github", "nara", "web", "tests", "scripts", "deploy", "screenshots", "README.md", "API.md", "INSTALL.fa.md", "release.json",
             "package.json", "package-lock.json", "FEATURE_REVIEW.md", "VERIFICATION.md", "LICENSE", "requirements.txt", "Dockerfile", "compose.yaml", "install.sh", "update.sh", ".dockerignore", ".gitignore"]
 with tarfile.open(archive, "w:gz") as bundle:
     for name in included:

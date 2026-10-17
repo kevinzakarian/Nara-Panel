@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, normalize_dns_record, require, validate
-from . import native, warp
+from . import native, warp, security, clients, notifications, accounts, api_keys, rest
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
 from .store import password_hash, password_matches
@@ -95,6 +95,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
     throttle_lock = threading.Lock()
     updates = UpdateChecker(store)
     warp_lock = threading.Lock()
+    account_lock = threading.RLock()
+    api_limits, api_limit_lock = {}, threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "NARA"
@@ -170,6 +172,23 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             except Exception:
                 self.send(500, {"error": "Operation failed; check service status"})
 
+        def rest_api(self, method, path):
+            self._secure_cookie, self._base_path = secure_cookie, base_path
+            return rest.API(self, store, runtime, access, updates, metrics, api_limits, api_limit_lock).handle(method, path)
+
+        def do_PATCH(self):
+            try:
+                self.same_origin()
+                path = self.route_path()
+                if role != 'panel' or not path or not path.startswith('/api/v1/'):
+                    return self.send(404, {'error': 'Not found'})
+                return self.rest_api(self.command, path[len('/api/v1/'):])
+            except ValueError as exc:
+                return self.send(400, {'error': str(exc)})
+
+        do_DELETE = do_PATCH
+        do_PUT = do_PATCH
+
         def get(self):
             if base_path and urlsplit(self.path).path == base_path:
                 return self.send(308, "", headers={"Location": base_path + "/"})
@@ -193,16 +212,26 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 return self.send(200, result, headers={"Subscription-Userinfo": info, "Profile-Update-Interval": "6"})
             if role == "subscription":
                 return self.send(404, {"error": "Not found"})
+            if path.startswith('/api/v1/'):
+                return self.rest_api('GET', path[len('/api/v1/'):])
             if path.startswith("/api/"):
                 session = self.auth()
                 if not session:
                     return
                 if path == "/api/session":
-                    return self.send(200, {"csrf": session["csrf"], "username": store.get("admin")["username"]})
+                    return self.send(200, {"csrf": session["csrf"], **security.public_admin(store.get("admin"))})
                 if path == "/api/access":
                     return self.send(200, access.info())
                 if path.startswith("/api/access-status/"):
                     return self.send(200, access.status(path.rsplit("/", 1)[-1]))
+                if path == '/api/admin':
+                    return self.send(200, {**security.public_admin(store.get('admin')), 'avatars': security.AVATARS})
+                if path == '/api/openapi':
+                    return self.send(200, rest.openapi())
+                if path == '/api/api-keys':
+                    return self.send(200, {'keys': api_keys.listing(store), 'scopes': api_keys.SCOPES})
+                if path == '/api/telegram':
+                    return self.send(200, {**notifications.public_settings(store), 'event_labels': {k: v[1] for k, v in notifications.EVENTS.items() if k != 'test'}})
                 if path == "/api/options":
                     return self.send(200, options.schema())
                 if path == "/api/core-schema":
@@ -233,6 +262,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             assets["/dns-presets.js"] = "dns-presets.js"
             assets["/routing.js"] = "routing.js"
             assets["/dns-rules.js"] = "dns-rules.js"
+            for script in ("account.js", "integrations.js", "clients.js"):
+                assets["/" + script] = script
             if path in assets:
                 file = web_dir / assets[path]
                 return self.send(200, file.read_bytes(), mimetypes.guess_type(str(file))[0] or "text/plain")
@@ -245,6 +276,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 self.same_origin()
                 self.post()
             except (ValueError, KeyError, TypeError, OverflowError) as exc:
+                if self.route_path() in ("/api/save", "/api/settings", "/api/core-options", "/api/clients-bulk-create", "/api/clients-bulk-action"):
+                    notifications.emit(store, "apply_failed", "A settings change was rejected. Previous working settings were retained.", "apply-failed", 300)
                 self.send(400, {"error": str(exc) if isinstance(exc, ValueError) else "Invalid data structure"})
             except subprocess.TimeoutExpired:
                 self.send(400, {"error": "Operation timed out"})
@@ -257,6 +290,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             path = self.route_path()
             if path is None:
                 return self.send(404, {"error": "Not found"})
+            if path.startswith('/api/v1/'):
+                return self.rest_api('POST', path[len('/api/v1/'):])
             if path == "/api/login":
                 data = self.json_body()
                 peer = self.client_address[0]
@@ -271,52 +306,32 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     if len(attempts) >= 10:
                         return self.send(429, {"error": "Too many sign-in attempts; try again in 15 minutes"})
                     attempts.append(now)
-                admin = store.get("admin")
-                require(admin is not None, "Administrator is not initialized; run the init command")
-                username = str(data.get("username", ""))
-                password = str(data.get("password", ""))
-                valid = password_matches(password, admin["password"])
-                if not valid or not hmac.compare_digest(username.encode(), admin["username"].encode()):
-                    return self.send(401, {"error": "Incorrect username or password"})
-                token, csrf = store.new_session()
+                with account_lock:
+                    admin = store.get("admin")
+                    require(admin is not None, "Administrator is not initialized; run the init command")
+                    username = str(data.get("username", ""))
+                    password = str(data.get("password", ""))
+                    valid = len(password) <= 256 and password_matches(password, admin["password"])
+                    if not valid or not hmac.compare_digest(username.encode(), admin["username"].encode()):
+                        notifications.emit(store, 'login_failed', 'An administrator sign-in attempt was rejected.', 'failed-login', 900)
+                        return self.send(401, {"error": "Incorrect username or password"})
+                    if admin.get('totp_secret') and not data.get('code'):
+                        return self.send(200, {'two_factor_required': True})
+                    if not security.verify_factor(admin, data.get('code', '')):
+                        notifications.emit(store, 'login_failed', 'An administrator sign-in attempt was rejected.', 'failed-login', 900)
+                        return self.send(401, {'error': 'Invalid or already used verification code'})
+                    if admin.get('totp_secret'): store.set('admin', admin)
+                    token, csrf = store.new_session()
+                with throttle_lock:login_attempts.pop(peer, None)
                 cookie = "nara_session=" + token + "; HttpOnly; SameSite=Strict; Path=" + cookie_path + "; Max-Age=43200" + ("; Secure" if secure_cookie else "")
                 store.audit("Administrator signed in")
+                notifications.emit(store, 'login', 'A new authenticated administrator session started.')
                 return self.send(200, {"csrf": csrf}, headers={"Set-Cookie": cookie})
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
             if path == "/api/warp":
-                require(data.get("accept_terms") is True, "Accept Cloudflare’s consumer terms to register WARP")
-                require(warp_lock.acquire(blocking=False), "WARP creation is already in progress")
-                try:
-                    with runtime.lock:
-                        state = store.get("state")
-                        require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
-                        require("with_wireguard" in runtime.build_info()["tags"], "Install the compatible NARA core with WireGuard support first")
-                    pending = store.get("warp_pending")
-                    if not pending:
-                        pending = {"id": uuid.uuid4().hex, "config": warp.create(runtime.binary)}
-                        # Keep a completed registration privately if apply or a concurrent edit fails.
-                        # A retry uses the same keys instead of registering another account.
-                        store.set("warp_pending", pending)
-                    with runtime.lock:
-                        state = store.get("state")
-                        require(data.get("revision") == state["revision"], "Settings changed during WARP creation; refresh and retry. The registered configuration was kept privately.")
-                        existing = next((row for row in state["endpoints"] if row["id"] == pending["id"]), None)
-                        if existing:
-                            store.set("warp_pending", None)
-                            return self.send(200, {"ok": True, "tag": existing["tag"], "revision": state["revision"]})
-                        row = warp.record(pending["config"], state)
-                        row["id"] = pending["id"]
-                        state["endpoints"].append(row)
-                        validate(state)
-                        state["revision"] += 1
-                        result = runtime.apply(state, save=True)
-                        store.set("warp_pending", None)
-                        store.audit("Cloudflare WARP destination created and applied")
-                        return self.send(200, {"ok": True, "tag": row["tag"], "revision": state["revision"], **result})
-                finally:
-                    warp_lock.release()
+                return self.send(200, self.provision_warp(data))
             if path == "/api/check-updates":
                 started = updates.start()
                 return self.send(200, {"started": started, "updates": updates.status(runtime.version())})
@@ -333,37 +348,119 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if path == "/api/logout":
                 store.logout(self.cookie_token())
                 return self.send(200, {"ok": True}, headers={"Set-Cookie": "nara_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=" + cookie_path + ("; Secure" if secure_cookie else "")})
-            if path == "/api/password":
-                admin = store.get("admin")
-                require(password_matches(str(data.get("current", "")), admin["password"]), "Current password is incorrect")
-                require(isinstance(data.get("password"), str) and 12 <= len(data["password"]) <= 256, "New password must contain at least 12 characters")
-                admin["password"] = password_hash(data["password"])
-                store.set("admin", admin)
-                with store.connect() as db:
-                    db.execute("DELETE FROM sessions")
-                return self.send(200, {"ok": True})
+            if path == "/api/password" or path.startswith('/api/admin/'):
+                action = 'credentials' if path == '/api/password' else path[len('/api/admin/'):]
+                with account_lock:
+                    result = accounts.action(store, action, data, self.cookie_token())
+                if action != 'avatar':notifications.emit(store, 'admin_changed', 'Administrator account security was updated.')
+                return self.send(200, result)
+            if path in ('/api/api-keys/create', '/api/api-keys/revoke'):
+                with account_lock:
+                    admin = store.get('admin')
+                    accounts.verify(store, admin, data, self.cookie_token())
+                    result = api_keys.create(store, data) if path.endswith('/create') else api_keys.revoke(store, data.get('id')) or {'ok': True}
+                    store.set('admin', admin)
+                store.audit('API key created' if path.endswith('/create') else 'API key revoked')
+                notifications.emit(store, 'api_key', 'A machine-access key was created.' if path.endswith('/create') else 'A machine-access key was revoked.')
+                return self.send(200, result)
+            if path == '/api/telegram/chats':
+                with account_lock:
+                    admin = store.get('admin')
+                    accounts.verify(store, admin, data, self.cookie_token())
+                    value = notifications.validate_settings({'enabled': False, 'bot_token': data.get('bot_token', '')}, notifications.settings(store))
+                    require(value.get('bot_token'), 'Enter a bot token first')
+                    store.set('admin', admin)
+                return self.send(200, {'chats': notifications.chats(value['bot_token'])})
+            if path in ('/api/telegram', '/api/telegram/test'):
+                with account_lock:
+                    admin = store.get('admin')
+                    accounts.verify(store, admin, data, self.cookie_token())
+                    if path.endswith('/test'):
+                        require(notifications.settings(store)['enabled'], 'Save and enable Telegram notifications first')
+                        notifications.enqueue(store, 'test', 'Your bot is ready. Selected NARA events will appear here. No credentials or subscription links are included.')
+                    else:
+                        previous = notifications.settings(store)
+                        value = notifications.validate_settings(data.get('settings'), previous)
+                        store.set('telegram', value)
+                        if any(value.get(key) != previous.get(key) for key in ('bot_token', 'chat_id', 'enabled')):
+                            with store.connect() as db:db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued'")
+                    store.set('admin', admin)
+                store.audit('Telegram test queued' if path.endswith('/test') else 'Telegram notification settings updated')
+                return self.send(200, {'ok': True, 'queued': path.endswith('/test')})
+            if path in ('/api/clients-bulk-preview', '/api/clients-action-preview'):
+                with runtime.lock:
+                    state = store.get('state')
+                    require(data.get('revision') == state['revision'], 'Settings changed; refresh the page')
+                    return self.send(200, clients.preview(store, state, data, self.cookie_token(), 'create' if path == '/api/clients-bulk-preview' else 'action'))
+            return self.send(*self.mutate(path, data))
+
+        def provision_warp(self, data):
+            require(data.get("accept_terms") is True, "Accept Cloudflare’s consumer terms to register WARP")
+            require(warp_lock.acquire(blocking=False), "WARP creation is already in progress")
+            try:
+                with runtime.lock:
+                    state = store.get("state")
+                    require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
+                    require("with_wireguard" in runtime.build_info()["tags"], "Install the compatible NARA core with WireGuard support first")
+                pending = store.get("warp_pending")
+                if not pending:
+                    pending = {"id": uuid.uuid4().hex, "config": warp.create(runtime.binary)}
+                    # Keep a completed registration privately if apply or a concurrent edit fails.
+                    # A retry uses the same keys instead of registering another account.
+                    store.set("warp_pending", pending)
+                with runtime.lock:
+                    state = store.get("state")
+                    require(data.get("revision") == state["revision"], "Settings changed during WARP creation; refresh and retry. The registered configuration was kept privately.")
+                    existing = next((row for row in state["endpoints"] if row["id"] == pending["id"]), None)
+                    if existing:
+                        store.set("warp_pending", None)
+                        return {"ok": True, "tag": existing["tag"], "revision": state["revision"]}
+                    row = warp.record(pending["config"], state)
+                    row["id"] = pending["id"]
+                    state["endpoints"].append(row)
+                    validate(state)
+                    state["revision"] += 1
+                    result = runtime.apply(state, save=True)
+                    store.set("warp_pending", None)
+                    store.audit("Cloudflare WARP destination created and applied")
+                    notifications.emit(store, "config_saved", "A Cloudflare WARP destination was registered and applied.")
+                    return {"ok": True, "tag": row["tag"], "revision": state["revision"], **result}
+            finally:
+                warp_lock.release()
+
+        def mutate(self, path, data):
             with runtime.lock:
                 state = store.get("state")
                 reset_client = None
-                if path in ("/api/save", "/api/delete", "/api/self-signed", "/api/settings", "/api/core-options", "/api/reset-traffic", "/api/rotate-token", "/api/apply", "/api/reorder-rules"):
+                created, affected, row = [], [], None
+                if path in ("/api/save", "/api/delete", "/api/self-signed", "/api/settings", "/api/core-options", "/api/reset-traffic", "/api/rotate-token", "/api/apply", "/api/reorder-rules", "/api/clients-bulk-create", "/api/clients-bulk-action"):
                     require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
                 if path == "/api/apply":
-                    return self.send(200, runtime.apply(state))
+                    return 200, runtime.apply(state)
                 if path == "/api/check":
                     directory, _ = runtime.prepare(state)
                     import shutil
                     shutil.rmtree(directory)
-                    return self.send(200, {"ok": True})
+                    return 200, {"ok": True}
                 if path == "/api/stop":
                     runtime.stop()
                     store.set("autostart", False)
                     store.audit("Core stopped by administrator")
-                    return self.send(200, {"ok": True})
+                    return 200, {"ok": True}
                 if path == "/api/self-signed":
                     profile = self_signed(data)
                     profile.update(certificate_info(profile))
                     profile.update({f["key"]: data[f["key"]] for f in options.TLS if f["key"] in data})
                     state["tls"].append(profile)
+                    row = profile
+                elif path == "/api/clients-bulk-create":
+                    created = (clients.prepared(store, state, data, getattr(self, 'api_identity', self.cookie_token()), 'create')['rows']
+                               if data.get('preview_id') else clients.plan_create(state, data))
+                    state["clients"].extend(created)
+                elif path == "/api/clients-bulk-action":
+                    plan = (clients.prepared(store, state, data, getattr(self, 'api_identity', self.cookie_token()), 'action')['data']
+                            if data.get('preview_id') else data)
+                    affected, reset_client = clients.plan_action(state, plan, store.totals())
                 elif path == "/api/settings":
                     state["settings"] = data["settings"]
                 elif path == "/api/core-options":
@@ -379,7 +476,11 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     collection = data.get("collection")
                     require(collection in COLLECTIONS, "Invalid collection")
                     if path == "/api/delete":
+                        if collection == "clients": affected = [r for r in state[collection] if r["id"] == data.get("id")]
                         state[collection] = [r for r in state[collection] if r["id"] != data.get("id")]
+                        if collection == "client_groups":
+                            for client in state["clients"]:
+                                client["group_ids"] = [value for value in client.get("group_ids", []) if value != data.get("id")]
                     else:
                         record = data["record"]
                         require(isinstance(record, dict), "Invalid record")
@@ -397,7 +498,13 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                             if collection == "inbounds":
                                 row["port"] = row["config"].get("listen_port", 0)
                                 row["listen"] = row["config"].get("listen", "")
+                        if collection == 'client_groups' and isinstance(row.get('name'), str): row['name'] = row['name'].strip()
                         if collection == "clients":
+                            if isinstance(row.get('name'), str): row['name'] = row['name'].strip()
+                            for key, value in {'enabled': True, 'quota_bytes': 0, 'expires_at': '', 'note': '', 'group_ids': [], 'tags': []}.items():
+                                row.setdefault(key, value)
+                            if not row.get("name"):
+                                row["name"] = clients.random_name(c["name"] for c in state["clients"])
                             row["uuid"] = existing.get("uuid") or str(uuid.uuid4())
                             row["password"] = existing.get("password") or secrets.token_urlsafe(24)
                             row["token"] = existing.get("token") or secrets.token_urlsafe(32)
@@ -443,12 +550,29 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     else:
                         reset_client = client["id"]
                 else:
-                    return self.send(404, {"error": "Not found"})
+                    return 404, {"error": "Not found"}
                 validate(state)
                 state["revision"] += 1
                 result = runtime.apply(state, save=True, reset_client=reset_client)
-                store.audit("Settings saved and applied: " + path.split("/")[-1])
-                return self.send(200, {"ok": True, "revision": state["revision"], **result})
+                if path in ('/api/clients-bulk-create', '/api/clients-bulk-action') and data.get('preview_id'):
+                    with store.connect() as db: db.execute('DELETE FROM kv WHERE key=?', ('bulk-preview:' + data['preview_id'],))
+                store.audit("Settings saved and applied: " + path.split("/")[-1] + (" · API key: " + self.api_actor if hasattr(self, "api_actor") else ""))
+                event = "config_saved"
+                if path == "/api/clients-bulk-create":event = "clients_created"
+                elif path == "/api/clients-bulk-action":event = "clients_deleted" if (plan if data.get("preview_id") else data).get("operation") == "delete" else "clients_updated"
+                elif data.get("collection") == "clients":event = "clients_deleted" if path == "/api/delete" else "clients_updated" if data.get("record", {}).get("id") else "clients_created"
+                items = created or affected or ([row] if row and data.get('collection') == 'clients' else [])
+                detail = 'Settings were validated and applied. Core is running.'
+                if items:
+                    names = ', '.join(str(item.get('name', '')).replace('\n', ' ') for item in items[:5])
+                    detail = f'{len(items)} client(s) · {names}' + (f' · +{len(items)-5} more' if len(items)>5 else '')
+                    if path == '/api/clients-bulk-action': detail += '\nAction: ' + str((plan if data.get('preview_id') else data).get('operation', '')).replace('_', ' ')
+                    detail += '\nChanges are applied. Your other clients are unchanged.'
+                notifications.emit(store, event, detail)
+                return 200, {"ok": True, "revision": state["revision"], **result,
+                             **({"ids": [row["id"] for row in created]} if created else {}),
+                             **({"affected": len(affected)} if affected else {}),
+                             **({"record_id": row["id"]} if row else {})}
 
     return Handler
 
@@ -466,6 +590,8 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
     server.daemon_threads = subscription.daemon_threads = True
     threading.Thread(target=subscription.serve_forever, kwargs={"poll_interval": .5}, daemon=True).start()
     threading.Thread(target=runtime.worker, daemon=True).start()
+    notifier = notifications.Worker(store, runtime)
+    threading.Thread(target=notifier.run, daemon=True).start()
     print("NARA panel: http://" + bind + ":" + str(port) + normalize_web_path(web_path) + "/", flush=True)
     print("Subscriptions: http://" + bind + ":" + str(sub_port) + normalize_web_path(sub_path) + "/", flush=True)
     try:

@@ -3,6 +3,7 @@ const $ = (q, root = document) => root.querySelector(q);
 const $$ = (q, root = document) => [...root.querySelectorAll(q)];
 const e = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths = {
+ account:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M4 21v-2a8 8 0 0 1 16 0v2',notifications:'M18 8a6 6 0 0 0-12 0c0 8-3 8-3 8h18s-3 0-3-8 M10 20h4',api:'m8 5-6 7 6 7 M16 5l6 7-6 7 M14 3l-4 18',about:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 11v6 M12 7h.01',
  dashboard:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
  inbounds:'M4 7h16v5H4z M4 15h16v5H4z M7 9.5h.01 M7 17.5h.01 M12 4V2 M9 4h6',
  tls:'M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z M9 12l2 2 4-4',
@@ -28,8 +29,8 @@ const paths = {
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.code}"/></svg>`;
 const btn = (text, action, symbol = 'plus', cls = '', attrs = '') => `<button class="btn ${cls}" data-action="${action}" ${attrs}>${icon(symbol)}${text}</button>`;
 const rowBtn = (title, action, symbol, id, collection='') => `<button title="${e(title)}" aria-label="${e(title)}" data-action="${action}" data-id="${e(id)}" data-collection="${collection}">${icon(symbol)}</button>`;
-const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',routing:'Routing',core:'Core features',settings:'Settings'};
-const descriptions = {dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',routing:'Control destinations, matching rules, and outbound connections.',core:'Endpoints, services, certificates and the remaining core features.',settings:'Server preferences and administrator account security.'};
+const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',routing:'Routing',core:'Core features',settings:'Settings',account:'Administrator',notifications:'Notifications',api:'API access',about:'About'};
+const descriptions = {dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',routing:'Control destinations, matching rules, and outbound connections.',core:'Endpoints, services, certificates and the remaining core features.',settings:'Server preferences and service controls.',account:'Your profile, sign-in details and two-factor authentication.',notifications:'Useful updates from your server, delivered to Telegram.',api:'Connect scripts and other apps to your panel.',about:'Versions, project information and help.'};
 let optionSchema,coreCatalog;
 let accessSettings={sub_path:'/subscriptions',subscription_port:10001,subscription_scheme:'http',managed:false},accessChangePending=false;
 let routingTab='route_rules',coreTab='endpoints';
@@ -60,9 +61,9 @@ async function api(path, body) {
  return result;
 }
 function toast(message, error=false) { const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toasts').append(node);setTimeout(()=>node.remove(),6500); }
-function showLogin() { $('#login').hidden=false;$('#app').hidden=true;csrf=''; }
+function showLogin() { $('#login').hidden=false;$('#app').hidden=true;csrf='';if($('#modal')?.open)$('#modal').close();$('#modal-body')?.replaceChildren();modalSubmit=null;apiKeyData=null;telegramData=null;selectedClients.clear();updateAdminUI({username:'Administrator',avatar:'ember',two_factor:false,recovery_remaining:0}); }
 async function boot() {
- try { const session=await api('session');csrf=session.csrf;[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema'),api('check-updates',{}).catch(()=>null)]);CoreSchema.configure(coreCatalog);$('#admin-name').textContent=session.username;await load();$('#login').hidden=true;$('#app').hidden=false; }
+ try { const session=await api('session');csrf=session.csrf;[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema'),api('check-updates',{}).catch(()=>null)]);CoreSchema.configure(coreCatalog);updateAdminUI(session);await load();$('#login').hidden=true;$('#app').hidden=false; }
  catch(err) { showLogin();if (err.message !== 'Please sign in first') $('#login-error').textContent=err.message; }
 }
 async function load(silent=false) {
@@ -72,6 +73,7 @@ async function load(silent=false) {
   $$('.panel-version').forEach(el=>el.textContent='v'+dashboard.panel_version);
   $('#sidebar-core').textContent=dashboard.core.running?'Core is running':'Core is stopped';
   $('.core-label .status-dot').classList.toggle('on',dashboard.core.running);
+  $('.core-label .status-dot').classList.toggle('off',!dashboard.core.running);
   $('#updated').textContent='Updated at '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
   if (!silent || page==='dashboard') render(); else renderNav();
  })();
@@ -89,7 +91,8 @@ function render() {
  if (!state || !dashboard) return;
  page=Object.hasOwn(titles,location.hash.slice(1))?location.hash.slice(1):'dashboard';
  renderNav();$('#crumb').textContent=titles[page];document.title=titles[page]+' · NARA';
- $('#content').innerHTML=({dashboard:renderDashboard,inbounds:renderInbounds,tls:renderTLS,dns:renderDNS,routing:renderRouting,core:renderCore,clients:renderClients,settings:renderSettings}[page])();
+ $('#content').innerHTML=({dashboard:renderDashboard,inbounds:renderInbounds,tls:renderTLS,dns:renderDNS,routing:renderRouting,core:renderCore,clients:renderClients,settings:renderSettings,account:renderAccount,notifications:renderNotifications,api:renderAPI,about:renderAbout}[page])();
+ if(page==='notifications')requireAdminInputs($('#telegram-form'));
 }
 function metric(label,value,symbol,color,foot) {return `<article class="stat-card"><div class="stat-head">${label}<span class="stat-symbol ${color}">${icon(symbol)}</span></div><div class="stat-number">${value}</div><div class="stat-foot">${foot}</div></article>`;}
 function renderDashboard() {
@@ -127,15 +130,8 @@ function renderTLS() {
 }
 function renderDNS() {return renderDNSWorkspace();}
 function renderCore() {return renderCoreWorkspace('core',['endpoints','services','certificate_providers','http_clients','network_namespaces','log','ntp','certificate','experimental'],coreTab);}
-function clientTable(clients,compact=false) {
- if (!clients.length) return empty('No clients to display','Create an account, assign inbounds, and set a traffic allowance and expiry date.','new-client','Create client','clients');
- return `<div class="table-wrap"><table><thead><tr><th>Client</th><th>Status</th><th>Usage / allowance</th><th>Expires</th>${compact?'':'<th>Inbounds</th>'}<th>Actions</th></tr></thead><tbody>${clients.map(c=>`<tr><td><div class="name-cell"><span class="client-avatar">${e(c.name.slice(0,2).toUpperCase())}</span><div><b>${e(c.name)}</b><small>${e(c.note||c.id.slice(0,8))}</small></div></div></td><td>${badge(...status(c))}</td><td><div class="usage"><small>${e(size(total(c)))} / ${c.quota_bytes?e(size(c.quota_bytes)):'∞'}</small><progress max="100" value="${c.quota_bytes?Math.min(100,total(c)/c.quota_bytes*100):0}" aria-label="Client usage"></progress></div></td><td>${date(c.expires_at)}</td>${compact?'':`<td>${c.inbound_ids.map(id=>badge(state.inbounds.find(i=>i.id===id)?.tag||id,'blue')).join(' ')}</td>`}<td><div class="row-actions">${rowBtn('Details & subscription','client-details','eye',c.id)}${rowBtn('Subscription QR code','subscription-qr','qr',c.id)}${rowBtn('Edit','edit','edit',c.id,'clients')}${rowBtn('Download config','export','download',c.id)}${compact?'':rowBtn('Delete','delete','trash',c.id,'clients')}</div></td></tr>`).join('')}</tbody></table></div>`;
-}
-function renderClients() {
- const filtered=state.clients.filter(c=>(c.name+' '+(c.note||'')).toLowerCase().includes(search.toLowerCase())&&(filter==='all'||(filter==='active'?(status(c)[0]==='Active'):(status(c)[0]!=='Active'))));
- const pages=Math.max(1,Math.ceil(filtered.length/10));pageNumber=Math.min(pageNumber,pages);
- return heading(btn('New client','new-client','plus','primary'))+pendingBanner()+`<div class="toolbar"><div class="search">${icon('search')}<input id="client-search" placeholder="Search clients…" value="${e(search)}" aria-label="Search clients"></div><select id="client-filter" aria-label="Filter clients"><option value="all" ${filter==='all'?'selected':''}>All clients</option><option value="active" ${filter==='active'?'selected':''}>Active clients</option><option value="inactive" ${filter==='inactive'?'selected':''}>Disabled & limited</option></select><span class="count">${num(filtered.length)} clients</span></div><section class="card">${clientTable(filtered.slice((pageNumber-1)*10,pageNumber*10))}<div class="table-foot"><span>${num(filtered.length)} clients · page ${num(pageNumber)} of ${num(pages)}</span><div class="pagination"><button data-action="page" data-id="${Math.max(1,pageNumber-1)}" aria-label="Previous page">→</button><button class="active">${num(pageNumber)}</button><button data-action="page" data-id="${Math.min(pages,pageNumber+1)}" aria-label="Next page">←</button></div></div></section>`;
-}
+function clientTable(clients,compact=false) {return renderClientTable(clients,compact);}
+function renderClients() {return renderClientsWorkspace();}
 function renderAccessSettings(){
  const a=accessSettings;
  return `<section class="card section-gap"><div class="card-header"><div><h2>Panel & subscription access</h2><p>Separate addresses, separate ports</p></div>${icon('lock')}</div><form id="access-form" class="card-body"><fieldset class="entry-fields" ${a.managed?'':'disabled'}><div class="form-grid">${field('Panel webPath','web_path',a.web_path||'','text','For the sign-in page and administration only.')}${field('Panel port','panel_port',a.panel_port||10000,'number')}${field('Subscription subPath','sub_path',a.sub_path,'text','Public subscription links use this path without the panel webPath.')}${field('Subscription port','subscription_port',a.subscription_port,'number')}</div><p class="note">Saving restarts the panel and reconnects you at the new address. Keep the new ports open in your firewall. Changing subPath or its port changes subscription URLs; share the updated link or QR with clients.</p><button class="btn primary" type="submit">${icon('check')}Save access settings</button></fieldset>${a.managed?'':'<p class="note">Run the Linux installer or upgrade to enable these controls. Docker/manual services use their own port mappings and environment settings.</p>'}<div id="access-progress" role="status"></div></form></section>`;
@@ -157,7 +153,7 @@ async function saveAccess(form){
  accessChangePending=false;throw new Error('Still waiting for the system helper. Check the management menu logs before changing the address again.');
 }
 function renderSettings() {
- return heading()+pendingBanner()+renderAccessSettings()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">Panel address for your own reference and public host detection. Subscriptions use their separate address below.</small></label><label>Public subscription URL (optional)<input name="subscription_url" dir="ltr" placeholder="https://subscriptions.example.com:8443/YourSubPath/" value="${e(state.settings.subscription_url||'')}"><small class="field-hint">For an external reverse proxy. Leave blank to use the independent subscription port and subPath.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}<p class="note">Clients use this server’s Default DNS and DNS rules in Rule / Global mode. Direct mode uses device DNS. Manage resolver options in the DNS section.</p><label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Changing your password signs out all administrator sessions.</p>${btn('Change password','change-password','key')}</div></section>${panelUpdateCard()}</div></div>`;
+ return heading()+pendingBanner()+renderAccessSettings()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">Panel address for your own reference and public host detection. Subscriptions use their separate address below.</small></label><label>Public subscription URL (optional)<input name="subscription_url" dir="ltr" placeholder="https://subscriptions.example.com:8443/YourSubPath/" value="${e(state.settings.subscription_url||'')}"><small class="field-hint">For an external reverse proxy. Leave blank to use the independent subscription port and subPath.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}<p class="note">Clients use this server’s Default DNS and DNS rules in Rule / Global mode. Direct mode uses device DNS. Manage resolver options in the DNS section.</p><label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Manage your username, password, avatar and two-factor authentication.</p><a class="btn" href="#account">Administrator settings</a></div></section>${panelUpdateCard()}</div></div>`;
 }
 function panelUpdateCard(){
  const item=dashboard.updates?.panel;
@@ -227,15 +223,7 @@ function editInbound(item={}) {
  protocolInput.addEventListener('change',updateProtocol);transportInput.addEventListener('change',updateTransport);
  form.addEventListener('change',()=>syncOptionFields(form));updateProtocol();
 }
-function editClient(item={}) {
- if (!state.inbounds.some(i=>i.mode!=='native')) {toast('Create an inbound first.',true);location.hash='inbounds';return;}
- const localExpiry=item.expires_at?new Date(new Date(item.expires_at).getTime()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):'';
- openModal(item.id?'Edit client':'New client','Passwords, UUIDs, and subscription tokens are generated securely.',`<div class="form-grid">${field('Client name','name',item.name||'')}${field('Note','note',item.note||'')}${field('Traffic allowance (GiB)','quota',item.quota_bytes?item.quota_bytes/1024**3:0,'number','0 means unlimited')}${field('Expiry date and time','expires',localExpiry,'datetime-local','Leave blank for no expiry. Uses your browser\'s local time.')}<div class="field full"><span>Assigned inbounds</span><div class="checkbox-list">${state.inbounds.filter(i=>i.mode!=='native').map(i=>`<label><input type="checkbox" name="inbound" value="${e(i.id)}" ${checked(item.inbound_ids?.includes(i.id))}>${e(i.tag)}</label>`).join('')}</div></div><label class="check-field full"><input type="checkbox" name="enabled" ${checked(item.enabled!==false)}>Enable this account</label></div>`,async form=>{
-  const f=new FormData(form);const quota=Number(f.get('quota'));if(!Number.isFinite(quota)||quota<0)throw new Error('Invalid traffic allowance');
-  await saveRecord('clients',{id:item.id,name:f.get('name'),note:f.get('note'),quota_bytes:Math.round(quota*1024**3),expires_at:f.get('expires')?new Date(f.get('expires')).toISOString():'',inbound_ids:f.getAll('inbound'),enabled:form.elements.enabled.checked});
- });
- $('[name=quota]',$('#modal')).step='any';
-}
+function editClient(item={}) {return openClientEditor(item);}
 function editTLS(item={}) {
  openModal(item.id?'Edit certificate':'Import TLS certificate','Changes are checked and applied automatically when you save.',`<div class="form-grid">${field('Profile name','name',item.name||'')}${field('Domain / IP address','server_name',item.server_name||'')}${textField('Certificate (PEM)','certificate',item.certificate||'','The certificate must include the server name in its SAN extension.','class="full"')}${textField('Private key (PEM)','private_key','','Leave blank when editing to keep the existing private key.','class="full"')}</div>${tlsBehavior(item)}`,async form=>{
  const d=Object.fromEntries(new FormData(form));if(!d.private_key)delete d.private_key;
@@ -487,6 +475,9 @@ function details(id) {
 function confirmAction(title,text,run,label='Confirm') {openModal(title,'',`<p class="confirm-text">${e(text)}</p>`,run,label);}
 async function handle(action,target) {
  const id=target.dataset.id,collection=target.dataset.collection;
+ if(action.startsWith('admin-'))return handleAdmin(action,target);
+ if(action.startsWith('integration-'))return handleIntegration(action,target);
+ if(action.startsWith('clients-'))return handleClients(action,target);
  if(action.startsWith('dns-rule-'))return handleDNSRule(action,target);
  if(action.startsWith('route-'))return handleRouting(action,target);
  if(action==='update-panel')return updatePanel(id);
@@ -523,21 +514,22 @@ async function handle(action,target) {
   // Explicit ordered update, validated atomically by the server.
   await api('reorder-rules',{revision:state.revision,id});await load();toast('Rule order saved and applied.');return;
  }
- if(action==='change-password')return openModal('Change password','You will need to sign in again after saving.',`<div class="form-grid">${field('Current password','current','','password','','class="full"')}${field('New password','password','','password','At least 12 characters','class="full"')}</div>`,async form=>{await api('password',Object.fromEntries(new FormData(form)));showLogin();toast('Password changed. Please sign in again.');});
+ if(action==='change-password')return editAdminCredentials();
 }
 document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;event.preventDefault();target.disabled=true;try{await handle(target.dataset.action,target);}catch(err){toast(err.message,true);}finally{target.disabled=false;}});
 document.addEventListener('submit',async event=>{
- const form=event.target;if(!['modal-form','login-form','settings-form','access-form'].includes(form.id))return;event.preventDefault();const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Saving…';}
+ const form=event.target;if(!['modal-form','login-form','settings-form','access-form','telegram-form'].includes(form.id))return;event.preventDefault();const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Saving…';}
  try {
-  if(form.id==='login-form'){const result=await api('login',Object.fromEntries(new FormData(form)));csrf=result.csrf;form.elements.password.value='';$('#login-error').textContent='';await boot();}
-  else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';await modalSubmit(form);$('#modal').close();}
+  if(form.id==='login-form'){const result=await api('login',Object.fromEntries(new FormData(form)));if(result.two_factor_required){$('#login-2fa').hidden=false;form.elements.code.required=true;form.elements.code.focus();$('#login-error').textContent='Enter your authenticator or recovery code.';return;}csrf=result.csrf;form.elements.password.value='';form.elements.code.value='';form.elements.code.required=false;$('#login-2fa').hidden=true;$('#login-error').textContent='';await boot();}
+  else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';const close=await modalSubmit(form);if(close!==false)$('#modal').close();}
+  else if(form.id==='telegram-form'){await saveTelegram(form);}
   else if(form.id==='access-form'){await saveAccess(form);}
   else if(form.id==='settings-form'){const f=new FormData(form);const d={server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:state.revision,settings:d});await load();toast('Settings saved and applied.');}
- }catch(err){if(form.id==='modal-form')$('#form-error').textContent=err.message;else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=false;submit.textContent=label;}}
+ }catch(err){if(form.id==='modal-form')$('#form-error').textContent=err.message;else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=form.dataset.previewRequired==='true'&&!form.dataset.previewId;submit.textContent=label;}}
 });
-document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});
-document.addEventListener('change',event=>{if(event.target.matches('.subscription-format'))changeSubscriptionFormat(event.target);else if(event.target.id==='client-filter'){filter=event.target.value;pageNumber=1;render();}});
-window.addEventListener('hashchange',()=>{search='';filter='all';pageNumber=1;$('.sidebar').classList.remove('open');render();});
+document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;selectedClients.clear();render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});
+document.addEventListener('change',event=>{if(event.target.id==='admin-avatar-file'){uploadAdminAvatar(event.target.files?.[0]).catch(error=>toast(error.message,true));return;}if(changeClientControl(event.target))return;if(event.target.matches('.subscription-format'))changeSubscriptionFormat(event.target);else if(event.target.id==='client-filter'){filter=event.target.value;pageNumber=1;render();}});
+window.addEventListener('hashchange',()=>{search='';filter='all';pageNumber=1;selectedClients.clear();$('.sidebar').classList.remove('open');render();});
 $('#refresh').innerHTML=icon('refresh');$('#refresh').addEventListener('click',async()=>{try{await load();toast('Server data refreshed.');}catch(err){toast(err.message,true);}});
 $('#logout').addEventListener('click',async()=>{try{await api('logout',{});showLogin();}catch(err){toast(err.message,true);}});
 $('#mobile-menu').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));

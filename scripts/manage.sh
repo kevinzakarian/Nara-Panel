@@ -79,6 +79,12 @@ reset_password() {
     ui_warn 'All current administrator sessions will be signed out. Client accounts are preserved.'
     (cd "$app_dir" && runuser -u nara-panel -- .venv/bin/python -m nara reset-password --data /var/lib/nara-panel </dev/tty)
 }
+reset_two_factor() {
+    require_installed
+    ui_title 'Administrator two-factor recovery'
+    ui_warn 'This disables administrator 2FA and revokes browser sessions. The current password stays in place.'
+    (cd "$app_dir" && runuser -u nara-panel -- .venv/bin/python -m nara reset-2fa --data /var/lib/nara-panel </dev/tty)
+}
 uninstall_panel() {
     require_installed
     ui_title 'Uninstall NARA'
@@ -99,7 +105,7 @@ show_menu() {
     ui_title 'Server manager'
     if [[ -x "$app_dir/.venv/bin/python" ]]; then manager_python versions || true; else ui_info 'NARA is not installed.'; fi
     if [[ -f /var/run/reboot-required ]]; then ui_warn 'System updates require a reboot. Reboot manually when convenient.'; fi
-    printf '\n  1   New installation\n  2   Upgrade panel only (keep current core)\n  3   Upgrade panel + download compatible core\n  4   Panel HTTPS / Certificate\n  5   Service status and entry URL\n  6   Restart panel service\n  7   Stop panel and core\n  8   Start panel service\n  9   Recent logs\n  10  Create a private backup\n  11  Change administrator password\n  12  Uninstall NARA\n  0   Exit\n'
+    printf '\n  1   New installation\n  2   Upgrade panel only (keep current core)\n  3   Upgrade panel + download compatible core\n  4   Panel HTTPS / Certificate\n  5   Service status and entry URL\n  6   Restart panel service\n  7   Stop panel and core\n  8   Start panel service\n  9   Recent logs\n  10  Create a private backup\n  11  Change administrator password\n  12  Uninstall NARA\n  13  Reset administrator 2FA (server-local recovery)\n  0   Exit\n'
 }
 manager_main() {
     [[ $(uname -s) == Linux && $(id -u) == 0 ]] || { ui_error 'Run as root on a Linux server.'; return 1; }
@@ -129,7 +135,7 @@ manager_main() {
                 7) require_installed; systemctl stop nara-panel; ui_success 'Panel and core stopped. HTTPS proxy, if configured, remains running.' ;;
                 8) require_installed; systemctl start nara-panel; manager_python health; ui_success 'Panel service started. The core follows its saved start/stop state.' ;;
                 9) require_installed; journalctl -u nara-panel -u nara-panel-https -u nara-panel-access -n 60 --no-pager ;;
-                10) require_installed; manager_python backup ;; 11) reset_password ;; 12) uninstall_panel ;;
+                10) require_installed; manager_python backup ;; 11) reset_password ;; 12) uninstall_panel ;; 13) reset_two_factor ;;
                 *) ui_error 'Choose a number from the menu.'; exit 1 ;;
             esac
         )
