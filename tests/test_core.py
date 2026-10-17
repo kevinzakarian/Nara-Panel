@@ -281,12 +281,14 @@ class CoreTests(unittest.TestCase):
             ("snell", {"version": 5, "psk": "fixture-password"}, {"type": "snell", "version": 4, "psk": "fixture-password"}),
             ("snell", {"version": 6, "psk": "fixture-password", "mode": "unshaped"},
              {"type": "snell", "version": 6, "psk": "fixture-password", "mode": "unshaped"}),
-            ("hysteria", {"up_mbps": 20, "down_mbps": 20, "users": [{"name": "fixture", "auth_str": "fixture-password"}], "obfs": "fixture-obfs"},
-             {"type": "hysteria", "up_mbps": 20, "down_mbps": 20, "auth_str": "fixture-password", "obfs": "fixture-obfs"}),
+            ("hysteria", {"up_mbps": 20, "down_mbps": 20, "users": [{"name": "fixture", "auth_str": "fixture-password"}]},
+             {"type": "hysteria", "up_mbps": 20, "down_mbps": 20, "auth_str": "fixture-password"}),
+            ("hysteria", {"up_mbps": 20, "down_mbps": 20, "users": [{"name": "fixture", "auth_str": "fixture-password"}], "obfs": "fixture-obfs", "disable_path_mtu_discovery": True},
+             {"type": "hysteria", "up_mbps": 20, "down_mbps": 20, "auth_str": "fixture-password", "obfs": "fixture-obfs", "disable_path_mtu_discovery": True}),
         ]
         from nara.config import initial_state
         for protocol, server, outbound in cases:
-            with self.subTest(protocol=protocol, version=server.get("version")):
+            with self.subTest(protocol=protocol, version=server.get("version"), obfs=bool(server.get("obfs"))):
                 port = free_port()
                 state = initial_state()
                 state["settings"]["block_private"] = False
