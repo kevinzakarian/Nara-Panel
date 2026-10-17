@@ -22,6 +22,16 @@ from tests.helpers import example_state, free_port
 CORE = os.environ.get("SING_BOX_TEST_BINARY")
 
 
+def diagnostic_categories(text):
+    # Only fixed labels and counts may reach public CI output. Never emit log
+    # lines, peer names, file contents, credentials, or configuration values.
+    text = text.lower()
+    labels = ('network is unreachable','connection refused','operation not permitted',
+              'invalid argument','timeout','deadline exceeded','certificate','handshake',
+              'no such host','no route','gso','obfs','dns','read udp','write udp','dial tcp','sendmsg')
+    return {label:text.count(label) for label in labels if label in text}
+
+
 class Target(BaseHTTPRequestHandler):
     def do_GET(self):
         payload = b"NARA traffic accounting test.\n" * 2048
@@ -105,6 +115,14 @@ class CoreTests(unittest.TestCase):
         self.runtime.shutdown.set()
         with self.runtime.lock:
             self.runtime.stop()
+        if os.environ.get('NARA_TEST_DIAGNOSTICS') == '1':
+            result = getattr(self._outcome, 'result', None)
+            failures = getattr(result, 'errors', []) + getattr(result, 'failures', [])
+            if any(case.id().startswith(self.id()) for case, _ in failures):
+                server = Path(self.temp.name)/'core.log'
+                text = server.read_text(errors='replace') if server.exists() else ''
+                clients = ''.join(path.read_text(errors='replace') for path in Path(self.temp.name).glob('*client.log'))
+                print('Fixture error categories: '+json.dumps({'server':diagnostic_categories(text),'client':diagnostic_categories(clients)}))
         self.temp.cleanup()
 
     def local_client(self, state):
@@ -127,7 +145,8 @@ class CoreTests(unittest.TestCase):
             port, config = self.local_client(state)
         path = Path(self.temp.name) / "client.json"
         atomic_write(path, json.dumps(config))
-        process = subprocess.Popen([CORE, "run", "-c", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(path.with_suffix('.client.log'), 'w') as client_log:
+            process = subprocess.Popen([CORE, "run", "-c", str(path)], stdout=client_log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 8
             while True:
@@ -173,7 +192,8 @@ class CoreTests(unittest.TestCase):
         port, config = self.local_client(state)
         path = Path(self.temp.name)/"dns-client.json"
         atomic_write(path, json.dumps(config))
-        process = subprocess.Popen([CORE, "run", "-c", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(path.with_suffix('.client.log'), 'w') as client_log:
+            process = subprocess.Popen([CORE, "run", "-c", str(path)], stdout=client_log, stderr=subprocess.STDOUT)
         query = b"\x12\x34" + struct.pack("!HHHHH", 0x100, 1, 0, 0, 0) + b"\x03vpn\x04nara\x04test\x00" + struct.pack("!HH", 1, 1)
         before = len(RemoteDNS.queries)
         try:
