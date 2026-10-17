@@ -9,6 +9,8 @@ ExecStart=/opt/nara-panel/.venv/bin/python -m nara.access apply
 TimeoutStartSec=1200
 UMask=0077
 NoNewPrivileges=true
+# Keep the identities needed for owner-safe SQLite work across exec.
+AmbientCapabilities=CAP_SETUID CAP_SETGID
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=true
