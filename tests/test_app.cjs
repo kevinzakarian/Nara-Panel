@@ -10,8 +10,8 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
- w.TestApp.setup(fixture);
+ w.eval(fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},tls(){return renderTLS()},updates(value,managed){dashboard={updates:{panel:value}};accessSettings={managed};return panelUpdateCard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
+ w.TestApp.setup(JSON.parse(JSON.stringify(fixture)));
  return {w,dom,close(){w.close()}};
 }
 test('new IP resolver is independent and hostname resolver can be explicitly selected',()=>{
@@ -182,4 +182,46 @@ test('overview keeps CPU model and each address family in its own escaped row',(
   data.metrics.ipv6=[];root.innerHTML=f.w.TestApp.dashboard(data);assert.ok(root.textContent.includes('Not assigned'));
   data.metrics.ipv6=null;root.innerHTML=f.w.TestApp.dashboard(data);assert.ok(root.textContent.includes('Unavailable'));
  }finally{f.close()}
+});
+
+test('DNS identity stays adjacent and survives provider redraws without an enable checkbox',async()=>{
+ const f=app();try{
+  let saved;f.w.TestApp.saveWith(async(c,r)=>{saved=r});f.w.TestApp.editCoreRecord('dns_servers');const d=f.w.document;
+  assert.equal(d.querySelector('[name=native_enabled]'),null);
+  const name=d.querySelector('[name=display_name]');name.value='My resolver';
+  assert.equal(name.closest('label').nextElementSibling.dataset.dnsField,'tag');
+  const provider=d.querySelector('[name=dns_provider]');provider.value='google';provider.dispatchEvent(new f.w.Event('change'));
+  assert.equal(d.querySelector('[name=display_name]'),name);assert.equal(name.value,'My resolver');
+  assert.equal(name.closest('label').nextElementSibling.dataset.dnsField,'tag');
+  assert.ok(d.querySelector('.dns-tls-summary').textContent.includes('dns.google'));
+  assert.equal(d.querySelector('[data-dns-field=tls] input'),null);
+  await f.w.TestApp.submit();assert.equal(saved.enabled,true);assert.equal(saved.label,'My resolver');assert.equal(saved.config.tls.enabled,true);
+  f.w.TestApp.editCoreRecord('dns_servers',{id:'old',enabled:false,label:'Disabled resolver',config:{type:'udp',tag:'disabled',server:'8.8.8.8'}});
+  await f.w.TestApp.submit();assert.equal(saved.enabled,false);
+ }finally{f.close()}
+});
+test('TLS certificates use escaped table rows with assignments and existing actions',()=>{
+ const f=app();try{
+  const data=JSON.parse(JSON.stringify(fixture));data.state.tls=[{id:'demo',name:'Cert <demo>',server_name:'vpn.example',kind:'self_signed',expires:Date.now()/1000+3600,insecure:true},{id:'old',name:'Old certificate',server_name:'old.example',kind:'imported',expires:1,insecure:false}];data.state.inbounds=[{tls_id:'demo'},{tls_id:'demo'}];f.w.TestApp.setup(data);
+  const root=f.w.document.createElement('div');root.innerHTML=f.w.TestApp.tls();
+  assert.equal(root.querySelectorAll('tbody tr').length,2);assert.equal(root.querySelector('demo'),null);
+  const row=root.querySelector('tbody tr');assert.equal(row.cells[0].querySelector('b').textContent,'Cert <demo>');assert.equal(row.cells[5].textContent,'2');assert.ok(row.textContent.includes('Allow insecure'));assert.ok(row.textContent.includes('Valid'));
+  for(const action of ['download-cert','edit','delete'])assert.ok(row.querySelector(`[data-action="${action}"]`));
+  assert.ok(root.querySelectorAll('tbody tr')[1].textContent.includes('Expired'));
+ }finally{f.close()}
+});
+test('panel update button requires a managed installation and an available release',()=>{
+ const f=app();try{
+  const root=f.w.document.createElement('div');
+  for(const [managed,available] of [[false,true],[true,false],[true,true]]){
+   root.innerHTML=f.w.TestApp.updates({available,latest:'9.0.0',known:true},managed);
+   assert.equal(Boolean(root.querySelector('[data-action=update-panel]')),managed&&available);
+   assert.equal(root.querySelector('[type=password]'),null);
+  }
+  assert.equal(root.querySelector('[data-action=update-panel]').dataset.id,'9.0.0');
+ }finally{f.close()}
+});
+test('footer puts only the panel version beside the brand and tagline',()=>{
+ const d=new JSDOM(fs.readFileSync('web/index.html','utf8')).window.document;
+ const footer=d.querySelector('footer');assert.match(footer.textContent,/NARA v[0-9.]+ · Made for more control/);assert.ok(!footer.textContent.includes('server panel'));assert.equal(footer.querySelectorAll('.panel-version').length,1);
 });

@@ -327,6 +327,23 @@ class APITests(unittest.TestCase):
                 time.sleep(.01)
             self.assertEqual(network.call_count,4)
 
+    def test_panel_update_requires_authentication_csrf_and_managed_install_and_queues_only_a_version(self):
+        self.assertEqual(self.request('/api/update-panel',{'version':'9.0.0'})[0],401)
+        self.login()
+        self.assertEqual(self.request('/api/update-panel',{'version':'9.0.0'},{'X-CSRF-Token':'wrong'})[0],403)
+        self.assertEqual(self.request('/api/update-panel',{'version':'9.0.0'})[0],400)
+        from nara.access import Access
+        self.server.RequestHandlerClass=make_handler(self.store,self.runtime,Path('web'),web_path=self.web_path,access=Access(self.store.directory,{'NARA_ACCESS_MANAGED':'1'}))
+        self.assertEqual(self.request('/api/update-panel',{'version':'9.0.0;id'})[0],400)
+        before=self.store.get('state')
+        status,data,_=self.request('/api/update-panel',{'version':'9.0.0'})
+        self.assertEqual(status,200,data)
+        job=json.loads((self.store.directory/'access-request.json').read_text())
+        self.assertEqual(set(job),{'id','operation','version','created_at'})
+        self.assertEqual(job['operation'],'update-panel');self.assertEqual(job['version'],'9.0.0')
+        self.assertEqual(self.store.get('state'),before)
+        self.assertEqual(self.request('/api/update-panel',{'version':'9.0.1'})[0],400)
+
 
 class WebPathTests(APITests):
     web_path = "/AbCdEfGh"

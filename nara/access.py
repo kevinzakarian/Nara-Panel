@@ -1,8 +1,8 @@
-"""Validated entry settings and the small systemd broker for port/path changes.
+"""Fixed operations for entry settings and verified stable panel upgrades.
 
-The unprivileged web service can request only four allow-listed entry values.
-The root oneshot updates its fixed environment/proxy files and restores them if
-readiness fails. It never evaluates request data as code or shell arguments.
+The unprivileged web service requests allow-listed entry values or a version.
+The root oneshot restores entry settings on readiness failure and delegates
+fixed-source upgrades to panel_update. Request data is never evaluated as code.
 """
 import argparse
 import hashlib
@@ -86,6 +86,18 @@ class Access:
         url = change_url(current_url, values, host=self.info()['public_host'] or None,
                          scheme='https' if self.info()['public_host'] else None)
         job = {'id': secrets.token_urlsafe(24), 'expected': expected, 'values': values, 'created_at': time.time()}
+        self.queue(job)
+        return {'id': job['id'], 'url': url, 'values': values}
+
+    def request_update(self, version):
+        from .panel_update import target
+        if not self.info()['managed']:
+            raise ValueError('Use the Linux installer once to enable panel updates; containers use their image update process')
+        job = {'id':secrets.token_urlsafe(24), 'operation':'update-panel', 'version':target(version), 'created_at':time.time()}
+        self.queue(job)
+        return {'id':job['id'], 'version':job['version']}
+
+    def queue(self, job):
         descriptor, temporary = tempfile.mkstemp(prefix='.access-', dir=self.directory)
         try:
             with os.fdopen(descriptor, 'w') as file:
@@ -98,7 +110,6 @@ class Access:
                 raise ValueError('Another entry change is in progress; wait and refresh') from exc
         finally:
             Path(temporary).unlink(missing_ok=True)
-        return {'id': job['id'], 'url': url, 'values': values}
 
     def status(self, job_id):
         path = self.directory / 'access-result.json'
@@ -217,7 +228,12 @@ def process_request(paths, blocked_error=None):
         if blocked_error:
             raise ValueError(blocked_error)
         time.sleep(max(0, .5 - max(0, time.time() - job['created_at'])))
-        result = {'id': job['id'], 'status': 'complete', 'values': apply_job(paths, job)}
+        if job.get('operation') == 'update-panel':
+            from .panel_update import apply
+            values = apply(paths, job)
+        else:
+            values = apply_job(paths, job)
+        result = {'id': job['id'], 'status': 'complete', 'values': values}
     except Exception as exc:
         result = {'id': job.get('id', ''), 'status': 'failed', 'error': str(exc)}
     finally:

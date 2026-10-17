@@ -286,6 +286,10 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if path == "/api/check-updates":
                 started = updates.start()
                 return self.send(200, {"started": started, "updates": updates.status(runtime.version())})
+            if path == "/api/update-panel":
+                result = access.request_update(data.get('version'))
+                store.audit('Panel update requested: ' + result['version'])
+                return self.send(200, result)
             if path == "/api/access":
                 require(isinstance(data.get("current_url"), str), "Panel address is required")
                 parsed = urlsplit(data["current_url"])

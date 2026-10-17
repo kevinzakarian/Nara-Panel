@@ -284,3 +284,14 @@ licensed runtime dependencies from their official sources.
 
 
 Client controls follow the [official TUN HTTP proxy fields](https://sing-box.sagernet.org/configuration/inbound/tun/#platformhttp_proxy), [Clash mode behavior](https://sing-box.sagernet.org/configuration/experimental/clash-api/#default_mode), and the 1.14.3 core’s [mode-list calculation](https://github.com/SagerNet/sing-box/blob/v1.14.3/experimental/clashmode/mode_list.go). Native-app button visibility also depends on the app’s UI preferences. System HTTP Proxy is a separate control from starting/stopping the VPN.
+
+
+Version **0.6.6** places DNS Display name beside Tag, removes the resolver enable checkbox and shows a compact automatic TLS summary for provider presets. Encrypted DNS still uses TLS; Custom resolvers keep editable server name and certificate verification. Existing hidden TLS trust settings and disabled resolver states are preserved. TLS certificates now use a table, and the footer groups NARA, its version and tagline.
+
+**One-click panel updates:** Linux installations managed by NARA show **Update panel** in Overview and **Panel updates** in Settings when a newer stable panel release is found on entry. No SSH username or password is stored. The existing root maintenance broker accepts only a stable version number, downloads the source asset and SHA256SUMS from this fixed public repository, verifies the checksum and version, creates a private backup, and runs the updater with readiness checks and rollback on failure. The panel briefly restarts; the installed Sing-box core is preserved. Private update logs are in `/var/log/nara-panel-update.log`. A checksum validates downloaded bytes; repository release access remains the trust boundary.
+
+Existing installations must upgrade once with the command below (or installation manager option 2) to install the new maintenance helper. Later stable releases can use the button. Releases that change Python dependencies require the full installation manager; Docker/manual installations keep their own update process.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/update.sh | sudo bash
+```

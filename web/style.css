@@ -105,6 +105,11 @@ dialog { width:min(780px,calc(100% - 32px)); }
 .schema-note { margin:12px 16px; }
 .schema-json { display:block; margin:12px 16px; width:calc(100% - 32px); direction:ltr; font:14px/1.6 ui-monospace,monospace; }
 .dns-identity-grid { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:center; padding-top:18px; }
+.dns-identity-grid:empty { display:none; }
+.dns-editor>.dns-root-fields>.dns-name-field+[data-dns-field=tag] { grid-column:auto; }
+.dns-name-field { align-self:start; min-width:0; }
+.dns-tls-summary { padding:10px 12px; border:1px solid #dce9e3; background:#f5faf7; border-radius:8px; font-size:14px; color:#547267; overflow-wrap:anywhere; }
+.tls-server { display:block; color:var(--muted); margin-top:4px; }
 .dns-editor { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; }
 .dns-editor .schema-variant { margin-bottom:0; align-self:start; }
 .dns-editor>.dns-root-fields { display:contents; }
