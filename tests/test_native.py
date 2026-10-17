@@ -15,6 +15,14 @@ def row(config, ident='native'):
 
 
 class NativeTests(unittest.TestCase):
+    def test_wireguard_peer_pre_shared_keys_are_redacted_and_retained_on_edit(self):
+        config={'type':'wireguard','private_key':'PRIVATE','peers':[{'public_key':'PUBLIC','pre_shared_key':'SHARED'}]}
+        visible=native.redact(config)
+        self.assertNotIn('private_key',visible)
+        self.assertNotIn('pre_shared_key',visible['peers'][0])
+        self.assertEqual(native.preserve_secrets(visible,config),config)
+
+
     def test_ip_dns_drops_unused_dependencies_and_preserves_tls_options(self):
         for mode in ('native', 'legacy'):
             for address in ('8.8.8.8', '2001:4860:4860::8888'):

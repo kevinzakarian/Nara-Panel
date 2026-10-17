@@ -95,7 +95,10 @@ def endpoint(response, private_key):
         remote = peer['endpoint']
         # Prefer an API-provided literal IPv4 to avoid hostname bootstrap cycles.
         value = remote.get('v4') or remote.get('v6')
-        port = (remote.get('ports') or [2408])[0]
+        ports = remote.get('ports') or [2408]
+        if not isinstance(ports, list) or type(ports[0]) is not int:
+            raise ValueError()
+        port = ports[0]
         try:
             address = ipaddress.ip_address(value)
         except ValueError:
@@ -103,7 +106,7 @@ def endpoint(response, private_key):
             parsed = urlsplit('//'+value)
             address = ipaddress.ip_address(parsed.hostname)
             port = parsed.port or port
-        if not address.is_global or isinstance(port, bool) or not 1 <= int(port) <= 65535:
+        if not address.is_global or type(port) is not int or not 1 <= port <= 65535:
             raise ValueError()
         return {'type': 'wireguard', 'system': False, 'mtu': 1280, 'address': local,
                 'private_key': private_key, 'peers': [{'address': str(address), 'port': int(port),

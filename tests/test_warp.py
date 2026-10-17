@@ -34,6 +34,7 @@ class WarpTests(unittest.TestCase):
 
     def test_response_accepts_legacy_ip_port_and_ipv6_endpoint(self):
         for value, expected in [('162.159.192.1:500', ('162.159.192.1', 500)),
+                                ('162.159.192.1:0', ('162.159.192.1', 2408)),
                                 ('[2606:4700:d0::a29f:c001]:2408', ('2606:4700:d0::a29f:c001', 2408))]:
             response = registration()
             response['config']['peers'][0]['endpoint'] = {'v6': value}
@@ -47,6 +48,9 @@ class WarpTests(unittest.TestCase):
                        lambda r: r['config']['interface'].update(addresses={'v4':'127.0.0.1'}),
                        lambda r: r['config']['peers'][0]['endpoint'].update(v4='127.0.0.1'),
                        lambda r: r['config']['peers'][0]['endpoint'].update(ports=[70000]),
+                       lambda r: r['config']['peers'][0]['endpoint'].update(ports='2408'),
+                       lambda r: r['config']['peers'][0]['endpoint'].update(ports=[2408.5]),
+                       lambda r: r['config']['peers'][0]['endpoint'].update(ports=[True]),
                        lambda r: r.update(tunnel_type='masque')]:
             response = registration(); change(response); cases.append(response)
         for response in cases:
