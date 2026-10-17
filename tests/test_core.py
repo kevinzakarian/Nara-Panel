@@ -31,11 +31,15 @@ def diagnostic_categories(text):
               'invalid argument','timeout','deadline exceeded','certificate','handshake',
               'no such host','no route','gso','obfs','dns','read udp','write udp','dial tcp','sendmsg',
               'inbound','outbound','exchange','response','query','cached','rejected','hijack',
-              'eof','error','reset','stream','closed','cancel','not found','failed to','started')
+              'eof','error','reset','stream','closed','cancel','not found','failed to','started',
+              'invalid','unexpected','unpack','buffer','overflow','short','malformed','length',
+              'header','protocol','message','empty','resource','permission','denied','splice',
+              'tls','http','unknown','broken pipe','body','status','too many','compression')
     return {label:text.count(label) for label in labels if label in text}
 
 
 class Target(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     def do_GET(self):
         payload = b"NARA traffic accounting test.\n" * 2048
         self.send_response(200)
@@ -67,6 +71,7 @@ class BootstrapDNS(socketserver.BaseRequestHandler):
 
 
 class RemoteDNS(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     queries = []
 
     def do_POST(self):
@@ -171,14 +176,20 @@ class CoreTests(unittest.TestCase):
                     time.sleep(.1)
             with sock:
                 sock.settimeout(8)
-                request = "GET http://127.0.0.1:{}/ HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n".format(self.target.server_port, self.target.server_port)
+                request = "GET http://127.0.0.1:{}/ HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: keep-alive\r\n\r\n".format(self.target.server_port, self.target.server_port)
                 sock.sendall(request.encode())
                 # HTTP response framing defines completion. Waiting for a
                 # tunnel EOF after Content-Length can stall legacy QUIC streams.
                 response = http.client.HTTPResponse(sock)
                 response.begin()
                 self.assertEqual(response.status, 200)
-                data = response.read()
+                chunks = []
+                try:
+                    while chunk := response.read1(65536):
+                        chunks.append(chunk)
+                except TimeoutError:
+                    self.fail("HTTP body stalled after " + str(sum(map(len, chunks))) + " bytes")
+                data = b"".join(chunks)
                 self.assertEqual(len(data), len(b"NARA traffic accounting test.\n") * 2048)
             self.assertIn(b"NARA traffic accounting test.", data)
         finally:
