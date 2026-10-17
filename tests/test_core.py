@@ -1,5 +1,6 @@
 """Loopback integration tests. Never changes routes, firewall, or host DNS."""
 import copy
+import http.client
 import json
 import os
 import socket
@@ -129,6 +130,9 @@ class CoreTests(unittest.TestCase):
         config = client_config(state, state["clients"][0], {})
         # Exercise the proxy without creating a VPN or changing host routes.
         config["inbounds"] = [i for i in config["inbounds"] if i["type"] != "tun"]
+        # The fixture has no TUN or routing changes. Do not bind its local DNS
+        # bootstrap to the host's external default interface on Linux.
+        config["route"]["auto_detect_interface"] = False
         port = free_port()
         config["inbounds"][0]["listen_port"] = port
         config["dns"]["servers"][0].update(server="127.0.0.1", server_port=self.bootstrap_dns.server_address[1])
@@ -161,12 +165,13 @@ class CoreTests(unittest.TestCase):
                 sock.settimeout(8)
                 request = "GET http://127.0.0.1:{}/ HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n".format(self.target.server_port, self.target.server_port)
                 sock.sendall(request.encode())
-                data = b""
-                while True:
-                    chunk = sock.recv(65536)
-                    if not chunk:
-                        break
-                    data += chunk
+                # HTTP response framing defines completion. Waiting for a
+                # tunnel EOF after Content-Length can stall legacy QUIC streams.
+                response = http.client.HTTPResponse(sock)
+                response.begin()
+                self.assertEqual(response.status, 200)
+                data = response.read()
+                self.assertEqual(len(data), len(b"NARA traffic accounting test.\n") * 2048)
             self.assertIn(b"NARA traffic accounting test.", data)
         finally:
             process.terminate()

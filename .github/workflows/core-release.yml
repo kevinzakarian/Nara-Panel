@@ -51,6 +51,7 @@ jobs:
         run: sh scripts/build-core.sh "$PWD/dist/core/sing-box"
       - name: Check the binary and run real traffic/accounting integration
         run: |
+          python3 -c 'import ctypes; ctypes.CDLL("./dist/core/libcronet.so")'
           python3 -m venv .venv
           .venv/bin/pip install -r requirements.txt
           NARA_TEST_DIAGNOSTICS=1 PYTHONDONTWRITEBYTECODE=1 SING_BOX_TEST_BINARY="$PWD/dist/core/sing-box" .venv/bin/python -m unittest tests.test_core tests.test_auto_apply -v
