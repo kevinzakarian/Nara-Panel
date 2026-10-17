@@ -24,6 +24,14 @@ def normalize_dns_record(row):
         config = clean["config"] = dict(row["config"])
     if config.get("type") in REMOTE_DNS_TYPES and isinstance(config.get("server"), str):
         config["server"] = config["server"].strip()
+        try:
+            ipaddress.ip_address(config["server"])
+        except ValueError:
+            pass
+        else:
+            # A literal address never needs a lookup. Older forms populated this
+            # field automatically, leaving unused dependencies on deleted tags.
+            config.pop("domain_resolver", None)
     return clean
 
 
@@ -162,6 +170,7 @@ def validate(state):
     # Reject resolver dependency cycles before sing-box sees them.
     dependencies = {}
     for d in state["dns_servers"]:
+        d = normalize_dns_record(d)
         resolver = d.get("config", {}).get("domain_resolver") if d.get("mode") == "native" else d.get("domain_resolver")
         dependencies[d["tag"]] = resolver.get("server") if isinstance(resolver, dict) else resolver
     for tag in dependencies:

@@ -15,6 +15,26 @@ def row(config, ident='native'):
 
 
 class NativeTests(unittest.TestCase):
+    def test_ip_dns_drops_unused_dependencies_and_preserves_tls_options(self):
+        for mode in ('native', 'legacy'):
+            for address in ('8.8.8.8', '2001:4860:4860::8888'):
+                with self.subTest(mode=mode, address=address):
+                    config = {'type':'https', 'tag':'google', 'server':address,
+                              'domain_resolver':{'server':'deleted', 'strategy':'prefer_ipv4'},
+                              'tls':{'enabled':True, 'server_name':'dns.google'}, 'path':'/dns-query'}
+                    record = row(config) if mode == 'native' else {'id':'google', **config}
+                    original = copy.deepcopy(record)
+                    state = initial_state()
+                    state['dns_servers'] = [record]
+                    state['settings']['dns_final'] = 'google'
+                    validate(state)
+                    result = build_config(state, {}, Path('/tmp'))['dns']['servers'][0]
+                    self.assertNotIn('domain_resolver', result)
+                    self.assertEqual(result['server'], address)
+                    if mode == 'native':
+                        self.assertEqual(result['tls'], config['tls'])
+                    self.assertEqual(record, original)
+
     def test_dns_address_whitespace_is_normalized_without_changing_secret_or_other_fields(self):
         for mode in ('native', 'legacy'):
             with self.subTest(mode=mode):

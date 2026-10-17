@@ -122,6 +122,34 @@ class AutoApplyTests(unittest.TestCase):
         self.assertEqual(self.store.get('state'), state)
         self.assertEqual(self.runtime.active, state)
 
+    def test_delete_old_bootstrap_with_ip_dns_keeps_core_running_but_hostname_dependency_blocks(self):
+        state = self.seed()
+        for mode in ('native', 'legacy'):
+            config = {'type':'https', 'tag':'google-'+mode, 'server':'8.8.8.8',
+                      'domain_resolver':'bootstrap', 'tls':{'enabled':True,'server_name':'dns.google'}}
+            record = {'id':'google-'+mode, 'mode':'native', 'type':'https', 'tag':config['tag'], 'config':config} if mode == 'native' else {'id':'google-'+mode, **config}
+            state['dns_servers'].append(record)
+        state['settings']['dns_final'] = 'google-native'
+        # Simulate data saved by a version that auto-filled unused references.
+        self.store.set('state', state)
+        result = self.request('/api/delete', {'revision':state['revision'], 'collection':'dns_servers', 'id':'bootstrap'})
+        self.assertEqual(result[0], 200, result[1])
+        saved = self.store.get('state')
+        self.assertEqual(len(saved['dns_servers']), 2)
+        for record in saved['dns_servers']:
+            self.assertNotIn('domain_resolver', record.get('config', record))
+        self.assertEqual(self.runtime.active, saved)
+        self.assertTrue(self.runtime.running)
+        # A genuine hostname dependency must still prevent removal atomically.
+        saved['dns_servers'].append({'id':'hostname', 'tag':'hostname', 'mode':'native', 'type':'https',
+                                    'config':{'type':'https','tag':'hostname','server':'dns.google','domain_resolver':'google-native'}})
+        self.runtime.apply(saved, save=True)
+        result = self.request('/api/delete', {'revision':saved['revision'], 'collection':'dns_servers', 'id':'google-native'})
+        self.assertEqual(result[0], 400, result[1])
+        self.assertIn('separate configured', result[1]['error'])
+        self.assertEqual(self.store.get('state'), saved)
+        self.assertTrue(self.runtime.running)
+
     def test_google_udp_pasted_address_saves_without_bootstrap_in_native_and_legacy_forms(self):
         state = self.seed()
         for mode in ('native', 'legacy'):

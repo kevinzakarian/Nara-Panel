@@ -134,6 +134,8 @@ curl -fsSL https://raw.githubusercontent.com/kevinzakarian/Nara-Panel/main/updat
 
 This updates the application and web interface using the installed Sing-box core, preserving the panel port/webPath, administrator, accounts, and saved configuration. It restarts the panel and core, verifies readiness, and attempts to restore the previous application code if startup fails. If dependencies have changed, it stops before applying code and asks you to use the full installer. Docker installations should rebuild the image instead.
 
+Version **0.6.2** makes IP-address DNS resolvers independent. Unused Domain Resolver references from older forms are removed automatically, including on upgrade, so they do not block deleting an otherwise unused bootstrap resolver. Hostname-based DNS still needs a separate resolver. TLS SNI and certificate verification options are preserved.
+
 Version **0.6.1** adds native app mode/System HTTP Proxy controls to exported profiles and connects client DNS to the panel’s current Default DNS and DNS rules. Refresh existing remote profiles once after upgrading, then reconnect. Future resolver changes use the same profile; server restarts may require a reconnect and cached answers follow their TTL.
 
 Version **0.6.0** reorganizes Routing around traffic flow: defaults, ordered traffic rules, destinations and shared rule sets. Common rules use flat match/action/scope forms instead of nested option menus. Existing specialized rules open in a lossless advanced JSON editor. Moving rules in either direction and toggling them validates and applies immediately.
@@ -219,7 +221,7 @@ QR codes contain the private subscription URL, including the account token and s
 - There is one administrator identity. Private keys, client credentials, subscription tokens, and the database must stay private. Core diagnostics live in the private data directory as `core.log`; the UI does not display raw core errors that might contain credentials.
 - For a consistent manual backup, stop the panel service and back up the entire `/var/lib/nara-panel` directory including the SQLite database. Restore only to a trusted host with the service stopped. Automatic encrypted backups and multi-server management are outside this release.
 
-DNS resolvers using a hostname need a separate **Domain Resolver** (bootstrap), as described in the [upstream HTTPS DNS documentation](https://sing-box.sagernet.org/configuration/dns/server/https/). New resolver forms select the existing default resolver for this purpose. Enter an IP/hostname in **Server**, put the port in **Server Port** and the DoH path in **Path**. Invalid input is rejected before changing saved or active settings.
+DNS resolvers using a hostname need a separate **Domain Resolver** (bootstrap), as described in the [upstream HTTPS DNS documentation](https://sing-box.sagernet.org/configuration/dns/server/https/). IP-address resolvers are independent and new forms do not preselect a Domain Resolver. Unused Domain Resolver fields on IP-address servers are removed automatically from saved/active models and core configuration; this includes references populated by older versions. Hostname-based servers retain their explicit dependencies and cycle protection. The TLS Server Name / SNI can remain a hostname when Server is an IP. Enter an IP/hostname in **Server**, put the port in **Server Port** and the DoH path in **Path**. Invalid input is rejected before changing saved or active settings.
 
 ## Core build and release maintenance
 

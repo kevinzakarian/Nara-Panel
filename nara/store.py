@@ -6,7 +6,7 @@ import secrets
 import sqlite3
 import time
 from pathlib import Path
-from .config import initial_state
+from .config import initial_state, normalize_dns_record
 
 
 def password_hash(password, salt=None):
@@ -53,6 +53,7 @@ class Store:
             if key in ("state", "active") and isinstance(value, dict):
                 for name, initial in initial_state().items():
                     value.setdefault(name, initial)
+                value["dns_servers"] = [normalize_dns_record(row) for row in value["dns_servers"]]
             return value
 
     def set(self, key, value):

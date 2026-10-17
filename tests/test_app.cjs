@@ -14,14 +14,19 @@ function app(){
  w.TestApp.setup(fixture);
  return {w,dom,close(){w.close()}};
 }
-test('new resolver visibly selects an existing bootstrap and retains it for hostname input',()=>{
+test('new IP resolver is independent and hostname resolver can be explicitly selected',()=>{
  const f=app();try{
   f.w.TestApp.editCoreRecord('dns_servers');
   const document=f.w.document;
-  assert.ok(document.querySelector('#native-fields').textContent.includes('Domain Resolver'));
-  assert.ok([...document.querySelectorAll('#native-fields select')].some(select=>select.value==='bootstrap'));
+  document.querySelector('#core-to-json').click();
+  assert.equal(JSON.parse(document.querySelector('#native-json').value).server,'1.1.1.1');
+  assert.ok(!Object.hasOwn(JSON.parse(document.querySelector('#native-json').value),'domain_resolver'));
   const server=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Server').querySelector('textarea');
   server.value='dns.google';server.dispatchEvent(new f.w.Event('input',{bubbles:true}));
+  const add=document.querySelector('[data-core-add]');
+  add.value='domain_resolver';add.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  const resolver=[...document.querySelectorAll('#native-fields label')].find(label=>label.firstChild?.textContent==='Domain Resolver').querySelector('select');
+  resolver.value='bootstrap';resolver.dispatchEvent(new f.w.Event('input',{bubbles:true}));
   document.querySelector('#core-to-json').click();
   const config=JSON.parse(document.querySelector('#native-json').value);
   assert.equal(config.server,'dns.google');assert.equal(config.domain_resolver,'bootstrap');
