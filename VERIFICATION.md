@@ -316,3 +316,18 @@ discovery on macOS rather than invented IP values. No production server was chan
 Shell/JavaScript syntax, source packaging, version consistency, private build-log
 permissions and archive contents were checked. Credentials/databases and Go caches
 are excluded from the source package.
+
+## Legacy uninstall compatibility (0.4.2)
+
+All **30 maintenance tests passed**, including four new regressions for an older
+installation without access-broker/HTTPS units, a real disable failure, a systemd
+inspection failure and an active unit with a missing file. Missing inactive units
+are skipped using LoadState; installed units still require successful disable/stop
+before application deletion. Genuine systemd errors remain actionable and preserve
+application/data files. Existing keep-data, purge, backup and other-site isolation
+tests passed. Tests use temporary layouts and mocked systemctl; no real server
+uninstall was performed. The user's supplied output reports a completed purge;
+its missing-unit messages came from optional units absent on that installation.
+
+Version consistency, source packaging and whitespace checks passed. No new browser
+check was needed because this change affects terminal maintenance only.

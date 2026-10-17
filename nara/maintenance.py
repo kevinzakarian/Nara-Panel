@@ -705,7 +705,17 @@ def uninstall(paths, mode):
     if mode == "1":
         backup(paths)
     for unit in ("nara-panel-access.path", "nara-panel-access.service", "nara-panel-https", "nara-panel"):
-        subprocess.run(["systemctl", "disable", "--now", unit], check=False)
+        # Older installations do not have every optional unit. Inspect systemd's
+        # loaded state too, so a running unit whose file vanished is not skipped.
+        loaded = subprocess.run(["systemctl", "show", "--property=LoadState", "--value", unit],
+                                capture_output=True, text=True, check=False)
+        if loaded.stdout.strip() == "not-found" and not active(unit):
+            continue
+        if loaded.returncode:
+            raise ValueError("Could not inspect " + unit + "; no application files were removed. " + loaded.stderr.strip())
+        stopped = subprocess.run(["systemctl", "disable", "--now", unit], capture_output=True, text=True, check=False)
+        if stopped.returncode:
+            raise ValueError("Could not disable/stop " + unit + "; no application files were removed. " + stopped.stderr.strip())
         if active(unit):
             raise ValueError("Could not stop " + unit + "; no application files were removed")
     for item in (paths.unit, paths.root / "etc/systemd/system/nara-panel-access.path", paths.root / "etc/systemd/system/nara-panel-access.service", paths.root / "etc/systemd/system/nara-panel.service", paths.root / "usr/local/bin/nara"):

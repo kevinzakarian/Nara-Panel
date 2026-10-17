@@ -232,7 +232,7 @@ class MaintenanceTests(unittest.TestCase):
         (self.paths.app / 'fixture').write_text('application')
         self.paths.https.mkdir(parents=True)
         (self.paths.https / 'key.pem').write_text('fixture-key')
-        with mock.patch.object(m, 'active', return_value=False), mock.patch.object(m.subprocess, 'run'), mock.patch.object(m, 'run'), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.object(m, 'active', return_value=False), mock.patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='loaded', stderr='')), mock.patch.object(m, 'run'), contextlib.redirect_stdout(io.StringIO()):
             m.uninstall(self.paths, '1')
         self.assertFalse(self.paths.app.exists())
         self.assertTrue((self.paths.data / 'panel.sqlite3').exists())
@@ -247,16 +247,58 @@ class MaintenanceTests(unittest.TestCase):
         other = self.paths.root / 'etc/caddy/Caddyfile'
         other.parent.mkdir(parents=True)
         other.write_text('other website')
-        with mock.patch.object(m, 'active', return_value=False), mock.patch.object(m.subprocess, 'run'), mock.patch.object(m, 'run'), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.object(m, 'active', return_value=False), mock.patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='loaded', stderr='')), mock.patch.object(m, 'run'), contextlib.redirect_stdout(io.StringIO()):
             m.uninstall(self.paths, '2')
         self.assertFalse(self.paths.data.exists())
         self.assertFalse(self.paths.env.exists())
         self.assertEqual(other.read_text(), 'other website')
         self.assertTrue((self.paths.backups / 'existing.tar.gz').exists())
 
+    def test_uninstall_old_install_skips_missing_optional_units(self):
+        self.paths.app.mkdir(parents=True)
+        missing = {'nara-panel-access.path','nara-panel-access.service','nara-panel-https'}
+        disabled = []
+        def systemctl(command, **kwargs):
+            if command[1] == 'show':
+                return subprocess.CompletedProcess(command, 0, stdout='not-found' if command[-1] in missing else 'loaded', stderr='')
+            self.assertEqual(command[1:3], ['disable','--now'])
+            disabled.append(command[-1])
+            self.assertNotIn(command[-1], missing)
+            return subprocess.CompletedProcess(command, 0, stdout='', stderr='')
+        output=io.StringIO()
+        with mock.patch.object(m,'active',return_value=False),mock.patch.object(m.subprocess,'run',side_effect=systemctl),mock.patch.object(m,'run'),contextlib.redirect_stdout(output):
+            m.uninstall(self.paths,'2')
+        self.assertEqual(disabled,['nara-panel'])
+        self.assertFalse(self.paths.app.exists())
+        self.assertIn('NARA removed',output.getvalue())
+
+    def test_uninstall_real_systemctl_failure_preserves_application_files(self):
+        self.paths.app.mkdir(parents=True)
+        def systemctl(command, **kwargs):
+            return subprocess.CompletedProcess(command, 1 if command[1]=='disable' else 0, stdout='loaded', stderr='Access denied')
+        with mock.patch.object(m.subprocess,'run',side_effect=systemctl),self.assertRaisesRegex(ValueError,'Access denied'):
+            m.uninstall(self.paths,'2')
+        self.assertTrue(self.paths.app.exists())
+        self.assertTrue(self.paths.env.exists())
+        self.assertTrue(self.paths.data.exists())
+
+    def test_uninstall_systemd_inspection_failure_is_not_treated_as_missing(self):
+        self.paths.app.mkdir(parents=True)
+        with mock.patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],1,stdout='',stderr='Failed to connect to bus')),self.assertRaisesRegex(ValueError,'connect to bus'):
+            m.uninstall(self.paths,'2')
+        self.assertTrue(self.paths.app.exists())
+
+    def test_uninstall_does_not_skip_active_unit_with_missing_file(self):
+        self.paths.app.mkdir(parents=True)
+        responses=[subprocess.CompletedProcess([],0,stdout='not-found',stderr=''),subprocess.CompletedProcess([],1,stdout='',stderr='Unit file missing')]
+        with mock.patch.object(m,'active',return_value=True),mock.patch.object(m.subprocess,'run',side_effect=responses) as command,self.assertRaisesRegex(ValueError,'disable/stop'):
+            m.uninstall(self.paths,'2')
+        self.assertEqual(command.call_args_list[-1].args[0][1:3],['disable','--now'])
+        self.assertTrue(self.paths.app.exists())
+
     def test_uninstall_aborts_if_service_cannot_stop(self):
         self.paths.app.mkdir(parents=True)
-        with mock.patch.object(m, 'active', return_value=True), mock.patch.object(m.subprocess, 'run'), self.assertRaises(ValueError):
+        with mock.patch.object(m, 'active', return_value=True), mock.patch.object(m.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='loaded', stderr='')), self.assertRaises(ValueError):
             m.uninstall(self.paths, '2')
         self.assertTrue(self.paths.app.exists())
         self.assertTrue(self.paths.env.exists())
