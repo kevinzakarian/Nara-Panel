@@ -149,11 +149,17 @@ class ConfigTests(unittest.TestCase):
         state = example_state()
         state['dns_servers'].append({'id':'private','tag':'private','mode':'native','config':{
             'type':'hosts','tag':'private','path':['/server/private/hosts']}})
-        state['settings']['dns_final'] = 'private'
+        state['dns_servers'].append({'id':'secret','tag':'private-doh','mode':'native','config':{
+            'type':'https','tag':'private-doh','server':'8.8.8.8','path':'/dns-query',
+            'tls':{'enabled':True,'server_name':'dns.google','certificate_path':'/server/private/ca.pem'},
+            'headers':{'Authorization':'Bearer fixture-server-only-token'}}})
+        state['settings']['dns_final'] = 'private-doh'
         state['core_options']['dns'] = {'client_subnet':'198.51.100.7/32'}
         before = copy.deepcopy(state)
         profile = client_config(state,state['clients'][0],{})
         self.assertNotIn('/server/private/hosts',json.dumps(profile))
+        self.assertNotIn('/server/private/ca.pem',json.dumps(profile))
+        self.assertNotIn('fixture-server-only-token',json.dumps(profile))
         self.assertNotIn('198.51.100.7',json.dumps(profile))
         self.assertNotIn('1.1.1.1',json.dumps(profile))
         self.assertEqual(state,before)
