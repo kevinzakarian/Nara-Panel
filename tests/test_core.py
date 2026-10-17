@@ -483,6 +483,92 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(answer[:2],query[:2])
         self.assertEqual(answer[-4:],socket.inet_aton('192.0.2.42'))
 
+    def test_user_space_wireguard_destination_routes_selected_traffic(self):
+        from nara import warp
+        from nara.config import initial_state
+        from tests.test_native import row
+        private, public = warp.keypair(CORE)
+        remote_private, remote_public = warp.keypair(CORE)
+        peer_port, proxy_port = free_port(), free_port()
+        peer_config = {"log":{"level":"warn"}, "endpoints":[{
+            "type":"wireguard", "tag":"fixture-peer", "system":False, "mtu":1280,
+            "address":["10.88.0.2/32"], "private_key":remote_private, "listen_port":peer_port,
+            "peers":[{"public_key":public, "allowed_ips":["10.88.0.1/32"]}]}],
+            "outbounds":[{"type":"direct", "tag":"direct"}], "route":{"final":"direct", "rules":[{"action":"route","outbound":"direct","override_address":"127.0.0.1"}]}}
+        peer_path=Path(self.temp.name)/'peer.json'
+        atomic_write(peer_path,json.dumps(peer_config))
+        with open(Path(self.temp.name)/'peer.client.log','w') as log:
+            peer=subprocess.Popen([CORE,'run','-c',str(peer_path)],stdout=log,stderr=subprocess.STDOUT)
+        try:
+            time.sleep(.25)
+            self.assertIsNone(peer.poll(),'User-space WireGuard peer did not start')
+            config={"type":"wireguard","tag":"warp","system":False,"mtu":1280,
+                    "address":["10.88.0.1/32"],"private_key":private,
+                    "peers":[{"address":"127.0.0.1","port":peer_port,"public_key":remote_public,
+                              "allowed_ips":["0.0.0.0/0"],"persistent_keepalive_interval":25,"reserved":[1,2,255]}]}
+            state=initial_state();state['settings']['block_private']=False
+            state['inbounds']=[row({'type':'mixed','tag':'local','listen':'127.0.0.1','listen_port':proxy_port})]
+            state['endpoints']=[row(config,'warp')]
+            state['route_rules']=[row({'port':[self.target.server_port],'action':'route','outbound':'warp'})]
+            self.runtime.apply(state)
+            def fetch(port):
+                connection=http.client.HTTPConnection('127.0.0.1',proxy_port,timeout=8)
+                try:
+                    destination='192.0.2.1' if port==self.target.server_port else '127.0.0.1'
+                    connection.request('GET','http://'+destination+':'+str(port)+'/')
+                    response=connection.getresponse()
+                    return response.status,response.read()
+                finally: connection.close()
+            status,data=fetch(self.target.server_port)
+            self.assertEqual(status,200);self.assertIn(b'NARA traffic accounting test.',data)
+            # Only the matching rule uses the endpoint. Direct traffic survives
+            # an unreachable peer, proving this never replaces the host route.
+            direct_target=ThreadingHTTPServer(('127.0.0.1',0),Target)
+            threading.Thread(target=direct_target.serve_forever,daemon=True).start()
+            try:
+                peer.terminate();peer.wait(timeout=5)
+                self.assertEqual(fetch(direct_target.server_port)[0],200)
+                with self.assertRaises((OSError,http.client.HTTPException)):
+                    fetch(self.target.server_port)
+            finally:
+                direct_target.shutdown();direct_target.server_close()
+        finally:
+            if peer.poll() is None: peer.terminate();peer.wait(timeout=5)
+
+    def test_dns_rule_actions_order_and_default_answer_real_queries(self):
+        from nara.config import initial_state
+        from tests.test_native import row
+        state=initial_state();state['settings']['block_private']=False
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as reserve:
+            reserve.bind(('127.0.0.1',0));port=reserve.getsockname()[1]
+        state['inbounds']=[row({'type':'direct','tag':'dns-in','listen':'127.0.0.1','listen_port':port,
+                               'network':'udp','override_address':'1.1.1.1','override_port':53})]
+        state['dns_servers']=[row({'type':'hosts','tag':'fallback','predefined':{'default.nara.test':['192.0.2.30']}},'fallback'),
+                              row({'type':'hosts','tag':'chosen','predefined':{'chosen.nara.test':['192.0.2.40']}},'chosen')]
+        state['settings']['dns_final']='fallback'
+        state['route_rules']=[row({'inbound':['dns-in'],'action':'hijack-dns'})]
+        state['dns_rules']=[row({'action':'route-options','disable_cache':True},'options'),
+                            row({'domain':['blocked.nara.test'],'action':'predefined','rcode':'NXDOMAIN'},'block'),
+                            row({'domain':['chosen.nara.test'],'action':'route','server':'chosen'},'choose'),
+                            row({'domain':['answer.nara.test'],'action':'predefined','rcode':'NOERROR',
+                                 'answer':['answer.nara.test. 30 IN A 192.0.2.50']},'answer')]
+        self.runtime.apply(state)
+        def query(name):
+            message=b'\x34\x56'+struct.pack('!HHHHH',0x100,1,0,0,0)+b''.join(bytes([len(x)])+x.encode() for x in name.split('.'))+b'\0'+struct.pack('!HH',1,1)
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+                sock.settimeout(5);sock.sendto(message,('127.0.0.1',port));answer,_=sock.recvfrom(4096)
+            return answer
+        self.assertEqual(query('blocked.nara.test')[3]&15,3)
+        for name,ip in [('chosen','192.0.2.40'),('answer','192.0.2.50'),('default','192.0.2.30')]:
+            self.assertEqual(query(name+'.nara.test')[-4:],socket.inet_aton(ip))
+        # A catch-all blocks later rules until they are moved before it.
+        state['dns_rules'].insert(1,row({'action':'predefined','rcode':'REFUSED'},'catch-all'))
+        self.runtime.apply(state)
+        self.assertEqual(query('chosen.nara.test')[3]&15,5)
+        state['dns_rules'].insert(0,state['dns_rules'].pop(3))
+        self.runtime.apply(state)
+        self.assertEqual(query('chosen.nara.test')[-4:],socket.inet_aton('192.0.2.40'))
+
     def test_protocol_specific_settings_transfer_and_account(self):
         cases = [
             ("vless", {"flow": "xtls-rprx-vision"}, {}, {}),

@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, normalize_dns_record, require, validate
-from . import native
+from . import native, warp
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
 from .store import password_hash, password_matches
@@ -94,6 +94,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
     login_attempts = {}
     throttle_lock = threading.Lock()
     updates = UpdateChecker(store)
+    warp_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "NARA"
@@ -231,6 +232,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             assets["/core-editor.js"] = "core-editor.js"
             assets["/dns-presets.js"] = "dns-presets.js"
             assets["/routing.js"] = "routing.js"
+            assets["/dns-rules.js"] = "dns-rules.js"
             if path in assets:
                 file = web_dir / assets[path]
                 return self.send(200, file.read_bytes(), mimetypes.guess_type(str(file))[0] or "text/plain")
@@ -283,6 +285,38 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
+            if path == "/api/warp":
+                require(data.get("accept_terms") is True, "Accept Cloudflare’s consumer terms to register WARP")
+                require(warp_lock.acquire(blocking=False), "WARP creation is already in progress")
+                try:
+                    with runtime.lock:
+                        state = store.get("state")
+                        require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
+                        require("with_wireguard" in runtime.build_info()["tags"], "Install the compatible NARA core with WireGuard support first")
+                    pending = store.get("warp_pending")
+                    if not pending:
+                        pending = {"id": uuid.uuid4().hex, "config": warp.create(runtime.binary)}
+                        # Keep a completed registration privately if apply or a concurrent edit fails.
+                        # A retry uses the same keys instead of registering another account.
+                        store.set("warp_pending", pending)
+                    with runtime.lock:
+                        state = store.get("state")
+                        require(data.get("revision") == state["revision"], "Settings changed during WARP creation; refresh and retry. The registered configuration was kept privately.")
+                        existing = next((row for row in state["endpoints"] if row["id"] == pending["id"]), None)
+                        if existing:
+                            store.set("warp_pending", None)
+                            return self.send(200, {"ok": True, "tag": existing["tag"], "revision": state["revision"]})
+                        row = warp.record(pending["config"], state)
+                        row["id"] = pending["id"]
+                        state["endpoints"].append(row)
+                        validate(state)
+                        state["revision"] += 1
+                        result = runtime.apply(state, save=True)
+                        store.set("warp_pending", None)
+                        store.audit("Cloudflare WARP destination created and applied")
+                        return self.send(200, {"ok": True, "tag": row["tag"], "revision": state["revision"], **result})
+                finally:
+                    warp_lock.release()
             if path == "/api/check-updates":
                 started = updates.start()
                 return self.send(200, {"started": started, "updates": updates.status(runtime.version())})

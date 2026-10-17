@@ -97,6 +97,38 @@ class AutoApplyTests(unittest.TestCase):
         self.assertEqual(self.store.get('state'), state)
         self.assertEqual(self.runtime.active, state)
 
+    def test_warp_registration_applies_and_is_used_by_dns_and_traffic_rules(self):
+        import json
+        from nara import warp
+        from tests.test_warp import registration
+        state=self.seed()
+        endpoint=warp.endpoint
+        def local_endpoint(response,private):
+            config=endpoint(response,private)
+            config['peers'][0].update(address='127.0.0.1',port=free_port())
+            return config
+        with mock.patch('nara.warp.register',return_value=registration()) as register, mock.patch('nara.warp.endpoint',side_effect=local_endpoint):
+            result=self.request('/api/warp',{'revision':state['revision'],'accept_terms':True})
+        self.assertEqual(result[0],200,result[1]);register.assert_called_once()
+        state=self.store.get('state');tag=result[1]['tag']
+        self.assertTrue(self.runtime.running)
+        self.assertEqual(state['endpoints'][0]['config']['peers'][0]['reserved'],[1,2,255])
+        result=self.save(state,'route_rules',{'mode':'native','config':{'domain_suffix':['example.com'],'action':'route','outbound':tag}})
+        self.assertEqual(result[0],200,result[1]);state=self.store.get('state')
+        result=self.save(state,'dns_servers',{'mode':'native','config':{'type':'udp','tag':'via-warp','server':'1.1.1.1','server_port':53,'detour':tag}})
+        self.assertEqual(result[0],200,result[1]);state=self.store.get('state')
+        result=self.save(state,'dns_rules',{'mode':'native','config':{'domain_suffix':['example.com'],'action':'route','server':'via-warp','disable_cache':True}})
+        self.assertEqual(result[0],200,result[1]);state=self.store.get('state')
+        config=json.loads((self.runtime.generation/'config.json').read_text())
+        self.assertEqual(config['route']['rules'][-1]['outbound'],tag)
+        self.assertEqual(config['dns']['servers'][-1]['detour'],tag)
+        self.assertEqual(config['dns']['rules'][-1]['server'],'via-warp')
+        self.assertNotIn('private_key',self.request('/api/state')[1]['endpoints'][0]['config'])
+        # Referenced endpoints cannot be removed and disrupt live traffic.
+        result=self.request('/api/delete',{'revision':state['revision'],'collection':'endpoints','id':state['endpoints'][0]['id']})
+        self.assertEqual(result[0],400);self.assertEqual(self.store.get('state'),state)
+        self.assertTrue(self.runtime.running)
+
     def save(self, state, collection, record):
         return self.request("/api/save", {"revision": state["revision"], "collection": collection, "record": record})
 

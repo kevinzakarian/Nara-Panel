@@ -246,3 +246,6 @@ test('opening an existing resolver preserves its custom endpoint and label',()=>
   f.w.TestApp.editCoreRecord('dns_servers',{id:'stored-google',config:{type:'udp',tag:'google',server:'8.8.8.8',server_port:53}});assert.equal(f.w.document.querySelector('[name=dns_provider]').value,'google');assert.equal(f.w.document.querySelector('[name=display_name]').value,'Google Public DNS');
  }finally{f.close()}
 });
+test('DNS resolver detour is editable without advanced menus and preserves a WARP tag',async()=>{
+ const f=app();try{let saved;f.w.TestApp.saveWith(async(collection,record)=>{saved=JSON.parse(JSON.stringify(record))});f.w.TestApp.editCoreRecord('dns_servers',{id:'d',mode:'native',config:{type:'udp',tag:'via-warp',server:'1.1.1.1',server_port:53,detour:'warp'}});const field=f.w.document.querySelector('[data-dns-field=detour]');assert.ok(field);assert.equal(f.w.document.querySelector('[data-core-add]'),null);await f.w.TestApp.submit();assert.equal(saved.config.detour,'warp');}finally{f.close()}
+});

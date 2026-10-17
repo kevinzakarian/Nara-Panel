@@ -79,7 +79,7 @@ async function load(silent=false) {
 }
 
 function renderNav() {
- $('#navigation').innerHTML=Object.keys(titles).map(key=>`<a href="#${key}" class="nav-item ${page===key?'active':''}" ${page===key?'aria-current="page"':''}>${icon(key)}<span>${titles[key]}</span>${['inbounds','clients','tls'].includes(key)?`<span class="nav-count">${state[key].length}</span>`:''}</a>`).join('');
+ $('#navigation').innerHTML=Object.keys(titles).map(key=>`<a href="#${key}" class="nav-item ${page===key?'active':''}" ${page===key?'aria-current="page"':''}>${icon(key)}<span>${titles[key]}</span>${['inbounds','clients','tls','dns'].includes(key)?`<span class="nav-count">${state[key==='dns'?'dns_servers':key].length}</span>`:''}</a>`).join('');
 }
 function heading(actions='') {return `<div class="page-heading"><div><h1>${titles[page]}</h1><p>${descriptions[page]}</p></div><div class="heading-actions">${actions}</div></div>`;}
 function pendingBanner() {return `<div class="auto-apply-note">${icon('check')}<span>Auto apply is on. Saving validates and activates changes. Connection changes may briefly reconnect clients.</span></div>`;}
@@ -125,7 +125,7 @@ function renderTLS() {
  `<section class="card"><div class="card-header"><div><h2>TLS certificates</h2><p>Certificates, client verification and inbound assignments</p></div></div>`+
  (state.tls.length?`<div class="table-wrap"><table><thead><tr><th>Name / server</th><th>Type</th><th>Status</th><th>Client verification</th><th>Expires</th><th>Inbounds</th><th>Actions</th></tr></thead><tbody>${state.tls.map(t=>`<tr><td><b>${e(t.name||t.server_name)}</b><small class="tls-server">${e(t.server_name)}</small></td><td>${badge(t.kind==='self_signed'?'Self-signed':'Imported',t.kind==='self_signed'?'orange':'green')}</td><td>${badge(t.expires>Date.now()/1000?'Valid':'Expired',t.expires>Date.now()/1000?'green':'red')}</td><td>${badge(t.insecure?'Allow insecure':'Verified',t.insecure?'orange':'green')}</td><td>${date(t.expires)}</td><td>${num(state.inbounds.filter(i=>i.tls_id===t.id).length)}</td><td><div class="row-actions">${rowBtn('Download certificate','download-cert','download',t.id)}${rowBtn('Edit certificate','edit','edit',t.id,'tls')}${rowBtn('Delete','delete','trash',t.id,'tls')}</div></td></tr>`).join('')}</tbody></table></div>`:empty('Start with a secure connection','Import your own certificate or generate a self-signed certificate in one click.','self-signed','Generate certificate','tls'))+'</section>';
 }
-function renderDNS() {return renderCoreWorkspace('dns',['dns_servers','dns_rules','rule_sets','dns_options'],dnsTab);}
+function renderDNS() {return renderDNSWorkspace();}
 function renderCore() {return renderCoreWorkspace('core',['endpoints','services','certificate_providers','http_clients','network_namespaces','log','ntp','certificate','experimental'],coreTab);}
 function clientTable(clients,compact=false) {
  if (!clients.length) return empty('No clients to display','Create an account, assign inbounds, and set a traffic allowance and expiry date.','new-client','Create client','clients');
@@ -320,6 +320,7 @@ function dnsProviderControls(selected){
  return `<section class="dns-provider-box">${selectField('DNS provider','dns_provider',[...Object.entries(DNSPresets.providers).sort((a,b)=>a[1].name.localeCompare(b[1].name,'en')).map(([key,p])=>[key,p.name]),['custom','Custom / Manual']],selected.provider)}<div id="dns-type-slot"></div><label id="dns-profile-field" ${selected.provider==='nextdns'?'':'hidden'}>NextDNS Profile ID<input name="dns_profile_id" value="${e(selected.profileId)}" placeholder="e.g. abc123" autocomplete="off" spellcheck="false" maxlength="6"><small class="field-hint">Find this ID in your NextDNS dashboard. It is separate from your NARA account.</small></label><p class="field-hint" id="dns-provider-note"></p><div class="dns-endpoint" id="dns-endpoint" hidden><span>Resolver address</span><code id="dns-endpoint-url"></code><small id="dns-endpoint-address"></small></div></section>`;
 }
 function editCoreRecord(collection,item={},preset){
+ if(collection==='dns_rules')return editDNSRule(item,preset);
  if(!coreCatalog.collections[collection])return editCoreOptions(collection);
  const schema=CoreSchema.byName(coreCatalog.collections[collection]);
  let config=preset||legacyCoreConfig(collection,item);
@@ -486,6 +487,7 @@ function details(id) {
 function confirmAction(title,text,run,label='Confirm') {openModal(title,'',`<p class="confirm-text">${e(text)}</p>`,run,label);}
 async function handle(action,target) {
  const id=target.dataset.id,collection=target.dataset.collection;
+ if(action.startsWith('dns-rule-'))return handleDNSRule(action,target);
  if(action.startsWith('route-'))return handleRouting(action,target);
  if(action==='update-panel')return updatePanel(id);
  if(action==='close')return $('#modal').close();

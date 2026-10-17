@@ -89,7 +89,7 @@ def validate_record(collection, row):
                 raise ValueError("Configure authentication or explicitly allow unauthenticated access for this standalone listener")
 
 
-SECRET_FIELDS = {"key", "private_key", "private_keys", "secret_key", "preshared_key"}
+SECRET_FIELDS = {"key", "private_key", "private_keys", "secret_key", "preshared_key", "pre_shared_key"}
 
 
 def _secret(key, value, parent):
