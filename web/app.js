@@ -161,7 +161,7 @@ function renderSettings() {
 }
 function panelUpdateCard(){
  const item=dashboard.updates?.panel;
- return `<section class="card section-gap"><div class="card-header"><h2>Panel updates</h2></div><div class="card-body"><p class="note">${accessSettings.managed?'Update this server directly. A private backup is created before the panel restarts. No SSH credentials are needed.':'Run the Linux installer once to enable one-click updates. Docker installations use their normal image update process.'}</p>${item?.available&&accessSettings.managed?btn('Update NARA to '+item.latest,'update-panel','download','primary',`data-id="${e(item.latest)}"`):`<span class="muted">${e(item?.error?'Update check unavailable':item?.known?'Panel is up to date':'Versions are checked when you enter the panel.')}</span>`}</div></section>`;
+ return `<section class="card section-gap"><div class="card-header"><h2>Panel updates</h2></div><div class="card-body"><p class="note">${accessSettings.managed?'Update this server directly. A private backup is created before the panel restarts. No SSH credentials are needed.':'Run the Linux installer once to enable one-click updates. Docker installations use their normal image update process.'}</p>${item?.available&&accessSettings.managed?btn('Update NARA to '+item.latest,'update-panel','download','primary',`data-id="${e(item.latest)}"`):`<span class="muted">${e(item?.error?'Update check unavailable':item?.available?'New panel version: '+item.latest:item?.known?'Panel is up to date':'Versions are checked when you enter the panel.')}</span>`}</div></section>`;
 }
 async function updatePanel(version){
  const job=await api('update-panel',{version});accessChangePending=true;

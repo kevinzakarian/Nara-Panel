@@ -107,7 +107,7 @@ class Access:
             try:
                 os.link(temporary, self.directory / 'access-request.json')
             except FileExistsError as exc:
-                raise ValueError('Another entry change is in progress; wait and refresh') from exc
+                raise ValueError('Another maintenance operation is in progress; wait and refresh') from exc
         finally:
             Path(temporary).unlink(missing_ok=True)
 

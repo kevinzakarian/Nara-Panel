@@ -216,7 +216,7 @@ test('panel update button requires a managed installation and an available relea
   for(const [managed,available] of [[false,true],[true,false],[true,true]]){
    root.innerHTML=f.w.TestApp.updates({available,latest:'9.0.0',known:true},managed);
    assert.equal(Boolean(root.querySelector('[data-action=update-panel]')),managed&&available);
-   assert.equal(root.querySelector('[type=password]'),null);
+   assert.equal(root.querySelector('[type=password]'),null);if(available&&!managed){assert.ok(root.textContent.includes('New panel version: 9.0.0'));assert.ok(!root.textContent.includes('up to date'));}
   }
   assert.equal(root.querySelector('[data-action=update-panel]').dataset.id,'9.0.0');
  }finally{f.close()}
