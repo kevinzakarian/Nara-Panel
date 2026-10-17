@@ -1,0 +1,37 @@
+name: Verify installation without Go
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: python:3.12-slim-bookworm
+    timeout-minutes: 15
+    steps:
+      - name: Prepare runtime dependencies only
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates openssl
+          if command -v go; then echo 'This check requires a Go-free environment.' >&2; exit 1; fi
+          if command -v git; then echo 'This check also verifies Git is unnecessary.' >&2; exit 1; fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4; REST archive fallback without Git
+        with:
+          persist-credentials: false
+      - name: Download and verify the public release
+        run: |
+          python scripts/fetch-core.py --output /tmp/nara-core
+          /tmp/nara-core/sing-box version
+          python -c 'import ctypes; ctypes.CDLL("/tmp/nara-core/libcronet.so")'
+      - name: Exercise real proxy traffic and accounting without a compiler
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          SING_BOX_TEST_BINARY: /tmp/nara-core/sing-box
+        run: |
+          pip install -r requirements.txt
+          python -m unittest tests.test_core tests.test_auto_apply -v
+          if command -v go; then exit 1; fi

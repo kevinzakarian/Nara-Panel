@@ -269,6 +269,10 @@ class CoreTests(unittest.TestCase):
                 self.runtime.stop()
 
     def test_new_standalone_protocols_transfer(self):
+        # Hysteria 1 Brutal derives its window from configured bandwidth * RTT.
+        # Linux loopback RTT is microseconds: a WAN rate can make the window
+        # smaller than one datagram. Use a loopback-appropriate fixture rate.
+        # This changes no generated production defaults or host networking.
         cases = [
             ("http", {"users": [{"username": "fixture", "password": "fixture-password"}]},
              {"type": "http", "username": "fixture", "password": "fixture-password"}),
@@ -281,10 +285,10 @@ class CoreTests(unittest.TestCase):
             ("snell", {"version": 5, "psk": "fixture-password"}, {"type": "snell", "version": 4, "psk": "fixture-password"}),
             ("snell", {"version": 6, "psk": "fixture-password", "mode": "unshaped"},
              {"type": "snell", "version": 6, "psk": "fixture-password", "mode": "unshaped"}),
-            ("hysteria", {"up_mbps": 20, "down_mbps": 20, "users": [{"name": "fixture", "auth_str": "fixture-password"}]},
-             {"type": "hysteria", "up_mbps": 20, "down_mbps": 20, "auth_str": "fixture-password"}),
-            ("hysteria", {"up_mbps": 20, "down_mbps": 20, "users": [{"name": "fixture", "auth_str": "fixture-password"}], "obfs": "fixture-obfs", "disable_path_mtu_discovery": True},
-             {"type": "hysteria", "up_mbps": 20, "down_mbps": 20, "auth_str": "fixture-password", "obfs": "fixture-obfs", "disable_path_mtu_discovery": True}),
+            ("hysteria", {"up_mbps": 10000, "down_mbps": 10000, "users": [{"name": "fixture", "auth_str": "fixture-password"}]},
+             {"type": "hysteria", "up_mbps": 10000, "down_mbps": 10000, "auth_str": "fixture-password"}),
+            ("hysteria", {"up_mbps": 10000, "down_mbps": 10000, "users": [{"name": "fixture", "auth_str": "fixture-password"}], "obfs": "fixture-obfs"},
+             {"type": "hysteria", "up_mbps": 10000, "down_mbps": 10000, "auth_str": "fixture-password", "obfs": "fixture-obfs"}),
         ]
         from nara.config import initial_state
         for protocol, server, outbound in cases:
