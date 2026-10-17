@@ -31,6 +31,16 @@ def run(*args):
 def broker():
     print('Broker identity: '+str([line for line in Path('/proc/self/status').read_text().splitlines() if line.startswith(('Uid:','Gid:','Cap','NoNewPrivs:'))]),flush=True)
     from nara import panel_update as update
+    from nara import maintenance as maintenance
+    owner=DATA.stat()
+    def owner_identity():
+        caps=dict(line.split(':',1) for line in Path('/proc/self/status').read_text().splitlines() if line.startswith(('CapPrm:','CapEff:','CapAmb:','NoNewPrivs:')))
+        return {'uid':os.geteuid(),'gid':os.getegid(),'caps':caps}
+    dropped=maintenance._database_owner_worker(owner,owner_identity)
+    assert dropped['uid']==owner.st_uid and dropped['gid']==owner.st_gid
+    assert all(int(dropped['caps'][key].strip(),16)==0 for key in ('CapPrm','CapEff','CapAmb'))
+    assert dropped['caps']['NoNewPrivs'].strip()=='1'
+    print('Database child identity and zero remaining capabilities verified.',flush=True)
     def fetch(url, limit):
         base='https://github.com/kevinzakarian/Nara-Panel/releases/download/v'+FUTURE+'/'
         if url=='https://api.github.com/repos/kevinzakarian/Nara-Panel/releases/tags/v'+FUTURE:
