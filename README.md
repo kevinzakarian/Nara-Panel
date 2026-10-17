@@ -176,6 +176,8 @@ Use **Add option** within any object to add a field, including nested TLS/QUIC s
 
 ![Routing workflow with demonstration rules](screenshots/routing-0.6.0.jpg)
 
+![Guided traffic rule form](screenshots/routing-rule-0.6.0.jpg)
+
 The routing model follows the official [route options](https://sing-box.sagernet.org/configuration/route/), [matching logic](https://sing-box.sagernet.org/configuration/route/rule/) and [rule actions](https://sing-box.sagernet.org/configuration/route/rule_action/); validation uses the bundled 1.14.3 schema and installed core.
 
 The daily update check runs independently of the browser and core, uses fixed public GitHub endpoints, and persists its cache across restarts. Failed checks show “Update check unavailable”; they do not mean the installed version is current.
