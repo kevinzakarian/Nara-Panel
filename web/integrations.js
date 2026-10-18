@@ -37,34 +37,40 @@ function renderNotifications(){
   ['Clients & traffic',['clients_created','clients_updated','clients_deleted','quota_warning','quota_reached','expiry_warning','expired']],
   ['Server & summaries',['resource_alert','resource_recovery','daily_summary']]
  ];
+ const zone=panelTimeZone(),summary=String(t.summary_hour??9).padStart(2,'0')+':'+String(t.summary_minute??0).padStart(2,'0');
  return heading(btn('Send test message','integration-telegram-test','check','',t.enabled?'':'disabled'))+`
- <section class="card notification-setup">
-  <div class="card-header"><div><h2>Connect your Telegram bot</h2><p>Set up the connection, then choose which updates to receive.</p></div>${badge(t.enabled?'Enabled':'Not enabled',t.enabled?'green':'')}</div>
-  <div class="card-body"><details class="setup-help"><summary>How to get a bot token and Chat ID</summary><ol class="api-steps"><li>Create a bot with <a class="text-link" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> and copy its token.</li><li>Start your bot in Telegram, then use Find recent bot chats to choose a destination. For a channel, give the bot permission to post.</li><li>Enable notifications, save your choices and send a test message.</li></ol></details></div>
- </section>
- <section class="card section-gap">
-  <div class="card-header"><div><h2>Notification preferences</h2><p>Saved only after administrator verification</p></div></div>
-  <form id="telegram-form" class="card-body">
-   <div class="form-grid">${field('Bot token','bot_token','','password',t.token_configured?'A token is stored. Leave blank to keep it.':'Paste the token from BotFather.')}${field('Chat ID or @channel','chat_id',t.chat_id||'','text','Find your private/group Chat ID below, or enter a channel username.')}</div>
+ <div class="management-layout notifications-layout"><form id="telegram-form" class="management-stack">
+  <section class="card"><div class="card-header"><div><span class="section-kicker">01 / CONNECTION</span><h2>Your Telegram bot</h2><p>Choose the bot and chat that receive your updates</p></div>${badge(t.enabled?'Enabled':'Not enabled',t.enabled?'green':'')}</div><div class="card-body preference-fields">
+   <details class="setup-help mobile-setup-help"><summary>Need help connecting your bot?</summary><ol class="api-steps"><li>Create a bot with <a class="text-link" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> and copy its token.</li><li>Start your bot, then use Find recent bot chats. For a channel, give the bot permission to post.</li><li>Enable notifications, save your choices and send a test message.</li></ol></details>
+   <label class="notification-enable check-field"><input name="enabled" type="checkbox" ${checked(t.enabled)}><span><b>Enable Telegram notifications</b><small>Delivery starts after you save your preferences.</small></span></label>
+   <div class="form-grid">${field('Bot token','bot_token','','password',t.token_configured?'A token is stored. Leave blank to keep it.':'Paste the token from BotFather.')}${field('Chat ID or @channel','chat_id',t.chat_id||'','text','Your private/group Chat ID or channel username.')}</div>
    <div class="inline-buttons notification-tools"><button type="button" class="btn" data-action="integration-telegram-check">${icon('check')}Test bot</button><button type="button" class="btn" data-action="integration-telegram-chats">${icon('clients')}Find recent bot chats</button></div>
-   <p class="note">These buttons use the token above, or the saved token when blank. Each asks for your current NARA administrator password${adminProfile.two_factor?' and a fresh verification code':''} in a separate window.</p>
-   <div id="telegram-connection" role="status"></div><div id="telegram-chats"></div>
-   <div class="notification-schedule"><label class="check-field"><input name="enabled" type="checkbox" ${checked(t.enabled)}>Enable Telegram notifications</label>${selectField('Daily summary time (UTC)','summary_hour',Array.from({length:24},(_,hour)=>[hour,String(hour).padStart(2,'0')+':00 UTC']),t.summary_hour??9)}</div>
-   <div class="notification-groups">${categories.map(([title,events])=>`<fieldset class="route-scope"><legend>${title}</legend>${events.map(event=>`<label class="check-field"><input name="event" type="checkbox" value="${event}" ${checked(t.events?.includes(event))}>${e(t.event_labels[event]||event)}</label>`).join('')}</fieldset>`).join('')}</div>
-   <p class="note">Quota alerts begin at 80%; expiry alerts begin 24 hours before expiry. Resource alerts require sustained usage at or above 90%. Messages exclude passwords, API keys, private keys and subscription links.</p>
-   <div class="form-save-bar"><p>Saving requires your current administrator password${adminProfile.two_factor?' and a fresh verification code':''}.</p><button class="btn primary" type="submit">${icon('check')}Save notifications</button></div>
-  </form>
- </section>
- <section class="card section-gap"><div class="card-header"><div><h2>Delivery status</h2><p>Queued messages and recent attempts</p></div>${btn('Refresh','integration-telegram-refresh','refresh','sm')}</div><div class="card-body">
-  ${t.delivery?.at?`<p>${badge(t.delivery.ok?'Delivered':'Needs attention',t.delivery.ok?'green':'orange')} ${e(t.delivery.message)} · ${e(time(t.delivery.at))}</p>`:'<p class="note">No delivery attempts yet. Save and enable notifications to send a test message.</p>'}
-  <p class="note">Temporary failures retry automatically. Notifications cannot report a complete server/panel outage while this panel is offline.</p>
-  ${t.recent?.length?`<div class="table-wrap"><table><thead><tr><th>Event</th><th>Time</th><th>Status</th></tr></thead><tbody>${t.recent.map(row=>`<tr><td>${e(t.event_labels[row.event]||'Test notification')}</td><td>${e(time(row.created))}</td><td>${badge(row.status,row.status==='sent'?'green':row.status==='failed'?'red':'')}</td></tr>`).join('')}</tbody></table></div>`:''}
- </div></section>`;
+   <p class="note">Use the token above or the saved token when blank. Each check asks for your current NARA administrator password${adminProfile.two_factor?' and a fresh verification code':''}.</p><div id="telegram-connection" role="status"></div><div id="telegram-chats"></div>
+  </div></section>
+  <section class="card"><div class="card-header"><div><span class="section-kicker">02 / SCHEDULE</span><h2>Daily summary</h2><p>Your server, clients and traffic in one message</p></div>${icon('clock')}</div><div class="card-body preference-fields"><div class="form-grid"><label>Daily summary time<input name="summary_time" type="time" value="${summary}" required ${t.events?.includes('daily_summary')?'':'disabled'}><small class="field-hint">Based on ${e(zone)}, including daylight saving changes.</small></label><div class="schedule-zone"><span class="section-kicker">PANEL TIME ZONE</span><b>${e(zone)}</b><a class="text-link" href="#settings">Change in Settings →</a></div></div><p class="note" id="summary-schedule-note">${t.events?.includes('daily_summary')?'Sent once per local day at or shortly after your chosen time. If the panel was offline, it catches up later that day.':'Select “Daily summary” under events below to activate this schedule.'}</p></div></section>
+  <section class="card"><div class="card-header"><div><span class="section-kicker">03 / EVENTS</span><h2>What would you like to hear about?</h2><p>Choose the updates that matter to you</p></div><div class="inline-buttons">${btn('Select all','integration-events-all','check','sm','type="button"')}${btn('Clear','integration-events-none','close','sm','type="button"')}</div></div><div class="card-body"><div class="notification-groups">${categories.map(([title,events])=>`<fieldset class="route-scope"><legend>${title}</legend>${events.map(event=>`<label class="check-field"><input name="event" type="checkbox" value="${event}" ${checked(t.events?.includes(event))}>${e(event==='daily_summary'?'Daily summary':t.event_labels[event]||event)}</label>`).join('')}</fieldset>`).join('')}</div><p class="note">Traffic warnings start at 80%; expiry warnings start 24 hours before expiry. Resource alerts require sustained usage of 90% or more.</p></div></section>
+  <div class="settings-save"><span>${icon('lock')}Saving requires administrator verification.</span><button class="btn primary" type="submit">${icon('check')}Save notifications</button></div>
+ </form><aside class="management-stack" aria-label="Telegram setup and delivery">
+  <section class="card telegram-help-card"><div class="card-header"><h2>Getting connected</h2>${icon('notifications')}</div><div class="card-body"><ol class="connection-steps"><li><b>Create your bot</b><p>Open <a class="text-link" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> in Telegram and copy its token.</p></li><li><b>Choose a chat</b><p>Start your bot, then find recent bot chats. For a channel, give the bot permission to post.</p></li><li><b>Save & test</b><p>Enable notifications, save your choices, then send a test message.</p></li></ol><p class="note">Messages exclude passwords, API keys, private keys and subscription links.</p></div></section>
+  <section class="card"><div class="card-header"><div><h2>Delivery activity</h2><p>Recent messages · ${e(zone)}</p></div>${btn('Refresh','integration-telegram-activity','refresh','sm')}</div><div class="card-body delivery-activity">
+   ${telegramActivity(t)}
+  </div></section>
+ </aside></div>`;
 }
+function telegramActivity(t){return `   ${t.delivery?.at?`<div class="delivery-last">${badge(t.delivery.ok?'Delivered':'Needs attention',t.delivery.ok?'green':'orange')}<p>${e(t.delivery.message)}</p><small>${e(date(t.delivery.at))} · ${e(time(t.delivery.at))}</small></div>`:'<p class="note">No delivery attempts yet. Save and enable notifications to send a test message.</p>'}
+   ${t.recent?.length?`<ul class="delivery-list">${t.recent.map(row=>`<li><div><b>${e(t.event_labels[row.event]||'Test notification')}</b><small>${e(date(row.created))} · ${e(time(row.created))}</small></div>${badge(row.status,row.status==='sent'?'green':row.status==='failed'?'red':'')}</li>`).join('')}</ul>`:''}
+   <p class="note">Temporary failures retry automatically. A complete outage can only be reported once the panel is back online.</p>`;}
 function notificationPreferences(form){
- const f=new FormData(form);
- return {enabled:form.elements.enabled.checked,bot_token:String(f.get('bot_token')||'').trim(),chat_id:String(f.get('chat_id')||'').trim(),events:f.getAll('event'),summary_hour:Number(f.get('summary_hour'))};
+ const f=new FormData(form),[hour,minute]=form.elements.summary_time.value.split(':').map(Number);
+ return {enabled:form.elements.enabled.checked,bot_token:String(f.get('bot_token')||'').trim(),chat_id:String(f.get('chat_id')||'').trim(),events:f.getAll('event'),summary_hour:hour,summary_minute:minute};
 }
+function updateSummarySchedule(){
+ const form=$('#telegram-form');if(!form)return;
+ const enabled=[...form.querySelectorAll('[name=event]')].some(input=>input.value==='daily_summary'&&input.checked);
+ form.elements.summary_time.disabled=!enabled;
+ $('#summary-schedule-note').textContent=enabled?'Sent once per local day at or shortly after your chosen time. If the panel was offline, it catches up later that day.':'Select “Daily summary” under events below to activate this schedule.';
+}
+
 function notificationVerification(title,description,run,label){
  openModal(title,description,`<p class="note">Enter your current NARA administrator password. This is the password you use to sign in to this panel.</p>${adminReauth()}`,run,label);
  requireAdminInputs($('#modal-form'));
@@ -96,11 +102,13 @@ function checkTelegramBot(){
  },'Test bot');
 }
 async function handleIntegration(action,target){
+ if(action==='integration-events-all'||action==='integration-events-none'){for(const input of $$('#telegram-form [name=event]'))input.checked=action==='integration-events-all';updateSummarySchedule();return;}
  if(action==='integration-key-new')return createAPIKey();
  if(action==='integration-key-revoke')return revokeAPIKey(target.dataset.id);
  if(action==='integration-api-guide')return showAPIGuide();
  if(action==='integration-openapi'){download('nara-openapi.json',await api('openapi'));return;}
  if(action==='integration-api-refresh')return integrationLoad('api',true);
+ if(action==='integration-telegram-activity'){const container=$('.delivery-activity'),session=csrf,value=await api('telegram');if(session!==csrf||!container?.isConnected)return;telegramData={...telegramData,delivery:value.delivery,recent:value.recent};container.innerHTML=telegramActivity(telegramData);toast('Delivery activity refreshed.');return;}
  if(action==='integration-telegram-refresh')return integrationLoad('telegram',true);
  if(action==='integration-telegram-chats')return findTelegramChats();
  if(action==='integration-telegram-check')return checkTelegramBot();

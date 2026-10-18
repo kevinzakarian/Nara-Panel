@@ -5,6 +5,7 @@ import re
 import sqlite3
 import time
 from urllib import error, request
+from . import timezones
 
 EVENTS={
  'panel_started':('🚀','Panel started'), 'core_up':('🟢','Core is running'), 'core_down':('🔴','Core stopped'),
@@ -20,7 +21,7 @@ EVENTS={
 
 def settings(store):
     return {'enabled':False,'bot_token':'','chat_id':'','events':[x for x in EVENTS if x!='test'],
-            'summary_hour':9,**(store.get('telegram') or {})}
+            'summary_hour':9,'summary_minute':0,**(store.get('telegram') or {})}
 
 
 def public_settings(store):
@@ -34,12 +35,13 @@ def public_settings(store):
 
 def validate_settings(data, previous):
     if not isinstance(data,dict):raise ValueError('Invalid Telegram settings')
-    value={**previous,**{k:v for k,v in data.items() if k in ('enabled','chat_id','events','summary_hour')}}
+    value={'summary_minute':0,**previous,**{k:v for k,v in data.items() if k in ('enabled','chat_id','events','summary_hour','summary_minute')}}
     if data.get('bot_token'):value['bot_token']=data['bot_token']
     if data.get('clear_token') is True:value['bot_token']=''
     if type(value['enabled']) is not bool:raise ValueError('Invalid notification enabled state')
     if not isinstance(value['events'],list) or len(value['events'])>len(EVENTS) or any(x not in EVENTS or x=='test' for x in value['events']):raise ValueError('Choose supported notification events')
-    if type(value['summary_hour']) is not int or not 0<=value['summary_hour']<=23:raise ValueError('Choose a daily summary hour from 0 to 23 UTC')
+    if type(value['summary_hour']) is not int or not 0<=value['summary_hour']<=23:raise ValueError('Choose a daily summary hour from 0 to 23')
+    if type(value['summary_minute']) is not int or not 0<=value['summary_minute']<=59:raise ValueError('Choose a daily summary minute from 0 to 59')
     token=value.get('bot_token','');chat=value.get('chat_id','')
     if not isinstance(token,str) or token and not re.fullmatch(r'\d{5,20}:[A-Za-z0-9_-]{20,100}',token):raise ValueError('Enter a valid BotFather bot token')
     if not isinstance(chat,str) or chat and not re.fullmatch(r'-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31}',chat):raise ValueError('Enter a numeric Chat ID or @channel username')
@@ -126,9 +128,9 @@ def chats(token):
     return list(result.values())
 
 
-def text(event,payload):
+def text(event,payload,time_zone='UTC'):
     symbol,title=EVENTS[event]
-    stamp=dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d · %H:%M UTC')
+    stamp=dt.datetime.now(timezones.zone(time_zone)).strftime('%Y-%m-%d · %H:%M %z')+' · '+time_zone
     return f'{symbol} NARA · {title}\n\n{payload.get("detail", "")}\n\n{stamp}'.replace('\n\n\n','\n\n')
 
 
@@ -172,11 +174,11 @@ class Worker:
                 elif value<80 and name in self.resource_alerts:
                     enqueue(self.store,'resource_recovery',f'{name} usage returned to {value:.0f}%.',name+':recovered',3600)
                     self.resource_alerts.remove(name)
-        utc=dt.datetime.fromtimestamp(now,dt.timezone.utc)
-        if utc.hour>=config['summary_hour']:
+        local=dt.datetime.fromtimestamp(now,timezones.zone(timezones.name(state)))
+        if (local.hour,local.minute)>=(config['summary_hour'],config.get('summary_minute',0)):
             active=sum(eligible(row,totals,now) for row in state['clients'])
             used=sum(x.get('upload',0)+x.get('download',0) for x in totals.values())
-            enqueue(self.store,'daily_summary',f'Core: {"Running 🟢" if running else "Stopped 🔴"}\nClients: {len(state["clients"])} · Active: {active}\nRecorded traffic: {used/1024**3:.2f} GiB\nYou’re in control. Have a great day!', 'daily:'+utc.date().isoformat(),90000)
+            enqueue(self.store,'daily_summary',f'Core: {"Running 🟢" if running else "Stopped 🔴"}\nClients: {len(state["clients"])} · Active: {active}\nRecorded traffic: {used/1024**3:.2f} GiB\nYou’re in control. Have a great day!', 'daily:'+local.date().isoformat(),90000)
         # Deduplication keys are bounded independently of changing client IDs.
         with self.store.connect() as db:
             db.execute("DELETE FROM kv WHERE key LIKE 'notice:%' AND CAST(value AS REAL)<?",(now-7*86400,))
@@ -195,7 +197,7 @@ class Worker:
             with self.store.connect() as db:db.execute("UPDATE notifications SET status='cancelled' WHERE id=?",(ident,))
             return
         try:
-            send(config['bot_token'],config['chat_id'],text(event,json.loads(payload)))
+            send(config['bot_token'],config['chat_id'],text(event,json.loads(payload),timezones.name(self.store.get('state'))))
             with self.store.connect() as db:db.execute("UPDATE notifications SET status='sent',attempts=attempts+1 WHERE id=?",(ident,))
             self.store.set('telegram_delivery',{'at':now,'ok':True,'message':'Notification delivered'})
         except DeliveryError as exc:

@@ -121,3 +121,8 @@ Entry changes can move the API address and disconnect the requester. Software up
 ## Specifications
 
 The panel's API access page includes a short guide and OpenAPI download. The OpenAPI file describes routes, methods, scopes and revisions; this guide supplies the panel record and bulk body conventions. Native field schemas come from `/schema`. Authentication follows [Bearer token usage (RFC 6750)](https://www.rfc-editor.org/rfc/rfc6750); administrator 2FA uses [TOTP (RFC 6238)](https://www.rfc-editor.org/rfc/rfc6238).
+
+
+## Panel time zone
+
+`GET /settings` returns `time_zone` (an IANA name; legacy records without it use `UTC`). `PATCH /settings` accepts, for example, `{"revision":12,"time_zone":"Asia/Tehran"}` with the same revision and `config:write` requirements as other settings. The setting controls panel display and Telegram daily summary scheduling. It does not change the OS clock, stored expiry instants or generated Sing-box configuration. Unsupported/malformed zones are rejected atomically. Telegram credentials, events and daily summary hour/minute still require the browser’s administrator verification flow.

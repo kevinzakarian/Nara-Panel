@@ -96,3 +96,78 @@ class TelegramAPITests(unittest.TestCase):
         self.assertEqual(self.request('/api/telegram',{'current':'test-password-123','settings':{**config,'bot_token':'','chat_id':'789'}})[0],200)
         self.assertEqual(self.store.get('telegram')['bot_token'],TOKEN)
         with self.store.connect() as db:self.assertEqual(db.execute('SELECT status FROM notifications').fetchone()[0],'cancelled')
+
+class TimeZoneTests(unittest.TestCase):
+    setUp=NotificationTests.setUp;tearDown=NotificationTests.tearDown;enable=NotificationTests.enable;rows=NotificationTests.rows
+    def configure_zone(self, name, hour=9, minute=0):
+        self.enable(['daily_summary'])
+        state=initial_state();state['settings']['time_zone']=name;self.store.set('state',state)
+        config=notifications.settings(self.store);config.update(summary_hour=hour,summary_minute=minute);self.store.set('telegram',config)
+
+    def poll_at(self, value):
+        now=dt.datetime.fromisoformat(value).timestamp()
+        with mock.patch('nara.notifications.time.time',return_value=now):self.worker.poll(now)
+
+    def test_tehran_half_hour_offset_and_minute_precision(self):
+        self.configure_zone('Asia/Tehran',9,15)
+        self.poll_at('2026-10-18T05:44:59+00:00');self.assertEqual(self.rows(),[])
+        self.poll_at('2026-10-18T05:45:00+00:00');self.poll_at('2026-10-18T19:00:00+00:00')
+        self.assertEqual(len(self.rows()),1)
+
+    def test_summary_uses_local_date_across_utc_midnight(self):
+        self.configure_zone('Asia/Tokyo',0,15)
+        self.poll_at('2026-10-17T15:15:00+00:00');self.poll_at('2026-10-18T00:30:00+00:00')
+        self.assertEqual(len(self.rows()),1)
+        self.poll_at('2026-10-18T15:15:00+00:00');self.assertEqual(len(self.rows()),2)
+
+    def test_dst_spring_skipped_hour_catches_up_and_fall_repeated_hour_deduplicates(self):
+        self.configure_zone('America/New_York',2,30)
+        self.poll_at('2026-03-08T06:59:00+00:00');self.assertEqual(self.rows(),[])
+        self.poll_at('2026-03-08T07:00:00+00:00');self.assertEqual(len(self.rows()),1)
+        self.configure_zone('America/New_York',1,30)
+        self.poll_at('2026-11-01T05:30:00+00:00');self.poll_at('2026-11-01T06:30:00+00:00')
+        self.assertEqual(len(self.rows()),2)
+
+    def test_zone_change_and_restart_keep_same_day_deduplication(self):
+        self.configure_zone('UTC',9)
+        self.poll_at('2026-10-18T10:00:00+00:00')
+        self.configure_zone('Asia/Tehran',9)
+        self.worker=notifications.Worker(self.store,self.runtime)
+        self.poll_at('2026-10-18T10:01:00+00:00');self.assertEqual(len(self.rows()),1)
+
+    def test_legacy_defaults_and_summary_time_validation(self):
+        from nara import timezones
+        from nara.config import validate,build_config
+        state=initial_state();del state['settings']['time_zone'];validate(state)
+        self.assertEqual(timezones.name(state),'UTC')
+        before=build_config(state,{},'/tmp',1234)
+        state['settings']['time_zone']='Asia/Tehran';validate(state)
+        self.assertEqual(before,build_config(state,{},'/tmp',1234))
+        for value in ('',None,3,False,'../UTC','/etc/passwd','Not/AZone','x'*129):
+            state['settings']['time_zone']=value
+            with self.subTest(zone=value),self.assertRaises(ValueError):validate(state)
+        config=notifications.settings(self.store);del config['summary_minute']
+        self.assertEqual(notifications.validate_settings({},config)['summary_minute'],0)
+        for value in (-1,60,True,'15',None):
+            with self.subTest(minute=value),self.assertRaises(ValueError):notifications.validate_settings({'summary_minute':value},config)
+
+    def test_notification_timestamp_uses_panel_zone(self):
+        self.configure_zone('Asia/Tehran')
+        notifications.enqueue(self.store,'test','Test')
+        with mock.patch('nara.notifications.send') as send:self.worker.deliver()
+        message=send.call_args.args[2]
+        self.assertIn('+0330 · Asia/Tehran',message)
+
+
+class TimeZoneAPITests(unittest.TestCase):
+    setUp=TelegramAPITests.setUp;tearDown=TelegramAPITests.tearDown;request=TelegramAPITests.request;login=TelegramAPITests.login;web_path=""
+    def test_settings_zone_is_persisted_and_invalid_zone_keeps_previous_state(self):
+        self.login();state=self.store.get('state');settings={**state['settings'],'time_zone':'Asia/Tehran'}
+        status,data,_=self.request('/api/settings',{'revision':state['revision'],'settings':settings})
+        self.assertEqual(status,200,data)
+        visible=self.request('/api/state')[1]
+        self.assertEqual(visible['settings']['time_zone'],'Asia/Tehran')
+        status,data,_=self.request('/api/settings',{'revision':visible['revision'],'settings':{**settings,'time_zone':'Invalid/Zone'}})
+        self.assertEqual(status,400,data)
+        self.assertEqual(self.store.get('state'),visible)
+        self.assertIn('Asia/Tehran',self.request('/api/options')[1]['time_zones'])

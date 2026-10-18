@@ -316,6 +316,18 @@ class AutoApplyTests(unittest.TestCase):
         server = json.loads((self.runtime.generation / "config.json").read_text())
         self.assertNotIn("insecure", server["inbounds"][0]["tls"])
 
+    def test_time_zone_change_keeps_core_process_and_proxy_traffic(self):
+        state = self.seed()
+        process = self.runtime.process
+        result = self.request('/api/settings', {'revision': state['revision'],
+            'settings': {**state['settings'], 'time_zone': 'Asia/Tehran'}})
+        self.assertEqual(result[0], 200, result[1])
+        self.assertFalse(result[1]['restarted'])
+        self.assertIs(self.runtime.process, process)
+        self.assertEqual(self.store.get('state')['settings']['time_zone'], 'Asia/Tehran')
+        with socket.create_connection(('127.0.0.1', state['inbounds'][0]['port']), timeout=1):
+            pass
+
     def test_missing_core_does_not_save_a_draft(self):
         state = self.store.get("state")
         self.runtime.binary = "/nonexistent"

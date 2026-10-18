@@ -22,7 +22,7 @@ jobs:
       - name: Prepare runtime dependencies only
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends curl ca-certificates openssl
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl ca-certificates openssl tzdata
           if command -v go; then echo 'This check requires a Go-free environment.' >&2; exit 1; fi
           if command -v git; then echo 'This check also verifies Git is unnecessary.' >&2; exit 1; fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4; REST archive fallback without Git

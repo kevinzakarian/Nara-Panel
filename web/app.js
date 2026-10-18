@@ -45,8 +45,8 @@ const size = (n, decimals = 1) => {
  return `${(n/1024**i).toFixed(i ? decimals : 0)} ${units[i]}`;
 };
 const num = n => Number(n || 0).toLocaleString('en-US');
-const date = value => value ? new Date(typeof value === 'number' ? value*1000 : value).toLocaleDateString('en-US') : 'No expiry';
-const time = value => new Date(value*1000).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+const date = value => value ? panelDate(value,{year:'numeric',month:'numeric',day:'numeric'}) : 'No expiry';
+const time = value => panelDate(value,{hour:'2-digit',minute:'2-digit'});
 const total = c => { const t = dashboard?.totals[c.id] || {}; return (t.upload || 0) + (t.download || 0); };
 const status = c => !c.enabled ? ['Disabled',''] : c.expires_at && new Date(c.expires_at) <= new Date() ? ['Expired','red'] : c.quota_bytes && total(c)>=c.quota_bytes ? ['Quota reached','orange'] : ['Active','green'];
 const badge = (text, color='') => `<span class="badge ${color}">${e(text)}</span>`;
@@ -79,7 +79,7 @@ async function load(silent=false) {
   $('#sidebar-core').textContent=dashboard.core.running?'Core is running':'Core is stopped';
   $('.core-label .status-dot').classList.toggle('on',dashboard.core.running);
   $('.core-label .status-dot').classList.toggle('off',!dashboard.core.running);
-  $('#updated').textContent='Updated at '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  $('#updated').textContent='Updated at '+time(Date.now()/1000)+' · '+panelTimeZone();
   if (!silent || page==='dashboard') render(); else renderNav();
  })();
  try{await refreshPending;}finally{refreshPending=null;}
@@ -167,8 +167,39 @@ async function saveAccess(form){
  }
  accessChangePending=false;throw new Error('Still waiting for the system helper. Check the management menu logs before changing the address again.');
 }
+function panelTimeZone(){return state?.settings?.time_zone||'UTC';}
+function panelDate(value,options){
+ const instant=new Date(typeof value==='number'?value*1000:value);
+ try{return new Intl.DateTimeFormat('en-US',{...options,timeZone:panelTimeZone()}).format(instant);}catch{return new Intl.DateTimeFormat('en-US',{...options,timeZone:'UTC'}).format(instant)+' UTC';}
+}
+function zoneClock(name=panelTimeZone()){
+ try{return new Intl.DateTimeFormat('en-GB',{timeZone:name,dateStyle:'medium',timeStyle:'short'}).format(new Date());}catch{return 'Choose a valid time zone';}
+}
+function updateZonePreview(){const input=$('#settings-form [name=time_zone]'),preview=$('#time-zone-preview');if(input&&preview)preview.textContent=zoneClock(input.value)+' · '+input.value;}
 function renderSettings() {
- return heading()+pendingBanner()+renderAccessSettings()+`<div class="settings-grid"><section class="card"><div class="card-header"><div><h2>Connection settings</h2><p>Used in client configurations and subscription links</p></div>${icon('settings')}</div><form id="settings-form" class="card-body" data-revision="${state.revision}"><label>Public server IP or domain<input name="server_address" dir="ltr" placeholder="vpn.example.com" value="${e(state.settings.server_address)}"><small class="field-hint">The address clients connect to, without a scheme or port.</small></label><label>Public panel URL (optional)<input name="public_url" dir="ltr" placeholder="https://panel.example.com" value="${e(state.settings.public_url)}"><small class="field-hint">Panel address for your own reference and public host detection. Subscriptions use their separate address below.</small></label><label>Public subscription URL (optional)<input name="subscription_url" dir="ltr" placeholder="https://subscriptions.example.com:8443/YourSubPath/" value="${e(state.settings.subscription_url||'')}"><small class="field-hint">For an external reverse proxy. Leave blank to use the independent subscription port and subPath.</small></label>${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}<p class="note">Clients use this server’s Default DNS and DNS rules in Rule / Global mode. Direct mode uses device DNS. Manage resolver options in the DNS section.</p><label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label><button class="btn primary" type="submit">${icon('check')}Save settings</button></form></section><div><section class="card section-gap"><div class="card-header"><div><h2>Service controls</h2><p>Validate, start, and stop the core</p></div>${icon('power')}</div><div class="card-body"><div class="inline-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop','stop','power','danger')}</div><p class="note">Settings apply automatically when saved. Use Start core after an intentional stop or unexpected exit.</p></div></section><section class="card"><div class="card-header"><h2>Account security</h2>${icon('lock')}</div><div class="card-body"><p class="note">Manage your username, password, avatar and two-factor authentication.</p><a class="btn" href="#account">Administrator settings</a></div></section>${panelUpdateCard()}</div></div>`;
+ const zones=optionSchema?.time_zones||['UTC','Asia/Tehran','Europe/London','America/New_York'];
+ return heading()+pendingBanner()+`<div class="management-layout"><div class="management-stack">
+ <form id="settings-form" class="management-stack" data-revision="${state.revision}">
+  <section class="card"><div class="card-header"><div><span class="section-kicker">CONNECTION</span><h2>Server & client defaults</h2><p>Addresses and DNS used in generated client profiles</p></div>${icon('routing')}</div><div class="card-body preference-fields">
+   ${field('Public server IP or domain','server_address',state.settings.server_address,'text','The address clients connect to, without a scheme or port.')}
+   <div class="form-grid">${field('Public panel URL (optional)','public_url',state.settings.public_url,'url','Your external panel address, for example https://panel.example.com.')}${field('Public subscription URL (optional)','subscription_url',state.settings.subscription_url||'','url','For an external reverse proxy. Leave blank to use the subscription port and subPath.')}</div>
+   ${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}
+   <p class="note">Rule and Global mode use this resolver and your DNS rules. Direct mode uses device DNS. <a class="text-link" href="#dns">Manage DNS →</a></p>
+   <label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label>
+  </div></section>
+  <section class="card"><div class="card-header"><div><span class="section-kicker">TIME & REGION</span><h2>Panel time zone</h2><p>One clock for displayed times and daily Telegram summaries</p></div>${icon('clock')}</div><div class="card-body preference-fields">
+   <label>Time zone<input name="time_zone" list="panel-time-zones" value="${e(panelTimeZone())}" required maxlength="128" autocomplete="off" spellcheck="false" aria-describedby="time-zone-help"><datalist id="panel-time-zones">${zones.map(name=>`<option value="${e(name)}"></option>`).join('')}</datalist><small id="time-zone-help" class="field-hint">Search by region or city, for example Asia/Tehran. Daylight saving changes follow the selected region.</small></label>
+   <div class="zone-preview"><span>${icon('clock')}<b id="time-zone-preview" role="status">${e(zoneClock())} · ${e(panelTimeZone())}</b></span>${btn('Use my device time zone','settings-device-zone','refresh','sm','type="button"')}</div>
+   <p class="note">Existing installations use UTC until you choose another zone. <a class="text-link" href="#notifications">Set the daily summary time →</a></p>
+  </div></section>
+  <div class="settings-save"><span>${icon('check')}Changes apply automatically when saved.</span><button class="btn primary" type="submit">${icon('check')}Save settings</button></div>
+ </form>
+ ${renderAccessSettings()}
+ </div><aside class="management-stack" aria-label="Service and account shortcuts">
+  <section class="card"><div class="card-header"><div><span class="section-kicker">SERVICE</span><h2>Sing-box core</h2></div>${badge(dashboard.core?.running?'Running':'Stopped',dashboard.core?.running?'green':'red')}</div><div class="card-body preference-fields"><p class="note">Validate your configuration or control the core process.</p><div class="service-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop core','stop','power','danger')}</div><p class="note">Start the core after an intentional stop or unexpected exit.</p></div></section>
+  ${panelUpdateCard()}
+  <section class="card"><div class="card-header"><h2>Workspace preferences</h2></div><div class="card-body shortcut-list"><a href="#account">${icon('account')}<span><b>Administrator</b><small>Profile, password and 2FA</small></span><span>→</span></a><a href="#notifications">${icon('notifications')}<span><b>Notifications</b><small>Telegram connection and schedule</small></span><span>→</span></a><a href="#about">${icon('about')}<span><b>About NARA</b><small>Installation details and help</small></span><span>→</span></a></div></section>
+ </aside></div>`;
 }
 function panelUpdateCard(){
  const item=dashboard.updates?.panel;
@@ -499,6 +530,7 @@ async function handle(action,target) {
  if(action==='new-inbound')return editInbound();
  if(action==='new-client')return editClient();
  if(action==='self-signed')return createSelfSigned();
+ if(action==='settings-device-zone'){const input=$('#settings-form [name=time_zone]');input.value=Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';updateZonePreview();return;}
  if(action==='import-tls')return editTLS();
  if(action==='new-dns')return editCoreRecord(dnsTab);
  if(action==='core-new')return editCoreRecord(collection||(page==='dns'?dnsTab:page==='routing'?routingTab:coreTab));
@@ -538,7 +570,7 @@ document.addEventListener('submit',async event=>{
   else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';const close=await modalSubmit(form);if(close!==false)$('#modal').close();}
   else if(form.id==='telegram-form'){await saveTelegram(form);}
   else if(form.id==='access-form'){await saveAccess(form);}
-  else if(form.id==='settings-form'){const f=new FormData(form);const d={server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:Number(form.dataset.revision),settings:d});await load();toast('Settings saved and applied.');}
+  else if(form.id==='settings-form'){const f=new FormData(form);const d={...state.settings,time_zone:f.get('time_zone'),server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:Number(form.dataset.revision),settings:d});await load();toast('Settings saved and applied.');}
  }catch(err){if(form.id==='modal-form'){const error=$('#form-error',form);if(error)error.textContent=err.message;}else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=form.dataset.previewRequired==='true'&&!form.dataset.previewId;submit.textContent=label;}}
 });
 document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;selectedClients.clear();render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});
@@ -547,6 +579,8 @@ window.addEventListener('hashchange',()=>{if($('#modal').open)$('#modal').close(
 $('#refresh').innerHTML=icon('refresh');$('#refresh').addEventListener('click',async()=>{try{await load();toast('Server data refreshed.');}catch(err){toast(err.message,true);}});
 $('#logout').addEventListener('click',async()=>{try{await api('logout',{});showLogin();}catch(err){toast(err.message,true);}});
 $('#mobile-menu').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));
+document.addEventListener('input',event=>{if(event.target.matches('#settings-form [name=time_zone]'))updateZonePreview();});
+document.addEventListener('change',event=>{if(event.target.matches('#telegram-form [name=event]'))updateSummarySchedule();});
 document.addEventListener('click',event=>{if($('.sidebar').classList.contains('open')&&!event.target.closest('.sidebar,#mobile-menu'))$('.sidebar').classList.remove('open');});
 $('#modal').addEventListener('close',()=>{if(!$('#modal').open){$('#modal-body').replaceChildren();modalSubmit=null;previewConfig=null;}});
 let lastRefreshError=0;

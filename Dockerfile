@@ -7,7 +7,7 @@ ARG TARGETARCH
 RUN python /fetch-core.py --arch "$TARGETARCH" --output /core
 
 FROM python:3.12-slim-bookworm
-RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates iproute2 \
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssl ca-certificates iproute2 tzdata \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin nara
 WORKDIR /app

@@ -5,7 +5,7 @@ import ipaddress
 import re
 import time
 from urllib.parse import urlsplit
-from . import options, native
+from . import options, native, timezones
 
 PROTOCOLS = ("vless", "vmess", "trojan", "hysteria2", "tuic", "anytls")
 TLS_REQUIRED = ("trojan", "hysteria2", "tuic", "anytls")
@@ -40,7 +40,7 @@ def initial_state():
             "clients": [], "client_groups": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
             "server": "1.1.1.1", "port": 53}],
             "settings": {"server_address": "", "public_url": "", "subscription_url": "", "dns_final": "bootstrap",
-                         "block_private": True}}
+                         "block_private": True, "time_zone": "UTC"}}
 
 
 def require(ok, message):
@@ -243,6 +243,7 @@ def validate(state):
             require(u.scheme in ("http", "https") and u.hostname and u.username is None and u.password is None
                     and not u.query and not u.fragment and (u.port is None or 1 <= u.port <= 65535),
                     "Public URL must use HTTP or HTTPS without credentials, a query, or a fragment")
+    timezones.zone(timezones.name(state))
     require(type(state["settings"].get("block_private")) is bool, "Invalid private network setting")
     require(isinstance(state.get("core_options", {}), dict), "Invalid core options")
     require(set(state.get("core_options", {})) <= {"log", "dns", "ntp", "certificate", "route", "experimental"}, "Unsupported core options section")

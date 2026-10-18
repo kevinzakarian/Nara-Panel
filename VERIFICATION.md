@@ -628,3 +628,12 @@ After the native-secret redaction fix, **33 targeted Python tests passed** (`tes
 
 
 [Final Linux run 39099593470](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39099593470), at implementation commit `b9d0bc09e961e2633bf95afc03b67b5fa633b515`, passed **109 tests on amd64 and 109 on arm64** in Go-free/Git-free Python containers. Service-unit validation and the real path-triggered systemd upgrade fixture also passed. This run includes the final native-service secret-redaction regression and unused-import cleanup; earlier green runs were superseded during review. The isolated preview/core, temporary private data and browser tab were removed after inspection.
+
+
+## Preferences and time-zone scheduling (0.9.0) — 2026-10-18
+
+**291 full-suite Python tests passed without skips**, using Python 3.12, the real compatible Sing-box 1.14.3 and both Caddy fixtures. **131 Node.js tests passed**. New regressions cover Tehran’s half-hour offset and minute precision, a local date spanning UTC midnight, spring’s skipped hour, autumn’s repeated hour, persistence across restart/time-zone changes, legacy UTC/zero-minute defaults, invalid-zone rejection without persistence, local notification timestamps, and a real core process retained during a time-zone-only settings save.
+
+UI regressions cover the rendered Settings revision and time-zone input, panel-zone date formatting, disabled/enabled summary schedules, select-all/clear event choices and delivery refresh preserving unsaved preferences. Browser review used an isolated local server and demonstration accounts at 1280×720 and 390×844. Settings, About, Administrator and Notifications were inspected on both sizes; no browser errors were recorded, and page width stayed within the mobile viewport. The device-zone shortcut and persistence of Asia/Tehran were verified through the browser; Telegram’s schedule displayed the same selected zone. No actual bot token or external test message was submitted.
+
+Runtime requirements remain unchanged. Time zones use the Python standard library, with OS tzdata included in the bootstrap installer, Docker runtime and native Linux test containers. [Settings](screenshots/settings-0.9.0.jpg), [panel time zone](screenshots/time-zone-0.9.0.jpg), [Administrator](screenshots/administrator-0.9.0.jpg), [About](screenshots/about-0.9.0.jpg) and [Notifications](screenshots/notifications-0.9.0.jpg) show the revised pages. Native Linux release verification is recorded below when complete.
