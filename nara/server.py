@@ -395,11 +395,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     else:
                         previous = notifications.settings(store)
                         value = notifications.validate_settings(data.get('settings'), previous)
-                        store.set('telegram', value)
-                        store.notification_wakeup.set()
-                        if any(value.get(key) != previous.get(key) for key in ('bot_token', 'chat_id', 'enabled')):
-                            with store.connect() as db:db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued'")
-                    store.set('admin', admin)
+                        notifications.save_settings(store, value, previous)
                 store.audit('Telegram test queued' if path.endswith('/test') else 'Telegram notification settings updated')
                 return self.send(200, {'ok': True, 'queued': path.endswith('/test')})
             if path in ('/api/clients-bulk-preview', '/api/clients-action-preview'):

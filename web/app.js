@@ -52,15 +52,40 @@ const status = c => !c.enabled ? ['Disabled',''] : c.expires_at && new Date(c.ex
 const badge = (text, color='') => `<span class="badge ${color}">${e(text)}</span>`;
 const checked = value => value ? 'checked' : '';
 
-async function api(path, body) {
- const response = await fetch('api/' + path,{method:body ? 'POST':'GET', headers:body ? {'Content-Type':'application/json','X-CSRF-Token':csrf} : {},body:body ? JSON.stringify(body):undefined,credentials:'same-origin'});
- const result = await response.json();
- if (!response.ok) {
-  if (response.status === 401 && path !== 'login') showLogin();
-  throw new Error(result.error || 'Could not connect to the server');
- }
- return result;
+class PanelRequestError extends Error {
+ constructor(message,uncertain=false){super(message);this.name='PanelRequestError';this.uncertain=uncertain;}
 }
+async function api(path, body, options={}) {
+ const writing=body!==undefined,session=csrf,controller=new AbortController();
+ const timeout=options.timeoutMs??(path.startsWith('telegram')?20000:writing?90000:20000);
+ const timer=setTimeout(()=>controller.abort(),timeout);
+ try{
+  let response,raw;
+  try{
+   response=await fetch('api/'+path,{method:writing?'POST':'GET',headers:writing?{'Content-Type':'application/json','X-CSRF-Token':session}:{},body:writing?JSON.stringify(body):undefined,credentials:'same-origin',signal:controller.signal});
+   raw=await response.text();
+  }catch(error){
+   const reason=controller.signal.aborted?'The server did not respond in time.':'Connection to the panel was interrupted.';
+   throw new PanelRequestError(reason+(writing?' The change may have been saved. Check the saved settings before trying again.':' Please try refreshing.'),writing);
+  }
+  if(response.status===401&&path!=='login'){
+   if(session===csrf)showLogin();
+   throw new Error(path==='session'&&!session?'Please sign in first':'Your session has expired. Sign in again.');
+  }
+  let result;
+  try{result=JSON.parse(raw);if(!result||typeof result!=='object')throw Error();}
+  catch{
+   const message=response.ok?'The panel returned an empty or incomplete response.':'The panel could not complete this request (HTTP '+response.status+').';
+   throw new PanelRequestError(message+(writing?' Check the saved settings before trying again.':' Please try refreshing.'),writing&&(response.ok||response.status>=500));
+  }
+  if(!response.ok){
+   const message=typeof result.error==='string'?result.error:result.error?.message||'Could not complete this request';
+   throw new PanelRequestError(message,writing&&response.status>=500);
+  }
+  return result;
+ }finally{clearTimeout(timer);}
+}
+
 function toast(message, error=false) { const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toasts').append(node);setTimeout(()=>node.remove(),6500); }
 function showLogin() { $('#login').hidden=false;$('#app').hidden=true;csrf='';if($('#modal')?.open)$('#modal').close();$('#modal-body')?.replaceChildren();modalSubmit=null;apiKeyData=null;telegramData=null;selectedClients.clear();updateAdminUI({username:'Administrator',avatar:'ember',two_factor:false,recovery_remaining:0}); }
 async function boot() {
@@ -223,7 +248,8 @@ function field(label,name,value='',type='text',hint='',extra='') {return `<label
 function selectField(label,name,options,value='',extra=''){return `<label ${extra}>${label}<select name="${name}">${options.map(([v,t])=>`<option value="${e(v)}" ${v===value?'selected':''}>${e(t)}</option>`).join('')}</select></label>`;}
 function textField(label,name,value='',hint='',extra=''){return `<label ${extra}>${label}<textarea name="${name}" dir="ltr">${e(value)}</textarea>${hint?`<small class="field-hint">${hint}</small>`:''}</label>`;}
 function openModal(title,subtitle,content,submit=null,submitLabel='Save') {
- modalSubmit=submit;$('#modal-body').innerHTML=`<form id="modal-form"><div class="modal-head"><div><h2>${title}</h2><p>${subtitle}</p></div><button class="icon-btn" type="button" data-action="close" aria-label="Close">${icon('close')}</button></div><div class="modal-content">${content}</div><p class="error-text form-error" id="form-error" role="alert"></p><div class="modal-actions"><button class="btn" type="button" data-action="close">${submit?'Cancel':'Close'}</button>${submit?`<button class="btn primary" type="submit">${submitLabel}</button>`:''}</div></form>`;
+ $('#modal').classList.remove('verification-dialog');$('#modal').setAttribute('aria-labelledby','modal-title');$('#modal').setAttribute('aria-describedby','modal-description');
+ modalSubmit=submit;$('#modal-body').innerHTML=`<form id="modal-form"><div class="modal-head"><div><h2 id="modal-title">${title}</h2><p id="modal-description">${subtitle}</p></div><button class="icon-btn" type="button" data-action="close" aria-label="Close">${icon('close')}</button></div><div class="modal-content">${content}</div><p class="error-text form-error" id="form-error" role="alert"></p><div class="modal-actions"><button class="btn" type="button" data-action="close">${submit?'Cancel':'Close'}</button>${submit?`<button class="btn primary" type="submit">${submitLabel}</button>`:''}</div></form>`;
  if (!$('#modal').open) $('#modal').showModal();
  if(submit)setTimeout(()=>$('input:not([type=checkbox]),select,textarea', $('#modal'))?.focus(),30);
 }
@@ -562,17 +588,19 @@ async function handle(action,target) {
  }
  if(action==='change-password')return editAdminCredentials();
 }
-document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;event.preventDefault();target.disabled=true;try{await handle(target.dataset.action,target);}catch(err){toast(err.message,true);}finally{target.disabled=false;}});
-document.addEventListener('submit',async event=>{
- const form=event.target;if(!['modal-form','login-form','settings-form','access-form','telegram-form'].includes(form.id))return;event.preventDefault();const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent='Saving…';}
+async function submitPanelForm(event){
+ const form=event.target;if(!['modal-form','login-form','settings-form','access-form','telegram-form'].includes(form.id))return;event.preventDefault();if(form.dataset.submitting==='true')return;form.dataset.submitting='true';form.setAttribute('aria-busy','true');const busy=$('#verification-status',form);if(busy)busy.textContent=form.dataset.busyMessage||'Checking your administrator credentials…';const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent=form.dataset.busyLabel||'Saving…';}
  try {
   if(form.id==='login-form'){const result=await api('login',Object.fromEntries(new FormData(form)));if(result.two_factor_required){$('#login-2fa').hidden=false;form.elements.code.required=true;form.elements.code.focus();$('#login-error').textContent='Enter your authenticator or recovery code.';return;}csrf=result.csrf;form.elements.password.value='';form.elements.code.value='';form.elements.code.required=false;$('#login-2fa').hidden=true;$('#login-error').textContent='';await boot();}
-  else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';const close=await modalSubmit(form);if(close!==false)$('#modal').close();}
+  else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';const close=await modalSubmit(form);if(close!==false&&form.isConnected&&$('#modal-form')===form)$('#modal').close();}
   else if(form.id==='telegram-form'){await saveTelegram(form);}
   else if(form.id==='access-form'){await saveAccess(form);}
   else if(form.id==='settings-form'){const f=new FormData(form);const d={...state.settings,time_zone:f.get('time_zone'),server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:Number(form.dataset.revision),settings:d});await load();toast('Settings saved and applied.');}
- }catch(err){if(form.id==='modal-form'){const error=$('#form-error',form);if(error)error.textContent=err.message;}else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{if(submit){submit.disabled=form.dataset.previewRequired==='true'&&!form.dataset.previewId;submit.textContent=label;}}
-});
+ }catch(err){if(form.id==='modal-form'){const error=$('#form-error',form);if(error){error.textContent=err.message;if(err.uncertain&&form.classList.contains('verification-form')){const retry=document.createElement('button');retry.type='button';retry.className='btn sm';retry.dataset.action='integration-telegram-reload';retry.textContent='Load saved preferences';error.append(document.createElement('br'),retry);}error.tabIndex=-1;error.focus();}}else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{delete form.dataset.submitting;form.removeAttribute('aria-busy');if(busy)busy.textContent='';if(form.classList.contains('verification-form')){form.elements.current.value='';if(form.elements.code)form.elements.code.value='';}if(submit){submit.disabled=form.dataset.previewRequired==='true'&&!form.dataset.previewId;submit.textContent=label;}}
+}
+document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;event.preventDefault();target.disabled=true;try{await handle(target.dataset.action,target);}catch(err){toast(err.message,true);}finally{target.disabled=false;}});
+
+document.addEventListener('submit',submitPanelForm);
 document.addEventListener('input',event=>{if(event.target.id==='client-search'){const pos=event.target.selectionStart;search=event.target.value;pageNumber=1;selectedClients.clear();render();const input=$('#client-search');input.focus();input.setSelectionRange(pos,pos);}});
 document.addEventListener('change',event=>{if(event.target.id==='admin-avatar-file'){uploadAdminAvatar(event.target.files?.[0]).catch(error=>toast(error.message,true));return;}if(changeClientControl(event.target))return;if(event.target.matches('.subscription-format'))changeSubscriptionFormat(event.target);else if(event.target.id==='client-filter'){filter=event.target.value;pageNumber=1;render();}});
 window.addEventListener('hashchange',()=>{if($('#modal').open)$('#modal').close();search='';filter='all';pageNumber=1;selectedClients.clear();$('.sidebar').classList.remove('open');render();});
@@ -580,7 +608,7 @@ $('#refresh').innerHTML=icon('refresh');$('#refresh').addEventListener('click',a
 $('#logout').addEventListener('click',async()=>{try{await api('logout',{});showLogin();}catch(err){toast(err.message,true);}});
 $('#mobile-menu').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));
 document.addEventListener('input',event=>{if(event.target.matches('#settings-form [name=time_zone]'))updateZonePreview();});
-document.addEventListener('change',event=>{if(event.target.matches('#telegram-form [name=event]'))updateSummarySchedule();});
+document.addEventListener('change',event=>{if(event.target.matches('#telegram-form [name=event],#telegram-form [name=summary_hour],#telegram-form [name=summary_minute]'))updateSummarySchedule();});
 document.addEventListener('click',event=>{if($('.sidebar').classList.contains('open')&&!event.target.closest('.sidebar,#mobile-menu'))$('.sidebar').classList.remove('open');});
 $('#modal').addEventListener('close',()=>{if(!$('#modal').open){$('#modal-body').replaceChildren();modalSubmit=null;previewConfig=null;}});
 let lastRefreshError=0;

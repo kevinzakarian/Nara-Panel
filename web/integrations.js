@@ -35,11 +35,11 @@ function renderNotifications(){
  const categories=[
   ['Service & security',['panel_started','core_up','core_down','login','login_failed','admin_changed','api_key','config_saved','apply_failed']],
   ['Clients & traffic',['clients_created','clients_updated','clients_deleted','quota_warning','quota_reached','expiry_warning','expired']],
-  ['Server & summaries',['resource_alert','resource_recovery','daily_summary']]
+  ['Server health',['resource_alert','resource_recovery']]
  ];
- const zone=panelTimeZone(),summary=String(t.summary_hour??9).padStart(2,'0')+':'+String(t.summary_minute??0).padStart(2,'0');
+ const zone=panelTimeZone();
  return heading(btn('Send test message','integration-telegram-test','check','',t.enabled?'':'disabled'))+`
- <div class="management-layout notifications-layout"><form id="telegram-form" class="management-stack">
+ <div class="management-layout notifications-layout"><form id="telegram-form" class="management-stack" data-time-zone="${e(zone)}">
   <section class="card"><div class="card-header"><div><span class="section-kicker">01 / CONNECTION</span><h2>Your Telegram bot</h2><p>Choose the bot and chat that receive your updates</p></div>${badge(t.enabled?'Enabled':'Not enabled',t.enabled?'green':'')}</div><div class="card-body preference-fields">
    <details class="setup-help mobile-setup-help"><summary>Need help connecting your bot?</summary><ol class="api-steps"><li>Create a bot with <a class="text-link" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> and copy its token.</li><li>Start your bot, then use Find recent bot chats. For a channel, give the bot permission to post.</li><li>Enable notifications, save your choices and send a test message.</li></ol></details>
    <label class="notification-enable check-field"><input name="enabled" type="checkbox" ${checked(t.enabled)}><span><b>Enable Telegram notifications</b><small>Delivery starts after you save your preferences.</small></span></label>
@@ -47,7 +47,7 @@ function renderNotifications(){
    <div class="inline-buttons notification-tools"><button type="button" class="btn" data-action="integration-telegram-check">${icon('check')}Test bot</button><button type="button" class="btn" data-action="integration-telegram-chats">${icon('clients')}Find recent bot chats</button></div>
    <p class="note">Use the token above or the saved token when blank. Each check asks for your current NARA administrator password${adminProfile.two_factor?' and a fresh verification code':''}.</p><div id="telegram-connection" role="status"></div><div id="telegram-chats"></div>
   </div></section>
-  <section class="card"><div class="card-header"><div><span class="section-kicker">02 / SCHEDULE</span><h2>Daily summary</h2><p>Your server, clients and traffic in one message</p></div>${icon('clock')}</div><div class="card-body preference-fields"><div class="form-grid"><label>Daily summary time<input name="summary_time" type="time" value="${summary}" required ${t.events?.includes('daily_summary')?'':'disabled'}><small class="field-hint">Based on ${e(zone)}, including daylight saving changes.</small></label><div class="schedule-zone"><span class="section-kicker">PANEL TIME ZONE</span><b>${e(zone)}</b><a class="text-link" href="#settings">Change in Settings →</a></div></div><p class="note" id="summary-schedule-note">${t.events?.includes('daily_summary')?'Sent once per local day at or shortly after your chosen time. If the panel was offline, it catches up later that day.':'Select “Daily summary” under events below to activate this schedule.'}</p></div></section>
+  <section class="card"><div class="card-header"><div><span class="section-kicker">02 / SCHEDULE</span><h2>Daily summary</h2><p>Your server, clients and traffic in one message</p></div>${icon('clock')}</div><div class="card-body preference-fields"><label class="check-field summary-enable"><input name="event" type="checkbox" value="daily_summary" ${checked(t.events?.includes('daily_summary'))}><span><b>Send a daily summary</b><small class="field-hint">Include a daily overview in your Telegram notifications.</small></span></label><div class="form-grid"><fieldset class="summary-clock"><legend>Daily summary time · 24-hour</legend><div>${selectField('Hour','summary_hour',Array.from({length:24},(_,value)=>[value,String(value).padStart(2,'0')]),t.summary_hour??9)}<span aria-hidden="true">:</span>${selectField('Minute','summary_minute',Array.from({length:60},(_,value)=>[value,String(value).padStart(2,'0')]),t.summary_minute??0)}</div><small class="field-hint" id="summary-clock-preview">${String(t.summary_hour??9).padStart(2,'0')}:${String(t.summary_minute??0).padStart(2,'0')} · ${e(zone)}</small></fieldset><div class="schedule-zone"><span class="section-kicker">PANEL TIME ZONE</span><b>${e(zone)}</b><a class="text-link" href="#settings">Change in Settings →</a></div></div><p class="note" id="summary-schedule-note">${t.events?.includes('daily_summary')?'Sent once per local day at or shortly after your chosen time. If the panel was offline, it catches up later that day.':'Daily summary is off. Your chosen time is saved for when you enable it.'}</p></div></section>
   <section class="card"><div class="card-header"><div><span class="section-kicker">03 / EVENTS</span><h2>What would you like to hear about?</h2><p>Choose the updates that matter to you</p></div><div class="inline-buttons">${btn('Select all','integration-events-all','check','sm','type="button"')}${btn('Clear','integration-events-none','close','sm','type="button"')}</div></div><div class="card-body"><div class="notification-groups">${categories.map(([title,events])=>`<fieldset class="route-scope"><legend>${title}</legend>${events.map(event=>`<label class="check-field"><input name="event" type="checkbox" value="${event}" ${checked(t.events?.includes(event))}>${e(event==='daily_summary'?'Daily summary':t.event_labels[event]||event)}</label>`).join('')}</fieldset>`).join('')}</div><p class="note">Traffic warnings start at 80%; expiry warnings start 24 hours before expiry. Resource alerts require sustained usage of 90% or more.</p></div></section>
   <div class="settings-save"><span>${icon('lock')}Saving requires administrator verification.</span><button class="btn primary" type="submit">${icon('check')}Save notifications</button></div>
  </form><aside class="management-stack" aria-label="Telegram setup and delivery">
@@ -61,27 +61,50 @@ function telegramActivity(t){return `   ${t.delivery?.at?`<div class="delivery-l
    ${t.recent?.length?`<ul class="delivery-list">${t.recent.map(row=>`<li><div><b>${e(t.event_labels[row.event]||'Test notification')}</b><small>${e(date(row.created))} · ${e(time(row.created))}</small></div>${badge(row.status,row.status==='sent'?'green':row.status==='failed'?'red':'')}</li>`).join('')}</ul>`:''}
    <p class="note">Temporary failures retry automatically. A complete outage can only be reported once the panel is back online.</p>`;}
 function notificationPreferences(form){
- const f=new FormData(form),[hour,minute]=form.elements.summary_time.value.split(':').map(Number);
+ const f=new FormData(form),hour=Number(f.get('summary_hour')),minute=Number(f.get('summary_minute'));
  return {enabled:form.elements.enabled.checked,bot_token:String(f.get('bot_token')||'').trim(),chat_id:String(f.get('chat_id')||'').trim(),events:f.getAll('event'),summary_hour:hour,summary_minute:minute};
 }
 function updateSummarySchedule(){
  const form=$('#telegram-form');if(!form)return;
  const enabled=[...form.querySelectorAll('[name=event]')].some(input=>input.value==='daily_summary'&&input.checked);
- form.elements.summary_time.disabled=!enabled;
- $('#summary-schedule-note').textContent=enabled?'Sent once per local day at or shortly after your chosen time. If the panel was offline, it catches up later that day.':'Select “Daily summary” under events below to activate this schedule.';
+ $('#summary-clock-preview').textContent=String(form.elements.summary_hour.value).padStart(2,'0')+':'+String(form.elements.summary_minute.value).padStart(2,'0')+' · '+form.dataset.timeZone;
+ $('#summary-schedule-note').textContent=enabled?'Sent once per local day at or shortly after your chosen time. If the panel was offline, it catches up later that day.':'Daily summary is off. Your chosen time is saved for when you enable it.';
 }
 
-function notificationVerification(title,description,run,label){
- openModal(title,description,`<p class="note">Enter your current NARA administrator password. This is the password you use to sign in to this panel.</p>${adminReauth()}`,run,label);
- requireAdminInputs($('#modal-form'));
+function notificationVerification(title,description,run,label,review=''){
+ openModal(title,description,`<div class="verification-identity">${adminAvatar(adminProfile.avatar,true)}<span>Signed in as <b>${e(adminProfile.username)}</b></span>${icon('lock')}</div>${review}<div class="verification-fields"><div class="verification-field"><label for="verification-password">Panel password</label><div class="password-control"><input id="verification-password" name="current" type="password" autocomplete="current-password" maxlength="256" required><button type="button" class="icon-btn" data-action="integration-password-visibility" aria-label="Show password" aria-pressed="false">${icon('eye')}</button></div><small class="field-hint">Use the password you sign in to NARA with.</small></div>${adminProfile.two_factor?field('Authenticator or recovery code','code','','text','Use a fresh authenticator code or an unused recovery code.'):''}</div><p class="verification-status" id="verification-status" role="status" aria-live="polite"></p>`,run,label);
+ $('#modal').classList.add('verification-dialog');
+ const form=$('#modal-form');form.classList.add('verification-form');form.dataset.busyLabel='Verifying…';form.dataset.busyMessage='Checking your password and completing this request…';
+ requireAdminInputs(form);
+}
+function notificationReview(settings){
+ const count=settings.events.length,summary=settings.events.includes('daily_summary')?String(settings.summary_hour).padStart(2,'0')+':'+String(settings.summary_minute).padStart(2,'0')+' · '+panelTimeZone():'Off · '+String(settings.summary_hour).padStart(2,'0')+':'+String(settings.summary_minute).padStart(2,'0')+' · '+panelTimeZone();
+ return `<dl class="verification-review"><div><dt>Delivery</dt><dd>${badge(settings.enabled?'Enabled':'Disabled',settings.enabled?'green':'')}</dd></div><div><dt>Events</dt><dd>${count} selected</dd></div><div><dt>Destination</dt><dd>${e(settings.chat_id||'Not set')}</dd></div><div><dt>Daily summary</dt><dd>${e(summary)}</dd></div>${settings.bot_token?'<div><dt>Bot token</dt><dd>Replace stored token</dd></div>':''}</dl>`;
+}
+function notificationSavedMatches(settings,saved){
+ return !settings.bot_token&&!!saved&&saved.enabled===settings.enabled&&saved.chat_id===settings.chat_id&&saved.summary_hour===settings.summary_hour&&(saved.summary_minute??0)===settings.summary_minute&&JSON.stringify([...(saved.events||[])].sort())===JSON.stringify([...settings.events].sort())&&(!settings.enabled||saved.token_configured);
 }
 function saveTelegram(form){
  const settings=notificationPreferences(form);
- notificationVerification('Save notification preferences','Confirm the bot destination and event choices.',async auth=>{
-  await api('telegram',{...Object.fromEntries(new FormData(auth)),settings});
-  integrationLoad('telegram',true);toast('Notification preferences saved.');
- },'Save notifications');
+ if(settings.enabled&&!settings.bot_token&&!telegramData.token_configured)throw Error('Enter a bot token before enabling notifications.');
+ if(settings.enabled&&!settings.chat_id)throw Error('Choose a destination Chat ID before enabling notifications.');
+ notificationVerification('Save notification preferences','Review your choices, then confirm with your panel password.',async auth=>{
+  const session=csrf;let recovered=false;
+  try{await api('telegram',{...Object.fromEntries(new FormData(auth)),settings});}
+  catch(error){
+   if(!error.uncertain||settings.bot_token||session!==csrf)throw error;
+   let saved;try{saved=await api('telegram',undefined,{timeoutMs:8000});}catch{throw error;}
+   if(!notificationSavedMatches(settings,saved))throw error;
+   telegramData=saved;recovered=true;
+  }
+  if(session!==csrf)return;
+  // Update the public cache only. Neither the panel password nor token is retained.
+  telegramData={...telegramData,enabled:settings.enabled,chat_id:settings.chat_id,events:settings.events,summary_hour:settings.summary_hour,summary_minute:settings.summary_minute,token_configured:!!settings.bot_token||!!telegramData.token_configured};
+  if(page==='notifications')render();
+  toast(recovered?'Saved preferences confirmed after reconnecting.':'Notification preferences saved.');
+ },'Confirm & save',notificationReview(settings));
 }
+
 function testTelegram(){
  notificationVerification('Send a test message','Queues a message to your saved Telegram destination.',async form=>{
   await api('telegram/test',Object.fromEntries(new FormData(form)));
@@ -102,6 +125,8 @@ function checkTelegramBot(){
  },'Test bot');
 }
 async function handleIntegration(action,target){
+ if(action==='integration-telegram-reload'){if($('#modal').open)$('#modal').close();return integrationLoad('telegram',true);}
+ if(action==='integration-password-visibility'){const input=$('#modal-form').elements.current,show=input.type==='password';input.type=show?'text':'password';target.setAttribute('aria-label',show?'Hide password':'Show password');target.setAttribute('aria-pressed',String(show));return;}
  if(action==='integration-events-all'||action==='integration-events-none'){for(const input of $$('#telegram-form [name=event]'))input.checked=action==='integration-events-all';updateSummarySchedule();return;}
  if(action==='integration-key-new')return createAPIKey();
  if(action==='integration-key-revoke')return revokeAPIKey(target.dataset.id);

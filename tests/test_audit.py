@@ -145,8 +145,26 @@ class ReviewResourceTests(unittest.TestCase):
                     if time.monotonic()>deadline:self.fail('No first handler')
                     time.sleep(.005)
                 second=socket.create_connection(server.server_address,timeout=2);second.settimeout(2)
-                self.assertEqual(second.recv(1),b'');second.close()
+                response=second.recv(4096);second.close()
+                self.assertIn(b'503 Service Unavailable',response)
+                self.assertEqual(json.loads(response.split(b'\r\n\r\n',1)[1])['error'],'The panel is busy. Wait a moment and try again.')
                 first.settimeout(2);self.assertEqual(first.recv(1),b'')
                 time.sleep(.03)
                 c=http.client.HTTPConnection(*server.server_address,timeout=2);c.request('GET','/api/health');r=c.getresponse();self.assertEqual(r.status,200);r.read();c.close()
             finally:first.close();server.shutdown();server.server_close()
+
+
+class DisconnectTests(unittest.TestCase):
+    def test_listener_ignores_expected_disconnects_but_reports_other_handler_errors(self):
+        server=BoundedHTTPServer(('127.0.0.1',0),lambda *args:None)
+        try:
+            with mock.patch('http.server.ThreadingHTTPServer.handle_error') as fallback:
+                for error in (ConnectionResetError(),BrokenPipeError(),TimeoutError()):
+                    with mock.patch('nara.http.sys.exc_info',return_value=(type(error),error,None)):
+                        server.handle_error(None,('127.0.0.1',1))
+                fallback.assert_not_called()
+                error=RuntimeError('Fixture bug')
+                with mock.patch('nara.http.sys.exc_info',return_value=(type(error),error,None)):
+                    server.handle_error(None,('127.0.0.1',1))
+                fallback.assert_called_once()
+        finally:server.server_close()

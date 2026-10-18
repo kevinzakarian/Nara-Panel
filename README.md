@@ -354,3 +354,14 @@ Choose **Settings → Panel time zone**, search for an IANA region/city such as 
 In **Notifications → Daily summary**, set the local hour and minute and select the **Daily summary** event. The worker queues one summary per local calendar day at or after that time, within its normal approximately 30-second check interval. If the panel is offline at the selected time, it catches up when running later that same day; it does not replay older missed days. Daylight saving gaps catch up at the first available later time; repeated hours do not create a second summary. Time zone changes and restarts retain the per-day deduplication record.
 
 Time zones use Python’s [standard IANA zoneinfo support](https://docs.python.org/3/library/zoneinfo.html). The Linux bootstrap installer and Docker runtime install the OS `tzdata` package. Manual installations need system IANA time zone data; unavailable zones are rejected without saving. A time zone-only save keeps an already-running core process because the rendered core configuration is unchanged. Refreshing Telegram delivery activity preserves unsaved bot, destination, schedule and event fields.
+
+
+### Notification confirmation and reconnects (0.9.1)
+
+The Daily summary card has a **Send a daily summary** choice and separate **Hour / Minute** controls in 24-hour format. Its time remains editable and saves even when the summary event is off; Select all / Clear also include this choice. Existing saved hour/minute values are preserved.
+
+Saving opens a compact confirmation with the signed-in account, delivery state, event count, destination and summary time. Password visibility, verification progress and inline errors are available. Failed attempts release the Save button and clear authentication inputs while preserving the preferences on the page. The same request cannot be submitted twice while pending.
+
+The browser applies a deadline to requests and handles empty/truncated responses without showing a JSON parser exception. If a preference write loses its response, a read-only check can confirm that the requested non-secret settings were saved; it never automatically retries the write. Token replacements cannot be proved from public settings, so their outcome is left unconfirmed. An unresolved response offers **Load saved preferences** for explicit review. A busy listener returns a bounded JSON 503 response, and ordinary client/proxy disconnects do not produce misleading unhandled stack traces.
+
+Preference saves and cancellation of deselected queued events commit together. Selecting all again does not replay canceled messages, and a failing in-flight delivery cannot put a canceled message back into the retry queue. A send already in progress may finish. Clearing all event choices skips unnecessary background health/client scans; a deliberately queued test message remains supported.

@@ -49,6 +49,19 @@ def validate_settings(data, previous):
     return value
 
 
+def save_settings(store, value, previous):
+    """Commit preferences and pending-message cancellation before waking delivery."""
+    with store.connect() as db:
+        db.execute("INSERT OR REPLACE INTO kv VALUES('telegram',?)", (json.dumps(value),))
+        if not value['enabled'] or any(value.get(key) != previous.get(key) for key in ('bot_token', 'chat_id', 'enabled')):
+            db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued'")
+        else:
+            allowed = [*value['events'], 'test']
+            placeholders = ','.join('?' for _ in allowed)
+            db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued' AND event NOT IN (" + placeholders + ")", allowed)
+    store.notification_wakeup.set()
+
+
 def enqueue(store, event, detail='', dedupe=None, window=900):
     value=settings(store)
     if not value['enabled'] or event not in EVENTS or event!='test' and event not in value['events']:return False
@@ -144,7 +157,7 @@ class Worker:
     def poll(self,now=None,config=None):
         now=time.time() if now is None else now
         config=config or settings(self.store)
-        if not config['enabled']:return
+        if not config['enabled'] or not config['events']:return
         running=self.runtime.running
         if self.previous_core is not None and self.previous_core!=running:
             enqueue(self.store,'core_up' if running else 'core_down','Proxy connections are available.' if running else 'Check Overview and the private core log. Existing settings are retained.')
@@ -175,7 +188,7 @@ class Worker:
                     enqueue(self.store,'resource_recovery',f'{name} usage returned to {value:.0f}%.',name+':recovered',3600)
                     self.resource_alerts.remove(name)
         local=dt.datetime.fromtimestamp(now,timezones.zone(timezones.name(state)))
-        if (local.hour,local.minute)>=(config['summary_hour'],config.get('summary_minute',0)):
+        if 'daily_summary' in config['events'] and (local.hour,local.minute)>=(config['summary_hour'],config.get('summary_minute',0)):
             active=sum(eligible(row,totals,now) for row in state['clients'])
             used=sum(x.get('upload',0)+x.get('download',0) for x in totals.values())
             # UTC+14 to UTC-12 can revisit the same local date after 26 hours.
@@ -199,12 +212,12 @@ class Worker:
             return
         try:
             send(config['bot_token'],config['chat_id'],text(event,json.loads(payload),timezones.name(self.store.get('state'))))
-            with self.store.connect() as db:db.execute("UPDATE notifications SET status='sent',attempts=attempts+1 WHERE id=?",(ident,))
+            with self.store.connect() as db:db.execute("UPDATE notifications SET status='sent',attempts=attempts+1 WHERE id=? AND status='queued'",(ident,))
             self.store.set('telegram_delivery',{'at':now,'ok':True,'message':'Notification delivered'})
         except DeliveryError as exc:
             if exc.retry_after:self.store.set('telegram_throttle',now+exc.retry_after)
             count=attempts+1; delay=max(exc.retry_after,min(1800,30*2**count))
-            with self.store.connect() as db:db.execute("UPDATE notifications SET status=?,attempts=?,available=? WHERE id=?",('failed' if count>=6 else 'queued',count,now+delay,ident))
+            with self.store.connect() as db:db.execute("UPDATE notifications SET status=?,attempts=?,available=? WHERE id=? AND status='queued'",('failed' if count>=6 else 'queued',count,now+delay,ident))
             self.store.set('telegram_delivery',{'at':now,'ok':False,'message':str(exc)})
 
     def run(self):

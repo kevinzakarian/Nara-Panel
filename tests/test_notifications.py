@@ -176,3 +176,75 @@ class TimeZoneAPITests(unittest.TestCase):
         self.assertEqual(status,400,data)
         self.assertEqual(self.store.get('state'),visible)
         self.assertIn('Asia/Tehran',self.request('/api/options')[1]['time_zones'])
+
+class NotificationSaveConcurrencyTests(unittest.TestCase):
+    setUp=TelegramAPITests.setUp;tearDown=TelegramAPITests.tearDown;request=TelegramAPITests.request;login=TelegramAPITests.login;web_path=''
+
+    def test_clear_then_select_all_remain_responsive_while_bot_delivery_is_blocked(self):
+        import time
+        self.login();all_events=[key for key in notifications.EVENTS if key!='test']
+        config={**notifications.settings(self.store),'enabled':True,'bot_token':TOKEN,'chat_id':'123456'}
+        def save(events):
+            status,data,_=self.request('/api/telegram',{'current':'test-password-123','settings':{**config,'events':events}})
+            self.assertEqual(status,200,data)
+            self.assertEqual(self.request('/api/telegram')[1]['events'],events)
+        save([]);save(all_events)
+        worker=notifications.Worker(self.store,self.runtime);worker.last_poll=time.time()
+        entered=threading.Event();release=threading.Event()
+        def slow_send(*args):
+            entered.set();release.wait(8)
+            raise notifications.DeliveryError('Fixture delivery unavailable')
+        with mock.patch('nara.notifications.send',side_effect=slow_send):
+            thread=threading.Thread(target=worker.run,daemon=True);thread.start()
+            try:
+                self.assertTrue(entered.wait(3),'No queued startup notification reached delivery')
+                start=time.monotonic();save([]);save(all_events)
+                self.assertLess(time.monotonic()-start,3)
+                self.assertEqual(self.request('/api/dashboard')[0],200)
+                self.assertTrue(thread.is_alive())
+            finally:
+                self.runtime.shutdown.set();self.store.notification_wakeup.set();release.set();thread.join(3)
+                self.assertFalse(thread.is_alive())
+
+class NotificationPreferenceTests(unittest.TestCase):
+    setUp=NotificationTests.setUp;tearDown=NotificationTests.tearDown;enable=NotificationTests.enable;rows=NotificationTests.rows
+
+    def test_clear_cancels_deselected_queue_atomically_and_select_all_does_not_replay_it(self):
+        self.enable();previous=notifications.settings(self.store)
+        notifications.enqueue(self.store,'login','Fixture');notifications.enqueue(self.store,'test','Fixture')
+        clear={**previous,'events':[]};notifications.save_settings(self.store,clear,previous)
+        self.assertEqual([(row[0],row[2]) for row in self.rows()],[('login','cancelled'),('test','queued')])
+        notifications.save_settings(self.store,previous,clear)
+        self.assertEqual(self.rows()[0][2],'cancelled')
+        self.assertEqual(notifications.settings(self.store)['events'],previous['events'])
+
+    def test_failed_save_rolls_back_preferences_and_does_not_wake_delivery(self):
+        import contextlib
+        self.enable();previous=notifications.settings(self.store);notifications.enqueue(self.store,'login','Fixture')
+        self.store.notification_wakeup.clear();connect=self.store.connect
+        @contextlib.contextmanager
+        def fail_cancellation():
+            with connect() as db:
+                class Broken:
+                    def execute(self,query,args=()):
+                        if query.startswith('UPDATE notifications'):raise OSError('Fixture failure')
+                        return db.execute(query,args)
+                yield Broken()
+        with mock.patch.object(self.store,'connect',fail_cancellation),self.assertRaises(OSError):
+            notifications.save_settings(self.store,{**previous,'events':[]},previous)
+        self.assertEqual(notifications.settings(self.store),previous)
+        self.assertEqual(self.rows()[0][2],'queued');self.assertFalse(self.store.notification_wakeup.is_set())
+
+    def test_failed_inflight_delivery_cannot_resurrect_a_cancelled_message(self):
+        self.enable(['login']);previous=notifications.settings(self.store);notifications.enqueue(self.store,'login','Fixture')
+        def fail_after_clear(*args):
+            notifications.save_settings(self.store,{**previous,'events':[]},previous)
+            raise notifications.DeliveryError('Fixture delivery failed')
+        with mock.patch('nara.notifications.send',side_effect=fail_after_clear):self.worker.deliver()
+        self.assertEqual(self.rows()[0][2],'cancelled')
+
+    def test_no_events_skip_health_and_client_scans_but_still_allow_an_explicit_test(self):
+        self.enable();previous=notifications.settings(self.store);notifications.save_settings(self.store,{**previous,'events':[]},previous)
+        with mock.patch.object(self.store,'totals',side_effect=AssertionError('Do not scan usage')):self.worker.poll()
+        self.assertTrue(notifications.enqueue(self.store,'test','Fixture'))
+        with mock.patch('nara.notifications.send') as send:self.worker.deliver();send.assert_called_once()
