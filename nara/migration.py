@@ -46,7 +46,9 @@ def address(data):
     try:host=ipaddress.ip_address(data.get('host',''))
     except ValueError:raise ValueError('Enter the destination IPv4 or IPv6 address') from None
     require(not (host.is_loopback or host.is_unspecified or host.is_multicast or host.is_link_local),'Choose a remote server address')
-    port=panel_port(data.get('ssh_port',22))
+    raw_port=str(data.get('ssh_port',22))
+    require(bool(re.fullmatch(r'[0-9]{1,5}',raw_port)) and 1<=int(raw_port)<=65535,'SSH port must be 1–65535')
+    port=int(raw_port)
     return str(host),port
 
 
@@ -94,10 +96,10 @@ def source_archive():
     return payload
 
 
-def bundle(store, config, source=None, database=None):
+def bundle(store, config, source=None, database=None, output_path=None):
     if database is not None:
         store=copy.copy(store);store.path=database
-    output=io.BytesIO()
+    output=io.BytesIO() if output_path is None else output_path.open('xb')
     with tarfile.open(fileobj=output,mode='w:gz') as archive:
         files={'source.tar.gz':source if source is not None else source_archive(), 'backup.json':json.dumps(portable.document(store)).encode(),
                'admin.json':json.dumps(store.get('admin')).encode(), 'destination.json':json.dumps(config).encode(),
@@ -108,7 +110,9 @@ def bundle(store, config, source=None, database=None):
         if database is not None:
             require(database.stat().st_size<=512*1024*1024,'Migration database exceeds 512 MiB; use a portable settings backup and retain the original statistics separately')
             archive.add(database,arcname='history.sqlite3',recursive=False)
-    return output.getvalue()
+    if output_path is None:return output.getvalue()
+    output.close();output_path.chmod(0o600)
+    return output_path
 
 
 class Manager:
@@ -154,7 +158,7 @@ class Manager:
                         source_db.backup(target_db)
                     database.chmod(0o600)
                     # Build settings and security from the same frozen database.
-                payload=bundle(self.store,config,source,database)
+                payload=bundle(self.store,config,source,database,directory/'payload.tar.gz')
                 database.unlink()
                 known=directory/'known_hosts'
                 known.write_text((config['host'] if config['ssh_port']==22 else '['+config['host']+']:'+str(config['ssh_port']))+' '+pin['algorithm']+' '+pin['key']+'\n');known.chmod(0o600)
@@ -175,12 +179,12 @@ class Manager:
                     arguments+=['-o','PreferredAuthentications=password,keyboard-interactive','-o','PubkeyAuthentication=no']
                 stage('Connecting to the pinned host; installing and verifying destination (up to 25 minutes)')
                 # The command is constant; destination data travels in stdin, never shell text.
-                with tempfile.TemporaryFile() as output:
-                    process=subprocess.Popen(arguments+['root@'+config['host'],REMOTE_COMMAND],stdin=subprocess.PIPE,stdout=output,stderr=output,env=env,start_new_session=True)
+                with tempfile.TemporaryFile() as output, payload.open('rb') as incoming:
+                    process=subprocess.Popen(arguments+['root@'+config['host'],REMOTE_COMMAND],stdin=incoming,stdout=output,stderr=output,env=env,start_new_session=True)
                     try:
-                        process.communicate(payload,timeout=1500)
+                        process.wait(timeout=1500)
                     except subprocess.TimeoutExpired:
-                        process.kill();process.communicate()
+                        process.kill();process.wait()
                         raise ValueError('SSH migration timed out. Check the destination /var/log/nara-migration.log before retrying') from None
                     output.seek(0);result=output.read(1_048_577)
                     require(process.returncode==0,'Destination setup did not complete (SSH status '+str(process.returncode)+'). Check SSH access and /var/log/nara-migration.log on the destination. Existing destination installations are never overwritten.')

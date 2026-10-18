@@ -233,7 +233,11 @@ function panelUpdateCard(){
  return `<section class="card section-gap"><div class="card-header"><h2>Panel updates</h2></div><div class="card-body"><p class="note">${accessSettings.managed?'Update this server directly. A private backup is created before the panel restarts. No SSH credentials are needed.':'Run the Linux installer once to enable one-click updates. Docker installations use their normal image update process.'}</p>${item?.available&&accessSettings.managed?btn('Update NARA to '+item.latest,'update-panel','download','primary',`data-id="${e(item.latest)}"`):`<span class="muted">${e(item?.error?'Update check unavailable':item?.available?'New panel version: '+item.latest:item?.known?'Panel is up to date':'Versions are checked when you enter the panel.')}</span>`}</div></section>`;
 }
 function updatePanel(version){
- return createPortableBackup('Confirm update to NARA '+version,async backup=>{await performPanelUpdate(version,backup.proof);});
+ return createPortableBackup('Confirm update to NARA '+e(version),async backup=>{
+  openModal('Backup ready · NARA '+e(version),'Finish saving the downloaded file before starting the update.',`<div class="hint-box"><b>${e(backup.filename)}</b><p>Server copy: <span class="mono">${e(backup.path)}</span></p><p>Full pre-update backup: <span class="mono">/var/backups/nara-panel/</span></p></div><label class="check-field section-gap"><input type="checkbox" name="backup_saved" required>I saved the private backup on my device.</label><p class="note">The panel may briefly disconnect while the verified release is installed. If this confirmation expires, prepare a fresh backup.</p>`,async form=>{
+   if(!form.elements.backup_saved.checked)throw Error('Save your backup before continuing.');await performPanelUpdate(version,backup.proof);
+  },'Confirm update');
+ });
 }
 async function performPanelUpdate(version,proof){
  const job=await api('update-panel',{version,confirmed:true,backup_proof:proof});accessChangePending=true;

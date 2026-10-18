@@ -411,6 +411,9 @@ class CoreTests(unittest.TestCase):
                 self.transfer(state)
                 self.assertGreater(self.store.totals()["user1"]["download"], before + 1000)
                 self.assertGreater(self.store.totals()["user1"]["upload"], 0)
+                with self.store.connect() as db:
+                    recorded=db.execute("SELECT SUM(download) FROM traffic_history WHERE kind='inbound' AND id='in1' AND step=3600").fetchone()[0]
+                self.assertGreater(recorded, before+1000)
                 self.runtime.stop()
 
     def test_new_standalone_protocols_transfer(self):

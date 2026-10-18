@@ -49,7 +49,8 @@ class Runtime:
 
     @property
     def running(self):
-        return self.process is not None and self.process.poll() is None
+        process = self.process
+        return process is not None and process.poll() is None
 
     def build_info(self):
         binary = shutil.which(self.binary)

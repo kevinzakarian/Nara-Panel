@@ -206,7 +206,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if path is None:
                 return self.send(404, {"error": "Not found"})
             if path == "/api/health":
-                return self.send(200, {"ok": True, "version": __version__})
+                return self.send(200, {"ok": True, "version": __version__, "core_running": runtime.running})
             if role == "subscription" and path.startswith("/") and path.count("/") == 1 and len(path) > 1:
                 token = path[1:]
                 if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
@@ -382,7 +382,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     store.set('prepared_update_backup',{'proof':proof,'session':hashlib.sha256(self.cookie_token().encode()).hexdigest(),'expires':time.time()+900,'filename':result['filename']})
                     return self.send(200,{**result,'proof':proof})
                 if path=='/api/backup/restore':
-                    return self.send(200,portable.restore(store,runtime,data.get('backup')))
+                    return self.send(200,portable.restore(store,runtime,data.get('backup'),data.get('server_address')))
                 current='http://'+self.headers.get('Host','')+base_path+'/'
                 return self.send(200,{'csv':client_links.export(store,access,current,data.get('ids'))})
             if path=='/api/backup/preview':

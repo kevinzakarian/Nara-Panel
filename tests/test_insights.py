@@ -52,6 +52,12 @@ class InsightsTests(unittest.TestCase):
         self.assertEqual(traffic.summary(self.store,jan+5)['cycle']['used'],100)
         self.sample(210,310,jan+15)
         self.assertEqual(traffic.summary(self.store,jan+15)['cycle']['used'],10)
+    def test_downtime_across_a_billing_boundary_is_not_all_attributed_to_the_new_month(self):
+        jan=dt.datetime(2026,1,31,23,tzinfo=dt.timezone.utc).timestamp()
+        self.sample(100,100,jan);self.sample(1000,2000,jan+7200)
+        info=traffic.summary(self.store,jan+7200)
+        self.assertEqual(info['cycle']['used'],0)
+        self.assertEqual(info['total'],{'upload':900,'download':1900})
     def test_rollups_not_affected_by_quota_resets_and_queries_bounded(self):
         self.store.add_traffic([('u','upload',100),('u','download',200)],[('i','download',200)])
         self.store.commit_configuration(self.store.get('state'),reset_client='u')
@@ -86,6 +92,14 @@ class InsightsTests(unittest.TestCase):
         data=client_links.export(self.store,Access(self.store.directory,{'NARA_SUB_PATH':'/Links','NARA_SUB_PORT':'10001'}),'http://panel.example/Panel/')
         rows=list(csv.reader(io.StringIO(data)));self.assertEqual(len(rows),2);self.assertEqual(len(rows[1]),6)
         self.assertTrue(rows[1][0].startswith("'="));self.assertIn('sing-box://import-remote-profile?',rows[1][1]);self.assertIn('http://panel.example:10001/Links/',rows[1][2]);self.assertIn('vless://',rows[1][3])
+    def test_csv_includes_exhausted_disabled_and_unassigned_accounts(self):
+        state=example_state();state['clients'][0].update(enabled=False,quota_bytes=1,expires_at='2020-01-01T00:00:00Z');self.store.set('state',state)
+        self.store.add_traffic([('user1','upload',999)])
+        rows=list(csv.reader(io.StringIO(client_links.export(self.store,Access(self.store.directory,{}),'http://panel.example/'))))
+        self.assertIn('vless://',rows[1][3]);self.assertFalse(self.store.get('state')['clients'][0]['enabled'])
+        state['clients'][0]['inbound_ids']=[];self.store.set('state',state)
+        rows=list(csv.reader(io.StringIO(client_links.export(self.store,Access(self.store.directory,{}),'http://panel.example/'))))
+        self.assertEqual(rows[1][3],'')
     def test_hysteria_links_preserve_obfuscation_tls_and_ipv6(self):
         state=example_state('hysteria2');state['settings']['server_address']='2001:db8::9'
         state['inbounds'][0]['server_options']={'obfs':{'type':'salamander','password':'x & y'}}
@@ -98,6 +112,12 @@ class InsightsTests(unittest.TestCase):
         self.assertEqual(migration.destination(base)['panel_port'],10000)
         for update in ({'host':'127.0.0.1'},{'host':'x;id'},{'panel_domain':'example.com;id'},{'web_path':'/x/y'},{'panel_port':443},{'subscription_domain':'sub.example.com'}):
             with self.assertRaises(ValueError):migration.destination({**base,**update})
+    def test_separate_https_subscription_domain_uses_its_own_proxy_site(self):
+        from nara.maintenance import proxy_config
+        config={'NARA_PORT':'10000','NARA_WEB_PATH':'/Panel','NARA_SUB_PORT':'10001','NARA_SUB_PATH':'/Sub','NARA_PUBLIC_SUB_HOST':'sub.example.com','NARA_PUBLIC_PANEL_PORT':'443','NARA_PUBLIC_SUB_PORT':'8443'}
+        value=proxy_config('panel.example.com',config,'automatic',Path('/private/certs'))
+        self.assertIn('https://panel.example.com {',value);self.assertIn('https://sub.example.com:8443 {',value)
+        self.assertIn('reverse_proxy 127.0.0.1:10001',value)
     def test_migration_probe_does_not_authenticate_and_returns_sha256_pin(self):
         import base64
         key=base64.b64encode(b'fixture-key').decode()

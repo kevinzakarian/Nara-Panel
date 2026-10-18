@@ -9,7 +9,12 @@ from .config import client_config, expiry, require
 
 
 def links(state, client, totals):
-    config = client_config(state, client, totals)
+    if not state['settings'].get('server_address') or not any(row.get('mode')!='native' and row.get('enabled',True) and row['id'] in client.get('inbound_ids',[]) for row in state['inbounds']):
+        return []
+    # Administrators may export disabled, expired or exhausted accounts. Generating
+    # a share link never re-enables the account or bypasses subscription eligibility.
+    candidate={**client,'enabled':True,'expires_at':'','quota_bytes':0}
+    config = client_config(state, candidate, {})
     result = []
     for item in config['outbounds']:
         protocol = item['type']

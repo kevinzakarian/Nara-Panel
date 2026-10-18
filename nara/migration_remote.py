@@ -10,6 +10,7 @@ import socket
 import shutil
 import subprocess
 import sys
+import time
 
 
 def main(directory):
@@ -90,10 +91,18 @@ with contextlib.closing(sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True)
         if process.returncode:raise ValueError('Destination core validation or restore failed')
         run(['systemctl','start','nara-panel'])
         from nara.maintenance import Layout,panel_health,subscription_health,configure_https
-        paths=Layout();health=panel_health(paths);subscription_health(paths)
+        paths=Layout()
+        def ready_core():
+            deadline=time.monotonic()+30
+            while time.monotonic()<deadline:
+                health=panel_health(paths,timeout=2)
+                if health.get('core_running') is True:return health
+                time.sleep(.25)
+            raise ValueError('Destination core did not become ready after service restart')
+        health=ready_core();subscription_health(paths)
         if config['https']:
             configure_https(paths,'automatic',host=config['panel_host'],subscription_host=config['sub_host'],ports={'NARA_PUBLIC_PANEL_PORT':'443','NARA_PUBLIC_SUB_PORT':'8443'})
-            health=panel_health(paths);subscription_health(paths)
+            health=ready_core();subscription_health(paths)
         result={'version':health['version'],'url':public_url(config['panel_host'],443 if config['https'] else config['panel_port'],config['web_path'],'https' if config['https'] else 'http'),
                 'subscription_url':public_url(config['sub_host'],8443 if config['https'] else config['subscription_port'],config['sub_path'],'https' if config['https'] else 'http'), 'snapshot_at':backup['created_at']}
     print('NARA_MIGRATION_READY '+json.dumps(result),flush=True)

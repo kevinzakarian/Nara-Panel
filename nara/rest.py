@@ -189,11 +189,7 @@ class API:
                     live=next((row for row in (active or {}).get('clients',[]) if row['id']==client['id']),None)
                     if not live:raise Fault(409,'not_active','Client configuration is not active')
                     return 200,{'data':client_config(active,live,self.store.totals()),'revision':state['revision']}
-                info=self.access.info();base=state['settings'].get('subscription_url','').strip()
-                if not base:
-                    host=state['settings'].get('server_address') or urlsplit('//'+self.h.headers.get('Host','')).hostname
-                    host='['+host+']' if ':' in host else host
-                    base=info.get('subscription_scheme','http')+'://'+host+':'+str(info['subscription_port'])+info['sub_path']+'/'
+                base=client_links.subscription_base(state,self.access,'http://'+self.h.headers.get('Host','')+'/')
                 return 200,{'data':{'url':base.rstrip('/')+'/'+client['token'],'active':eligible(client,self.store.totals())},'revision':state['revision']}
         for resource,collection in sorted(RESOURCES.items(),key=lambda item:-len(item[0])):
             if path!=resource and not path.startswith(resource+'/'):continue

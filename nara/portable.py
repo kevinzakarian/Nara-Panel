@@ -6,7 +6,7 @@ from pathlib import Path
 import secrets
 import time
 from . import __version__, notifications, traffic
-from .config import require, validate
+from .config import require, validate, host
 from .runtime import atomic_write
 
 MAX_BYTES = 12*1024*1024
@@ -81,9 +81,12 @@ def preview(store, value):
             'note': 'Replaces proxy settings and client quota counters. Telegram delivery is disabled until reviewed. Historical charts are not included.'}
 
 
-def restore(store, runtime, value):
+def restore(store, runtime, value, server_address=None):
     with runtime.lock:
         state, totals, conf, telegram = prepare(value, store.get('state'))
+        if server_address is not None:
+            host(server_address)
+            state['settings']['server_address']=server_address
         # Core validation precedes the backup and every mutation.
         staging, _ = runtime.prepare(state, totals)
         import shutil

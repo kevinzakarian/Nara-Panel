@@ -105,10 +105,12 @@ def sample_host(store, now=None, counters=None):
         # First sample and changed interfaces/reboots establish a baseline, never invent downtime traffic.
         total = {key: saved.get('total', {}).get(key, 0) + deltas[key] for key in deltas}
         cycle = saved.get('cycle', {})
-        if cycle.get('start') != beginning:
+        rollover=cycle.get('start') != beginning
+        boundary_gap=rollover and now-saved.get('at',now)>30
+        if rollover:
             cycle = {'start': beginning, 'end': ending, 'since': now, 'upload': 0, 'download': 0}
         for key in deltas:
-            cycle[key] += deltas[key]
+            if not boundary_gap:cycle[key] += deltas[key]
         prune_at=saved.get('pruned_at',0)
         elapsed = now - saved.get('at', now)
         rates = {key: deltas[key] / elapsed if comparable and 0 < elapsed <= 30 else None for key in deltas}
@@ -176,10 +178,13 @@ def history(store, kind, ident, window, now=None):
         else:
             start = now-90*86400; step = 86400
     start = int(start)//step*step if window in ('6h','24h','3months') else int(start)
+    recorded=store.get('traffic_history_since')
+    requested_start=start
+    if recorded is not None:start=max(start,int(recorded)//step*step)
     with store.connect() as db:
         rows = db.execute('SELECT ((at - ?) / ?) * ? + ?,SUM(upload),SUM(download) FROM traffic_history WHERE kind=? AND id=? AND step=? AND at>=? AND at<=? GROUP BY 1 ORDER BY 1',
                           (start, step, step, start, kind, ident, source, start, now)).fetchall()
     mapped = {row[0]: row[1:] for row in rows}
     return {'kind': kind, 'id': ident, 'range': window, 'step': step, 'start': start, 'end': now,
             'points': [{'at': at, 'upload': mapped.get(at, (0, 0))[0], 'download': mapped.get(at, (0, 0))[1]} for at in range(start, int(now)+1, step)],
-            'recording_since': store.get('traffic_history_since')}
+            'recording_since': recorded, 'requested_start': requested_start}
