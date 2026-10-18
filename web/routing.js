@@ -2,7 +2,7 @@
 // Task-oriented routing UI. Native records remain the source of truth.
 const routeList=value=>value===undefined?[]:Array.isArray(value)?value:[value];
 const routeLines=value=>[...new Set(String(value||'').split(/[\n,]+/).map(x=>x.trim()).filter(Boolean))];
-const routeNames={domain:'Exact domain',domain_suffix:'Domain suffix',domain_keyword:'Domain keyword',domain_regex:'Domain pattern',ip_cidr:'Destination IP',source_ip_cidr:'Source IP',port:'Destination port',port_range:'Port range',inbound:'Inbound',network:'Network',rule_set:'Rule set',protocol:'Detected protocol',auth_user:'Authenticated user',ip_is_private:'Private destination',source_ip_is_private:'Private source'};
+const routeNames={domain:'Exact domain',domain_suffix:'Domain suffix',domain_keyword:'Domain keyword',domain_regex:'Domain pattern',ip_cidr:'Destination IP',source_ip_cidr:'Source IP',port:'Destination port',port_range:'Port range',inbound:'Inbound',network:'Network',rule_set:'Rule set',protocol:'Detected protocol',auth_user:'Authenticated account',ip_is_private:'Private destination',source_ip_is_private:'Private source'};
 const routeActions={route:['Route traffic','Send through a destination'],reject:['Block traffic','Reject matching connections'],'hijack-dns':['Handle DNS','Use this server’s DNS rules'],sniff:['Detect protocol','Inspect, then continue to the next rule'],resolve:['Resolve domain','Look up the IP, then continue to the next rule']};
 function routeTag(row){return row.config?.tag||row.tag||'';}
 function routeDestinations(){return [...new Set(['direct',...[...(state.outbounds||[]),...(state.endpoints||[])].filter(x=>x.enabled!==false).map(routeTag).filter(Boolean)])];}
@@ -11,13 +11,14 @@ function routeChoices(name,choices,value,cls=''){return `<div class="route-choic
 function routeChecks(name,values,selected){return `<div class="route-checks">${values.map(([value,label])=>`<label><input type="checkbox" name="${name}" value="${e(value)}" ${checked(routeList(selected).includes(value))}>${e(label)}</label>`).join('')}</div>`;}
 function routeSection(number,title,help,body){return `<section class="route-form-section"><div class="route-section-title"><span>${number}</span><div><h3>${title}</h3>${help?`<p>${help}</p>`:''}</div></div>${body}</section>`;}
 function routeBrief(value){const text=value&&typeof value==='object'&&!Array.isArray(value)?JSON.stringify(value):routeList(value).slice(0,3).join(', ')+(routeList(value).length>3?' +'+(routeList(value).length-3):'');return text.length>220?text.slice(0,220)+'…':text;}
+function ruleMatchBrief(key,value){return routeBrief(key==='auth_user'?routeList(value).map(identity=>(state.clients||[]).find(client=>'client-'+client.id===identity)?.name||identity):value);}
 function routeMatchEntries(c){
  const actionFields=CoreSchema.choose(CoreSchema.byName('RuleAction'),{...c,action:c.action||'route'}).properties||{};
  return Object.entries(c).filter(([key])=>!['type','invert'].includes(key)&&!Object.hasOwn(actionFields,key));
 }
 function routeMatchSummary(c,depth=0){
  if(c.type==='logical'){const rules=routeList(c.rules);return `${c.invert?'NOT ':''}${depth>2?(c.mode||'and').toUpperCase()+' group · '+rules.length+' conditions':'('+rules.map(rule=>routeMatchSummary(rule,depth+1)).join(' '+(c.mode||'and').toUpperCase()+' ')+')'}`;}
- const parts=routeMatchEntries(c).map(([k,v])=>`${routeNames[k]||CoreSchema.title(k)}: ${routeBrief(v)}`);
+ const parts=routeMatchEntries(c).map(([k,v])=>`${routeNames[k]||CoreSchema.title(k)}: ${ruleMatchBrief(k,v)}`);
  return (c.invert?'Except · ':'')+(parts.join(' · ')||'All traffic');
 }
 function routeActionSummary(c){return c.action==='route'||!c.action?'Route → '+routeDestinationName(c.outbound||'(selected by core)'):routeActions[c.action]?.[0]||CoreSchema.title(c.action);}
@@ -85,7 +86,7 @@ function mountRuleMatchExtras(form,c,dns=false){
   lastCombined=combined;
  }
  sync();form.addEventListener('change',sync);
- const search=$('#match-client-search',form);search.addEventListener('input',()=>{const needle=search.value.trim().toLowerCase();for(const row of $$('label',search.closest('fieldset').querySelector('.route-checks')))row.hidden=!row.textContent.toLowerCase().includes(needle);});
+ const search=$('#match-client-search',form);search.addEventListener('input',()=>{const needle=search.value.trim().toLowerCase(),list=search.closest('fieldset').querySelector('.route-checks');if(list)for(const row of $$('label',list))row.hidden=!row.textContent.toLowerCase().includes(needle);});
  form.ruleMatches=()=>{const extra=Object.assign({},...editors.map(editor=>editor.value())),auth=[...new Set([...new FormData(form).getAll('scope_client'),...routeLines(form.elements.scope_auth_other.value)])];if(auth.length)extra.auth_user=auth;return extra;};
  return editors;
 }
