@@ -4,7 +4,6 @@ import hmac
 import ipaddress
 import json
 import mimetypes
-import os
 import re
 import secrets
 import ssl
@@ -23,7 +22,7 @@ from .config import COLLECTIONS, build_config, client_config, eligible, host, no
 from . import native, warp, security, clients, notifications, accounts, api_keys, rest
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
-from .store import password_hash, password_matches
+from .store import password_matches
 from .install_config import normalize_web_path
 
 

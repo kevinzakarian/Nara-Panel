@@ -4,7 +4,6 @@ import json
 import os
 import re
 import signal
-import sys
 from .store import Store, password_hash
 from .runtime import Runtime
 from .server import serve

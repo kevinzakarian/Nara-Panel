@@ -1,6 +1,5 @@
 """Versioned automation API, sharing the browser's validation/apply transaction."""
 import copy
-import json
 import re
 import time
 import uuid

@@ -206,7 +206,6 @@ def proxy_config(host, config, mode, generation, legacy=False):
 
 
 def ask_https_ports(config, owned=()):
-    from .access import validate
     reserved = {80, int(config['NARA_PORT']), int(config.get('NARA_SUB_PORT', 10001)), int(config.get('NARA_STATS_PORT', 10085))}
     ports = {}
     for key, label, default in [('NARA_PUBLIC_PANEL_PORT', 'HTTPS panel port', 443), ('NARA_PUBLIC_SUB_PORT', 'HTTPS subscription port', 8443)]:
