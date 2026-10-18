@@ -353,6 +353,42 @@ class CoreTests(unittest.TestCase):
             self.assertEqual(self.query_client_dns(port,names[index])[-4:],socket.inet_aton(address))
             process.terminate();process.wait(timeout=5)
 
+    def test_multiple_inbounds_and_clients_route_through_selected_gateway_and_dns(self):
+        from nara import stats
+        from nara.clients import new_client
+        gateway_port,gateway_stats=free_port(),free_port()
+        gateway=self.start_client({'log':{'level':'warn'},'inbounds':[{'type':'mixed','tag':'gateway','listen':'127.0.0.1','listen_port':gateway_port}],
+            'outbounds':[{'type':'direct','tag':'direct'}],'route':{'final':'direct'},
+            'experimental':{'v2ray_api':{'listen':'127.0.0.1:'+str(gateway_stats),'stats':{'enabled':True,'inbounds':['gateway']}}}})
+        state=example_state('vless',self.profile);state['settings']['block_private']=False
+        second=copy.deepcopy(state['inbounds'][0]);second.update(id='in2',tag='second-in',port=free_port());state['inbounds'].append(second)
+        state['clients'][0]['inbound_ids']=['in1','in2']
+        state['clients'] += [new_client({'name':name,'inbound_ids':['in1','in2']}) for name in ('Selected second','Unselected third')]
+        selected=['client-'+client['id'] for client in state['clients'][:2]]
+        state['outbounds']=[{'id':'gateway','mode':'native','tag':'alternate','config':{'type':'socks','tag':'alternate','server':'127.0.0.1','server_port':gateway_port,'version':'5'}}]
+        state['route_rules']=[{'id':'source-route','mode':'native','config':{'inbound':['proxy-in','second-in'],'auth_user':selected,'action':'route','outbound':'alternate'}}]
+        names=['source-'+str(index)+'.nara.test' for index in range(4)]
+        state['dns_servers']=[{'id':key,'mode':'native','tag':key,'config':{'type':'hosts','tag':key,'predefined':{name:[ip] for name in names}}} for key,ip in [('selected','192.0.2.11'),('fallback','192.0.2.22')]]
+        state['settings']['dns_final']='fallback'
+        state['dns_rules']=[{'id':'source-dns','mode':'native','config':{'inbound':['proxy-in','second-in'],'auth_user':selected,'action':'route','server':'selected'}}]
+        self.runtime.apply(state)
+        for index,(client_index,inbound_index) in enumerate(((0,0),(0,1),(1,1),(2,0))):
+            profile=copy.deepcopy(state);profile['clients']=[state['clients'][client_index]]
+            if inbound_index:profile['inbounds'].reverse()
+            before=sum(stats.query(gateway_stats).values())
+            port,config=self.local_client(profile,fixture_dns=False);process=self.start_client(config)
+            expected='192.0.2.11' if client_index<2 else '192.0.2.22'
+            self.assertEqual(self.query_client_dns(port,names[index])[-4:],socket.inet_aton(expected))
+            connection=http.client.HTTPConnection('127.0.0.1',port,timeout=8)
+            try:
+                connection.request('GET','http://127.0.0.1:'+str(self.target.server_port)+'/')
+                response=connection.getresponse();self.assertEqual(response.status,200);self.assertIn(b'NARA traffic accounting test.',response.read())
+            finally:connection.close();process.terminate();process.wait(timeout=5)
+            after=sum(stats.query(gateway_stats).values())
+            if client_index<2:self.assertGreater(after,before)
+            else:self.assertEqual(after,before)
+        self.assertIsNone(gateway.poll())
+
     def test_traffic_rule_matches_authenticated_account_independently_of_display_name(self):
         from nara.clients import new_client
         state=example_state('vless',self.profile);state['settings']['block_private']=False

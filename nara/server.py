@@ -245,8 +245,9 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 if not action:return self.send(200,(web_dir/'client-portal.html').read_bytes(),'text/html; charset=utf-8')
                 if action=='api':
                     current='http://'+self.headers.get('Host','')+base_path+'/'
-                    result=client_portal.data(model,access,current,client,store.totals())
+                    result=client_portal.data(model,access,current,client,runtime.traffic_totals(refresh=True))
                     result['bot_enabled']=bool((store.get('client_delivery') or {}).get('bot_enabled'))
+                    result['telegram_connected']=bool(client_delivery.binding(store,client))
                     return self.send(200,result)
                 return self.send(404,{'error':'Not found'})
             if role == "subscription" and path.startswith("/") and path.count("/") == 1 and len(path) > 1:
@@ -423,9 +424,14 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     accounts.verify(store,store.get('admin'),data,self.cookie_token())
                 return self.send(200, migration.probe(store,data) if path.endswith('/probe') else migrations.start(data))
             if path == '/api/traffic/settings':
-                value=traffic.validate(data.get('settings'))
-                store.set('traffic_settings', value)
-                store.audit('Server traffic and alert policy saved')
+                with runtime.lock:
+                    value=traffic.validate(data.get('settings'))
+                    scope=data.get('scope','all');require(scope in ('all','alerts','allowance'),'Invalid traffic settings scope')
+                    if scope!='all':
+                        billing={'monthly_bytes','reset_day','interface','count'}
+                        value={**traffic.settings(store),**{key:val for key,val in value.items() if (key in billing)==(scope=='allowance')}}
+                    store.set('traffic_settings', value)
+                    store.audit('Server traffic and alert policy saved')
                 return self.send(200, {'ok':True})
             if path == '/api/traffic/reset':
                 with runtime.lock:
@@ -554,6 +560,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             with runtime.lock:
                 state = store.get("state")
                 reset_client = None
+                traffic_settings = traffic.validate(data["traffic_settings"]) if path == "/api/settings" and "traffic_settings" in data else None
+                if traffic_settings is not None:traffic_settings={**traffic.settings(store),**{key:traffic_settings[key] for key in ("monthly_bytes","reset_day","interface","count")}}
                 created, affected, row = [], [], None
                 if path in ("/api/save", "/api/delete", "/api/self-signed", "/api/settings", "/api/core-options", "/api/reset-traffic", "/api/rotate-token", "/api/apply", "/api/reorder-rules", "/api/clients-bulk-create", "/api/clients-bulk-action"):
                     require(data.get("revision") == state["revision"], "Settings changed in another request; refresh the page")
@@ -676,6 +684,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 validate(state)
                 state["revision"] += 1
                 result = runtime.apply(state, save=True, reset_client=reset_client)
+                if traffic_settings is not None:store.set("traffic_settings",traffic_settings)
                 if path in ('/api/clients-bulk-create', '/api/clients-bulk-action') and data.get('preview_id'):
                     with store.connect() as db: db.execute('DELETE FROM kv WHERE key=?', ('bulk-preview:' + data['preview_id'],))
                 store.audit("Settings saved and applied: " + path.split("/")[-1] + (" · API key: " + self.api_actor if hasattr(self, "api_actor") else ""))

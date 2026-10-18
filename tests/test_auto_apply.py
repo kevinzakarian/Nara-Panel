@@ -33,6 +33,17 @@ class AutoApplyTests(unittest.TestCase):
         self.runtime.apply(state, save=True)
         return state
 
+    def test_unified_settings_validate_traffic_before_saving_any_preferences(self):
+        from nara import traffic
+        state=self.seed();policy={**traffic.DEFAULTS,'monthly_bytes':2048*1024**3,'reset_day':18}
+        changed={**state['settings'],'time_zone':'Asia/Tehran'}
+        result=self.request('/api/settings',{'revision':state['revision'],'settings':changed,'traffic_settings':{**policy,'cpu_percent':101}})
+        self.assertEqual(result[0],400);self.assertEqual(self.store.get('state'),state);self.assertEqual(traffic.settings(self.store),traffic.DEFAULTS)
+        result=self.request('/api/settings',{'revision':state['revision'],'settings':changed,'traffic_settings':policy})
+        self.assertEqual(result[0],200,result[1]);self.assertEqual(self.store.get('state')['settings'],changed);self.assertEqual(traffic.settings(self.store),policy);self.assertTrue(self.runtime.running)
+        result=self.request('/api/traffic/settings',{'settings':{**traffic.DEFAULTS,'cpu_percent':85},'scope':'alerts'})
+        self.assertEqual(result[0],200);self.assertEqual(traffic.settings(self.store)['monthly_bytes'],policy['monthly_bytes']);self.assertEqual(traffic.settings(self.store)['reset_day'],18);self.assertEqual(traffic.settings(self.store)['cpu_percent'],85)
+
     def test_complete_dns_and_routing_save_without_apply_and_invalid_route_rolls_back(self):
         state = self.seed()
         result = self.request('/api/core-options', {'revision': state['revision'], 'section': 'dns',

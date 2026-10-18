@@ -80,7 +80,10 @@ def run_installer(source, output):
 def apply(paths, job):
     if set(job) != {'id','operation','version','created_at'} or job['operation'] != 'update-panel':
         raise ValueError("Invalid panel update request")
+    from .access import write_result
+    def progress(percent, stage):write_result(paths,{'id':job['id'],'status':'running','progress':percent,'stage':stage})
     release = target(job['version'])
+    progress(10,'Checking the published release')
     metadata = json.loads(download('https://api.github.com/repos/' + REPOSITORY + '/releases/tags/v' + release, 2_000_000))
     if metadata.get('tag_name') != 'v' + release or metadata.get('draft') or metadata.get('prerelease'):
         raise ValueError("A published stable release is required")
@@ -90,9 +93,11 @@ def apply(paths, job):
     digest = next((line.split()[0] for line in checksums.splitlines() if len(line.split()) == 2 and line.split()[1] == name), '')
     if not re.fullmatch('[a-fA-F0-9]{64}', digest):
         raise ValueError("Panel release checksum is missing")
+    progress(25,'Downloading the panel release')
     payload = download(base + name, 30_000_000)
     if hashlib.sha256(payload).hexdigest() != digest.lower():
         raise ValueError("Panel release checksum verification failed")
+    progress(40,'Verifying and extracting the release')
     with tempfile.TemporaryDirectory(prefix='nara-panel-update-') as temp:
         source = unpack(payload, Path(temp))
         if json.loads((source / 'release.json').read_text()).get('version') != release:
@@ -108,11 +113,14 @@ def apply(paths, job):
         os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, 'a') as output:
             try:
+                progress(55,'Creating the private server backup')
                 backup(paths)
             except Exception:
                 traceback.print_exc(file=output)
                 raise ValueError('Private backup failed; no update was installed. Review /var/log/nara-panel-update.log') from None
+            progress(70,'Installing the release and restarting the panel')
             run_installer(source, output)
+        progress(90,'Checking the updated panel health')
         if panel_health(paths).get('version') != release:
             raise ValueError("Updated panel did not report the expected version; review the private server update log")
     return {'version':release, 'backup_created':True}

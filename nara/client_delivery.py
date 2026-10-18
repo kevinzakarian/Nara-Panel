@@ -114,7 +114,10 @@ def test_smtp(store):
 
 def amount(value):
     if value is None:return 'Unlimited'
-    return f'{value/1024**3:.2f} GiB'
+    if not value:return '0 B'
+    units=('B','KiB','MiB','GiB','TiB','PiB');index=0
+    while value>=1024 and index<len(units)-1:value/=1024;index+=1
+    return (f'{value:.3f}'.rstrip('0').rstrip('.') if index else str(int(value)))+' '+units[index]
 
 
 def duration(seconds):
@@ -235,12 +238,33 @@ class Worker:
     def __init__(self,store,runtime,access):
         self.store,self.runtime,self.access=store,runtime,access
         self.last_poll=0;self.poll_wait=10;self.chat_times={}
+        self.sync_contacts()
+
+    def sync_contacts(self):
+        # Also repairs contacts for accounts paired before this version.
+        with self.runtime.lock:
+            state=self.store.get('state');fingerprint=bot_hash(self.store)
+            with self.store.connect() as db:
+                bindings={row[0]:(row[1],row[2]) for row in db.execute('SELECT client_id,chat_id,capability FROM client_bot_bindings WHERE bot_hash=?',(fingerprint,))}
+                changed={client['id']:bindings[client['id']][0] for client in state['clients'] if client['id'] in bindings and secrets.compare_digest(bindings[client['id']][1],client_portal.token(client)) and client.get('telegram_id')!=bindings[client['id']][0]}
+                if not changed:return
+                previous=state['revision'];state['revision']+=1
+                for client in state['clients']:
+                    if client['id'] in changed:client['telegram_id']=changed[client['id']]
+                db.execute("UPDATE kv SET value=? WHERE key='state'",(json.dumps(state),))
+                active=self.store.get('active')
+                if active:
+                    for client in active['clients']:
+                        if client['id'] in changed:client['telegram_id']=changed[client['id']]
+                    if active['revision']==previous:active['revision']=state['revision']
+                    db.execute("UPDATE kv SET value=? WHERE key='active'",(json.dumps(active),))
+            if active:self.runtime.active=active
 
     def model(self,state,client,totals=None):
         # Public connection URLs come only from saved access settings, never a bot message.
         info=self.access.info();address=(info.get('public_host') or state['settings'].get('server_address') or 'localhost').strip('[]')
         current='http://'+('['+address+']' if ':' in address else address)+'/'
-        return client_portal.data(state,self.access,current,client,self.store.totals() if totals is None else totals)
+        return client_portal.data(state,self.access,current,client,self.runtime.traffic_totals(refresh=True) if totals is None else totals)
 
     def process_update(self,update):
         message=update.get('message',{}) if isinstance(update,dict) else {};chat=message.get('chat',{});sender=message.get('from',{})
@@ -259,7 +283,8 @@ class Worker:
         command,_,argument=text.strip().partition(' ');command=command.split('@',1)[0];argument=argument.strip()
         reply='Open your private NARA service page and choose Connect Telegram, then press Start. After pairing, use /status, /links or /unlink. A username alone cannot grant account access.'
         if command=='/start' and re.fullmatch(r'[A-Za-z0-9_-]{43}',argument):
-            with self.store.connect() as db:
+            with self.runtime.lock, self.store.connect() as db:
+                state=self.store.get('state')
                 nonce=hashlib.sha256(argument.encode()).hexdigest()
                 row=db.execute('SELECT client_id,capability,bot_hash FROM client_bot_pairs WHERE token_hash=? AND expires>?',(nonce,now)).fetchone()
                 client=next((c for c in state['clients'] if row and c['id']==row[0]),None)
@@ -268,6 +293,17 @@ class Worker:
                     deleted=db.execute('DELETE FROM client_bot_pairs WHERE token_hash=?',(nonce,)).rowcount
                     if deleted:
                         db.execute('INSERT OR REPLACE INTO client_bot_bindings VALUES(?,?,?,?,?)',(client['id'],chat_id,row[2],row[1],now))
+                        # Verified Telegram sender ID is contact metadata, never an auth credential.
+                        previous_revision=state['revision'];client['telegram_id']=chat_id;state['revision']+=1
+                        db.execute("UPDATE kv SET value=? WHERE key='state'",(json.dumps(state),))
+                        active_row=db.execute("SELECT value FROM kv WHERE key='active'").fetchone()
+                        active=json.loads(active_row[0]) if active_row else None
+                        if active:
+                            for item in active['clients']:
+                                if item['id']==client['id']:item['telegram_id']=chat_id
+                            if active['revision']==previous_revision:active['revision']=state['revision']
+                            db.execute("UPDATE kv SET value=? WHERE key='active'",(json.dumps(active),))
+                            self.runtime.active=active
                         reply='✅ Your service is connected. Use /status for traffic and time, /links for connection access, or /unlink to disconnect this chat.'
         else:
             with self.store.connect() as db:records={row[0]:row[1] for row in db.execute('SELECT client_id,capability FROM client_bot_bindings WHERE chat_id=? AND bot_hash=?',(chat_id,bot_hash(self.store)))}
@@ -279,7 +315,7 @@ class Worker:
             elif command in ('/status','/links') or not text.startswith('/'):
                 if not text.startswith('/'):owned=[client for client in owned if client['name']==text.strip()]
                 if owned:
-                    totals=self.store.totals();models=[self.model(state,client,totals) for client in owned[:5]]
+                    totals=self.runtime.traffic_totals(refresh=True);models=[self.model(state,client,totals) for client in owned[:5]]
                     parts=[]
                     for model in models:
                         part=service_text(model,command=='/links')

@@ -81,6 +81,36 @@ class ClientAccessTests(unittest.TestCase):
             self.worker.chat_times.clear();self.worker.process_update(self.update('/status'));self.assertIn('Traffic used:',send.call_args.args[2])
             self.worker.chat_times.clear();self.worker.process_update(self.update(self.client['name']));self.assertIn('Traffic remaining:',send.call_args.args[2])
             self.client['token']=secrets.token_urlsafe(32);self.store.set('state',self.state);self.assertIsNone(delivery.binding(self.store,self.client))
+    def test_pairing_records_verified_numeric_contact_without_restarting_core(self):
+        self.enable();self.store.set('active',self.state);self.runtime.active=copy.deepcopy(self.state)
+        nonce=delivery.pair(self.store,self.client)['url'].split('start=')[1]
+        with mock.patch.object(delivery.notifications,'send'),mock.patch.object(self.runtime,'apply') as apply:
+            self.worker.process_update(self.update('/start '+nonce))
+        saved=self.store.get('state');self.assertEqual(saved['clients'][0]['telegram_id'],'123');self.assertEqual(saved['revision'],self.state['revision']+1)
+        self.assertEqual(self.store.get('active')['clients'][0]['telegram_id'],'123');self.assertEqual(self.runtime.active['revision'],saved['revision']);apply.assert_not_called()
+        self.worker.chat_times.clear()
+        with mock.patch.object(delivery.notifications,'send'):self.worker.process_update(self.update('/start '+nonce,456))
+        self.assertEqual(self.store.get('state')['clients'][0]['telegram_id'],'123')
+
+    def test_existing_valid_bindings_backfill_contacts_but_rotated_capabilities_do_not(self):
+        self.enable()
+        with self.store.connect() as db:db.execute('INSERT INTO client_bot_bindings VALUES(?,?,?,?,?)',(self.client['id'],'123',delivery.bot_hash(self.store),portal.token(self.client),time.time()))
+        self.worker.sync_contacts();self.assertEqual(self.store.get('state')['clients'][0]['telegram_id'],'123')
+        state=self.store.get('state');state['clients'][0].update(token=secrets.token_urlsafe(32),telegram_id='@changed');self.store.set('state',state)
+        self.worker.sync_contacts();self.assertEqual(self.store.get('state')['clients'][0]['telegram_id'],'@changed')
+
+    def test_bot_reports_small_real_usage_and_refreshes_counters_before_reply(self):
+        self.enable();nonce=delivery.pair(self.store,self.client)['url'].split('start=')[1]
+        with mock.patch.object(delivery.notifications,'send'):self.worker.process_update(self.update('/start '+nonce))
+        self.worker.chat_times.clear();self.client['quota_bytes']=20*1024**3;state=self.store.get('state');state['clients'][0]['quota_bytes']=self.client['quota_bytes'];self.store.set('state',state)
+        self.store.add_traffic([(self.client['id'],'upload',2*1024**2)])
+        def collect():self.store.add_traffic([(self.client['id'],'download',1024**2)]);self.runtime.last_stats=time.time()
+        with mock.patch.object(Runtime,'running',new_callable=mock.PropertyMock,return_value=True),mock.patch.object(self.runtime,'collect',side_effect=collect) as sample,mock.patch.object(delivery.notifications,'send') as send:
+            self.worker.process_update(self.update('/status'))
+        sample.assert_called_once();text=send.call_args.args[2];self.assertIn('Traffic used: 3 MiB',text);self.assertNotIn('Traffic remaining: 0 B',text)
+        self.assertEqual(self.store.totals()[self.client['id']]['download'],1024**2)
+        self.assertEqual(delivery.amount(1024),'1 KiB');self.assertEqual(delivery.amount(30),'30 B')
+
     def test_group_chats_forwarded_messages_expired_pairs_and_changed_bots_cannot_bind(self):
         self.enable();nonce=delivery.pair(self.store,self.client)['url'].split('start=')[1]
         with mock.patch.object(delivery.notifications,'send') as send:
@@ -175,6 +205,14 @@ class PublicPortalHTTPTests(unittest.TestCase):
         for path in ['/Access/api/state','/Access/index.html','/Access/portal-assets/../index.html',self.path+'admin',self.path+'api/other']:
             self.assertEqual(self.request(path)[0],404)
         self.state['clients'][0]['token']=secrets.token_urlsafe(32);self.store.set('state',self.state);self.assertEqual(self.request(self.path+'api')[0],404)
+    def test_portal_reports_verified_connection_and_revokes_it_when_bot_changes(self):
+        client=self.state['clients'][0]
+        self.assertFalse(json.loads(self.request(self.path+'api')[1])['telegram_connected'])
+        with self.store.connect() as db:db.execute('INSERT INTO client_bot_bindings VALUES(?,?,?,?,?)',(client['id'],'123',delivery.bot_hash(self.store),portal.token(client),time.time()))
+        self.assertTrue(json.loads(self.request(self.path+'api')[1])['telegram_connected'])
+        self.store.set('telegram',{'bot_token':'123456:changed'})
+        self.assertFalse(json.loads(self.request(self.path+'api')[1])['telegram_connected'])
+
     def test_pairing_post_enforces_capability_origin_and_request_shape(self):
         settings=delivery.settings(self.store);settings.update(bot_enabled=True,bot_username='nara_test_bot',bot_fingerprint=delivery.bot_hash(self.store));self.store.set('client_delivery',settings)
         host='127.0.0.1:'+str(self.server.server_port)

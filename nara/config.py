@@ -37,10 +37,10 @@ def normalize_dns_record(row):
 
 def initial_state():
     return {**{k: [] for k in native.EXTRA_COLLECTIONS}, "core_options": {}, "revision": 0, "inbounds": [], "tls": [], "dns_rules": [], "rule_sets": [],
-            "clients": [], "client_groups": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
+            "clients": [], "client_groups": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "label": "Cloudflare", "type": "udp",
             "server": "1.1.1.1", "port": 53}],
             "settings": {"server_address": "", "public_url": "", "subscription_url": "", "dns_final": "bootstrap",
-                         "block_private": True, "time_zone": "UTC", "core_features_enabled": False}}
+                         "block_private": True, "time_zone": "UTC", "core_features_enabled": True}}
 
 
 def require(ok, message):

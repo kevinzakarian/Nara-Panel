@@ -34,9 +34,11 @@ class PanelUpdateTests(unittest.TestCase):
                 (hashlib.sha256(payload).hexdigest()+'  nara-panel_9.0.0_source.tar.gz\n').encode(),payload]
 
     def test_verified_release_is_backed_up_then_installed_and_health_checked(self):
-        with mock.patch.object(u,'download',side_effect=self.responses(self.archive())) as fetch, mock.patch('nara.maintenance.backup') as backup, mock.patch.object(u,'run_installer') as install, mock.patch('nara.maintenance.panel_health',return_value={'version':'9.0.0'}):
+        with mock.patch.object(u,'download',side_effect=self.responses(self.archive())) as fetch, mock.patch('nara.maintenance.backup') as backup, mock.patch.object(u,'run_installer') as install, mock.patch('nara.maintenance.panel_health',return_value={'version':'9.0.0'}), mock.patch.object(a,'write_result') as progress:
             result=u.apply(self.paths,self.job)
             self.assertEqual(result,{'version':'9.0.0','backup_created':True})
+            self.assertEqual([call.args[1]['progress'] for call in progress.call_args_list],[10,25,40,55,70,90])
+            self.assertTrue(all(call.args[1]['status']=='running' and call.args[1]['id']==self.job['id'] for call in progress.call_args_list))
             backup.assert_called_once_with(self.paths);install.assert_called_once()
             self.assertEqual(install.call_args.args[0].name,'nara-panel')
             self.assertTrue(all(call.args[0].startswith(('https://api.github.com/repos/kevinzakarian/Nara-Panel/','https://github.com/kevinzakarian/Nara-Panel/releases/')) for call in fetch.call_args_list))

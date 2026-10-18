@@ -94,6 +94,16 @@ class Runtime:
         self.stats_error = ""
         self.failures = 0
 
+    def traffic_totals(self, refresh=False):
+        """One serialized sample keeps bot, portal and quota accounting consistent."""
+        with self.lock:
+            if refresh and self.running and time.time() - (self.last_stats or 0) >= 1:
+                try:
+                    self.collect()
+                except Exception:
+                    self.stats_error = "Could not refresh traffic statistics; showing last recorded usage"
+            return self.store.totals()
+
     def prepare(self, state, totals=None):
         validate(state)
         require(all((i.get("config", {}).get("listen_port") if i.get("mode") == "native" else i.get("port")) != self.stats_port for i in state["inbounds"]), "An inbound cannot use the statistics API port")

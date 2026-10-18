@@ -210,6 +210,21 @@ def read_env_text(value):
     return dict(line.split('=', 1) for line in value.splitlines() if line and not line.lstrip().startswith('#') and '=' in line)
 
 
+def write_result(paths, result):
+    destination = paths.data / 'access-result.json'
+    owner = paths.data.stat()
+    descriptor, temporary = tempfile.mkstemp(prefix='.access-result-', dir=paths.data)
+    try:
+        os.fchown(descriptor, owner.st_uid, owner.st_gid)
+        with os.fdopen(descriptor, 'w') as file:
+            json.dump(result, file)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, destination)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
 def process_request(paths, blocked_error=None):
     request = paths.data / 'access-request.json'
     job = {}
@@ -237,18 +252,7 @@ def process_request(paths, blocked_error=None):
     except Exception as exc:
         result = {'id': job.get('id', ''), 'status': 'failed', 'error': str(exc)}
     finally:
-        destination = paths.data / 'access-result.json'
-        owner = paths.data.stat()
-        descriptor, temporary = tempfile.mkstemp(prefix='.access-result-', dir=paths.data)
-        try:
-            os.fchown(descriptor, owner.st_uid, owner.st_gid)
-            with os.fdopen(descriptor, 'w') as file:
-                json.dump(result, file)
-                file.flush()
-                os.fsync(file.fileno())
-            os.replace(temporary, destination)
-        finally:
-            Path(temporary).unlink(missing_ok=True)
+        write_result(paths,result)
         request.unlink(missing_ok=True)
 
 

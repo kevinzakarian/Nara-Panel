@@ -60,3 +60,12 @@ This is a code/regression review, not an independent penetration test. Tests cov
 - External URL imports pin the connection to vetted public DNS results, revalidate every redirect, reject all non-global/mixed private addresses and HTTPS downgrades, verify TLS against the original hostname, ignore environment proxies and bound time/body/redirect/profile counts. Imported local files, commands, interfaces and references are rejected. Preview does not apply settings.
 - A sleeping delivery worker wakes on preferences/jobs and uses no client scans while disabled. Account matching uses stable native user identities. Inbound match references remain valid while a quota temporarily removes a listener; live detour references remain strict.
 - Portable backups include SMTP/template settings privately and restore with email/bot delivery disabled. They do not transfer host URLs. A fresh destination requires fresh private chat pairing.
+
+
+## Connection and preference refinements — 0.12.0
+
+Verified private-chat IDs are written to account metadata only after one-use pairing validation. Contact fields remain separate from authorization bindings; subscription rotation and bot changes still revoke access. Backfill intersects valid bot fingerprints and current per-account portal capabilities. Runtime configuration edits and contact changes share the runtime lock, with revision updates and no core restart. Portal output exposes only a connection boolean, not Telegram identity.
+
+Traffic reads serialize core polling and reuse persisted cumulative counters; requests within one second reuse the latest sample. Alert-only and allowance-only writes preserve the other policy fields under the same lock. The unified Settings request validates the traffic policy before applying panel changes; managed access changes run last and report partial completion if that independent maintenance action fails.
+
+Email previews escape subject/body and placeholders, use fictitious values, generate local cached QR images, and perform no message send or external image fetch. Update phase messages are fixed strings written atomically with the existing private maintenance-file ownership. No arbitrary commands, URLs or log content are added to progress responses.

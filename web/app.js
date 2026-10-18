@@ -27,10 +27,10 @@ const paths = {
  power:'M12 2v10 M6 5a9 9 0 1 0 12 0', key:'M8 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10 M12 12l9 9 M17 17l3-3'
 };
 const icon = name => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.code}"/></svg>`;
-const btn = (text, action, symbol = 'plus', cls = '', attrs = '') => `<button class="btn ${cls}" data-action="${action}" ${attrs}>${icon(symbol)}${text}</button>`;
+const btn = (text, action, symbol = 'plus', cls = '', attrs = '') => `<button type="button" class="btn ${cls}" data-action="${action}" ${attrs}>${icon(symbol)}${text}</button>`;
 const rowBtn = (title, action, symbol, id, collection='') => `<button title="${e(title)}" aria-label="${e(title)}" data-action="${action}" data-id="${e(id)}" data-collection="${collection}">${icon(symbol)}</button>`;
-const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',routing:'Routing',core:'Core features',settings:'Settings',account:'Administrator',notifications:'Notifications',email:'Email',api:'API access',about:'About'};
-const descriptions = {email:'SMTP delivery, service templates and private client bot commands.',dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',routing:'Control destinations, matching rules, and outbound connections.',core:'Endpoints, services, certificates and the remaining core features.',settings:'Server preferences and service controls.',account:'Your profile, sign-in details and two-factor authentication.',notifications:'Useful updates from your server, delivered to Telegram.',api:'Connect scripts and other apps to your panel.',about:'Versions, project information and help.'};
+const titles = {dashboard:'Overview',inbounds:'Inbounds',tls:'TLS certificates',dns:'DNS',clients:'Clients',routing:'Routing',core:'Core features',settings:'Settings',notifications:'Notifications',email:'Email',api:'API access',account:'Administrator',about:'About'};
+const descriptions = {email:'SMTP delivery and service email templates.',dashboard:'An overview of your server and services, at a glance.',inbounds:'Configure and manage the entry points to your server.',tls:'Secure every connection with the right certificate.',dns:'Manage resolvers, DNS rules, and rule sets in one place.',clients:'Your clients, their traffic, and their access.',routing:'Control destinations, matching rules, and outbound connections.',core:'Endpoints, services, certificates and the remaining core features.',settings:'Server preferences and service controls.',account:'Your profile, sign-in details and two-factor authentication.',notifications:'Useful updates from your server, delivered to Telegram.',api:'Connect scripts and other apps to your panel.',about:'Versions, project information and help.'};
 let optionSchema,coreCatalog;
 let accessSettings={sub_path:'/subscriptions',subscription_port:10001,subscription_scheme:'http',managed:false},accessChangePending=false;
 let routingTab='route_rules',coreTab='endpoints';
@@ -175,9 +175,9 @@ function renderDNS() {return renderDNSWorkspace();}
 function renderCore() {return renderCoreWorkspace('core',['endpoints','services','certificate_providers','http_clients','network_namespaces','log','ntp','certificate','experimental'],coreTab);}
 function clientTable(clients,compact=false) {return renderClientTable(clients,compact);}
 function renderClients() {return renderClientsWorkspace();}
-function renderAccessSettings(){
+function renderAccessSettings(embedded=false){
  const a=accessSettings;
- return `<section class="card section-gap"><div class="card-header"><div><h2>Panel & subscription access</h2><p>Separate addresses, separate ports</p></div>${icon('lock')}</div><form id="access-form" class="card-body"><fieldset class="entry-fields" ${a.managed?'':'disabled'}><div class="form-grid">${field('Panel webPath','web_path',a.web_path||'','text','For the sign-in page and administration only.')}${field('Panel port','panel_port',a.panel_port||10000,'number')}${field('Subscription subPath','sub_path',a.sub_path,'text','Public subscription links use this path without the panel webPath.')}${field('Subscription port','subscription_port',a.subscription_port,'number')}</div><p class="note">Saving restarts the panel and reconnects you at the new address. Keep the new ports open in your firewall. Changing subPath or its port changes subscription URLs; share the updated link or QR with clients.</p><button class="btn primary" type="submit">${icon('check')}Save access settings</button></fieldset>${a.managed?'':'<p class="note">Run the Linux installer or upgrade to enable these controls. Docker/manual services use their own port mappings and environment settings.</p>'}<div id="access-progress" role="status"></div></form></section>`;
+ return `<section class="card section-gap"><div class="card-header"><div><h2>Panel & subscription access</h2><p>Separate addresses, separate ports</p></div>${icon('lock')}</div><${embedded?'div':'form'} ${embedded?'':'id="access-form"'} class="card-body"><fieldset class="entry-fields" ${a.managed?'':'disabled'}><div class="form-grid">${field('Panel webPath','web_path',a.web_path||'','text','For the sign-in page and administration only.')}${field('Panel port','panel_port',a.panel_port||10000,'number')}${field('Subscription subPath','sub_path',a.sub_path,'text','Public subscription links use this path without the panel webPath.')}${field('Subscription port','subscription_port',a.subscription_port,'number')}</div><p class="note">Saving restarts the panel and reconnects you at the new address. Keep the new ports open in your firewall. Changing subPath or its port changes subscription URLs; share the updated link or QR with clients.</p>${embedded?'':'<button class="btn primary" type="submit">Save access settings</button>'}</fieldset>${a.managed?'':'<p class="note">Run the Linux installer or upgrade to enable these controls. Docker/manual services use their own port mappings and environment settings.</p>'}<div id="access-progress" role="status"></div></${embedded?'div':'form'}></section>`;
 }
 async function saveAccess(form){
  const data=new FormData(form),values={web_path:data.get('web_path'),panel_port:Number(data.get('panel_port')),sub_path:data.get('sub_path'),subscription_port:Number(data.get('subscription_port'))};
@@ -206,12 +206,11 @@ function zoneClock(name=panelTimeZone()){
 function updateZonePreview(){const input=$('#settings-form [name=time_zone]'),preview=$('#time-zone-preview');if(input&&preview)preview.textContent=zoneClock(input.value)+' · '+input.value;}
 function renderSettings() {
  const zones=optionSchema?.time_zones||['UTC','Asia/Tehran','Europe/London','America/New_York'];
- return heading()+pendingBanner()+`<div class="management-layout"><div class="management-stack">
- <form id="settings-form" class="management-stack" data-revision="${state.revision}">
+ return heading('<button class="btn primary" type="submit" form="settings-form">'+icon('check')+'Save settings</button>')+pendingBanner()+`<form id="settings-form" data-revision="${state.revision}"><div class="management-layout"><div class="management-stack">
   <section class="card"><div class="card-header"><div><span class="section-kicker">CONNECTION</span><h2>Server & client defaults</h2><p>Addresses and DNS used in generated client profiles</p></div>${icon('routing')}</div><div class="card-body preference-fields">
    ${field('Public server IP or domain','server_address',state.settings.server_address,'text','The address clients connect to, without a scheme or port.')}
    <div class="form-grid">${field('Public panel URL (optional)','public_url',state.settings.public_url,'url','Your external panel address, for example https://panel.example.com.')}${field('Public subscription URL (optional)','subscription_url',state.settings.subscription_url||'','url','For an external reverse proxy. Leave blank to use the subscription port and subPath.')}</div>
-   ${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}
+   ${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.label?d.label+' · '+d.tag:d.tag]),state.settings.dns_final)}
    <p class="note">Rule and Global mode use this resolver and your DNS rules. Direct mode uses device DNS. <a class="text-link" href="#dns">Manage DNS →</a></p>
    <label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label>
   </div></section>
@@ -220,16 +219,29 @@ function renderSettings() {
    <div class="zone-preview"><span>${icon('clock')}<b id="time-zone-preview" role="status">${e(zoneClock())} · ${e(panelTimeZone())}</b></span>${btn('Use my device time zone','settings-device-zone','refresh','sm','type="button"')}</div>
    <p class="note">Existing installations use UTC until you choose another zone. <a class="text-link" href="#notifications">Set the daily summary time →</a></p>
   </div></section>
-  <section class="card"><div class="card-header"><h2>Advanced workspace</h2></div><div class="card-body"><label class="check-field"><input type="checkbox" name="core_features_enabled" ${checked(state.settings.core_features_enabled!==false)}>Show Core features in navigation</label><p class="note">Access endpoints, system services, certificates and core diagnostics. Hiding the menu keeps existing configurations active.</p></div></section><div class="settings-save"><span>${icon('check')}Changes apply automatically when saved.</span><button class="btn primary" type="submit">${icon('check')}Save settings</button></div>
- </form>
- ${renderAccessSettings()}
- ${typeof renderTrafficSettings==='function'?renderTrafficSettings():''}
+ ${renderAccessSettings(true)}
+ ${typeof renderTrafficSettings==='function'?renderTrafficSettings(true):''}
  ${typeof renderTransferSettings==='function'?renderTransferSettings():''}
  </div><aside class="management-stack" aria-label="Service and account shortcuts">
+  <section class="card"><div class="card-header"><h2>Advanced workspace</h2></div><div class="card-body"><label class="check-field"><input type="checkbox" name="core_features_enabled" ${checked(state.settings.core_features_enabled!==false)}>Show Core features in navigation</label><p class="note">Access endpoints, system services, certificates and core diagnostics. Hiding the menu keeps existing configurations active.</p></div></section>
   <section class="card"><div class="card-header"><div><span class="section-kicker">SERVICE</span><h2>Sing-box core</h2></div>${badge(dashboard.core?.running?'Running':'Stopped',dashboard.core?.running?'green':'red')}</div><div class="card-body preference-fields"><p class="note">Validate your configuration or control the core process.</p><div class="service-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop core','stop','power','danger')}</div><p class="note">Start the core after an intentional stop or unexpected exit.</p></div></section>
   ${panelUpdateCard()}
   <section class="card"><div class="card-header"><h2>Workspace preferences</h2></div><div class="card-body shortcut-list"><a href="#account">${icon('account')}<span><b>Administrator</b><small>Profile, password and 2FA</small></span><span>→</span></a><a href="#notifications">${icon('notifications')}<span><b>Notifications</b><small>Telegram connection and schedule</small></span><span>→</span></a><a href="#about">${icon('about')}<span><b>About NARA</b><small>Installation details and help</small></span><span>→</span></a></div></section>
- </aside></div>`;
+ </aside></div></form>`;
+}
+async function saveSettings(form){
+ const f=new FormData(form),settings={...state.settings,time_zone:f.get('time_zone'),server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,core_features_enabled:form.elements.core_features_enabled.checked,dns_options:state.settings.dns_options||{}};
+ const accessChanged=accessSettings.managed&&['web_path','sub_path','panel_port','subscription_port'].some(key=>String(f.get(key))!==String(accessSettings[key]));
+ if(accessChanged){
+  const panel=Number(f.get('panel_port')),subscription=Number(f.get('subscription_port'));
+  if(!Number.isInteger(panel)||!Number.isInteger(subscription)||Math.min(panel,subscription)<1||Math.max(panel,subscription)>65535||panel===subscription)throw Error('Use different valid panel and subscription ports (1–65535).');
+  for(const key of ['web_path','sub_path'])if(!/^\/?[A-Za-z0-9_-]{1,64}\/?$/.test(String(f.get(key))))throw Error('Paths must contain 1–64 letters, numbers, hyphens or underscores.');
+  if(String(f.get('web_path')).replace(/^\/|\/$/g,'')===String(f.get('sub_path')).replace(/^\/|\/$/g,''))throw Error('Use different panel and subscription paths.');
+ }
+ const traffic=dashboard.traffic?trafficSettingsValues(form):undefined;
+ await api('settings',{revision:Number(form.dataset.revision),settings,...(traffic?{traffic_settings:traffic}:{})});
+ if(accessChanged){try{await saveAccess(form);}catch(error){await load();throw Error('Preferences were saved, but access changes failed: '+error.message);}return;}
+ await load();toast('All settings saved and applied.');
 }
 function panelUpdateCard(){
  const item=dashboard.updates?.panel;
@@ -244,12 +256,13 @@ function updatePanel(version){
 }
 async function performPanelUpdate(version,proof){
  const job=await api('update-panel',{version,confirmed:true,backup_proof:proof});accessChangePending=true;
- openModal('Updating NARA','The panel may briefly disconnect while it restarts.','<p id="panel-update-progress" role="status">Creating a private backup and installing the verified panel release…</p>');
+ openModal('Updating NARA','The panel may briefly disconnect while it restarts.','<div class="update-progress"><progress id="panel-update-bar" max="100" aria-label="Panel update progress"></progress><p id="panel-update-progress" role="status">Waiting for the update service…</p><small>Progress follows completed stages. Installation may take several minutes.</small></div>');
  try{
   for(let attempt=0;attempt<960;attempt++){
    await new Promise(resolve=>setTimeout(resolve,1000));let result;
    try{result=await api('access-status/'+job.id);}catch{continue;}
-   if(result.status==='complete'){location.reload();return;}
+   if(result.status==='complete'){if($('#panel-update-bar'))$('#panel-update-bar').value=100;location.reload();return;}
+   if(result.status==='running'&&$('#panel-update-progress')){$('#panel-update-progress').textContent=result.stage||'Updating NARA…';if(Number.isFinite(result.progress))$('#panel-update-bar').value=result.progress;}
    if(result.status==='failed')throw new Error(result.error||'Panel update failed. Review the private server update log.');
   }
   throw new Error('Still waiting for the server update. Reopen the panel or review its private update log.');
@@ -392,7 +405,7 @@ function renderCoreWorkspace(surface,tabs,selected){
 }
 function renderCoreTable(collection){
  const rows=state[collection]||[];
- return `<section class="card"><div class="card-header"><div><h2>${coreLabels[collection]}</h2><p>${['dns_rules','route_rules'].includes(collection)?'Evaluated in order, from top to bottom. Logical rules support nested AND / OR groups.':coreFeatureHelp[collection]||'All options come from the official Sing-box 1.14.3 schema.'}</p></div></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Name / order</th><th>Type / action</th><th>Configuration</th><th>Actions</th></tr></thead><tbody>${rows.map((row,index)=>{const c=legacyCoreConfig(collection,row);return `<tr><td><b>${e(row.label||c.tag||'Rule '+(index+1))}</b>${row.enabled===false?badge('Disabled'):''}${collection==='dns_servers'&&c.tag===state.settings.dns_final?badge('Default','green'):''}</td><td>${badge(protocolLabel(c.type||c.action||'default'),'blue')}</td><td>${e(Object.keys(c).filter(k=>!['tag','type'].includes(k)).map(CoreSchema.title).join(' · '))}</td><td><div class="row-actions">${['dns_rules','route_rules','rule_sets'].includes(collection)&&index?rowBtn('Move up','core-move','arrow',row.id,collection):''}${rowBtn('Edit','core-edit','edit',row.id,collection)}${rowBtn('Delete','delete','trash',row.id,collection)}</div></td></tr>`;}).join('')}</tbody></table></div>`:empty('No '+coreLabels[collection].toLowerCase()+' yet','Add an item to configure its complete options.','core-new','Add item')}</section>`;
+ return `<section class="card"><div class="card-header"><div><h2>${coreLabels[collection]}</h2><p>${['dns_rules','route_rules'].includes(collection)?'Evaluated in order, from top to bottom. Logical rules support nested AND / OR groups.':coreFeatureHelp[collection]||'All options come from the official Sing-box 1.14.3 schema.'}</p></div></div>${rows.length?`<div class="table-wrap"><table><thead><tr><th>Name / order</th><th>Type / action</th><th>Configuration</th><th>Actions</th></tr></thead><tbody>${rows.map((row,index)=>{const c=legacyCoreConfig(collection,row);return `<tr><td><b>${e(row.label||c.tag||'Rule '+(index+1))}</b>${row.enabled===false?badge('Disabled'):''}${collection==='dns_servers'&&c.tag===state.settings.dns_final?'<span class="dns-default-badge">'+badge('Default','green')+'</span>':''}</td><td>${badge(protocolLabel(c.type||c.action||'default'),'blue')}</td><td>${e(Object.keys(c).filter(k=>!['tag','type'].includes(k)).map(CoreSchema.title).join(' · '))}</td><td><div class="row-actions">${['dns_rules','route_rules','rule_sets'].includes(collection)&&index?rowBtn('Move up','core-move','arrow',row.id,collection):''}${rowBtn('Edit','core-edit','edit',row.id,collection)}${rowBtn('Delete','delete','trash',row.id,collection)}</div></td></tr>`;}).join('')}</tbody></table></div>`:empty('No '+coreLabels[collection].toLowerCase()+' yet','Add an item to configure its complete options.','core-new','Add item')}</section>`;
 }
 function coreReferences(){
  const tags=rows=>rows.map(row=>row.tag).filter(Boolean);
@@ -485,7 +498,7 @@ function editCoreOptions(key){
  if(section==='dns'){values={...state.settings.dns_options,...values};delete values.independent_cache;}
  if(section==='route')values={final:'direct',default_domain_resolver:state.settings.dns_final,...values};
  let editor;
- openModal(coreLabels[key]||CoreSchema.title(section),'Saving validates and applies changes automatically.',`${coreFeatureHelp[key]?'<p class="hint-box">'+e(coreFeatureHelp[key])+'</p>':''}${section==='dns'?`<div class="form-grid">${selectField('Default resolver','default_resolver',state.dns_servers.map(d=>[d.tag,d.tag]),state.settings.dns_final)}</div>`:''}<div id="native-fields" class="schema-editor"></div>`,async form=>{
+ openModal(coreLabels[key]||CoreSchema.title(section),'Saving validates and applies changes automatically.',`${coreFeatureHelp[key]?'<p class="hint-box">'+e(coreFeatureHelp[key])+'</p>':''}${section==='dns'?`<div class="form-grid">${selectField('Default resolver','default_resolver',state.dns_servers.map(d=>[d.tag,d.label?d.label+' · '+d.tag:d.tag]),state.settings.dns_final)}</div>`:''}<div id="native-fields" class="schema-editor"></div>`,async form=>{
   await api('core-options',{revision:state.revision,section,options:editor.value(),...(section==='dns'?{default_resolver:form.elements.default_resolver.value}:{})});await load();toast('Saved and applied.');
  });
  editor=CoreSchema.mount($('#native-fields'),schema,values,{fixed:true,grouped:true,help:section==='ntp'?{write_to_system:'Requires permission to change the host clock. Keep off with the standard unprivileged NARA service.'}:{},scope:section,references:coreReferences()});
@@ -519,7 +532,7 @@ function subscriptionShare(client,format='sing-box') {
  try { qr=`<div class="subscription-qr">${NaraQR.svg(sub)}</div>`;qrReady=true; }
  catch { qr='<p class="note">This link is too long for a QR code. Copy the subscription link below.</p>'; }
  const help=format==='portal'?'Give this private page to the account owner to view their usage, service time, all connection links and QR codes.':format.startsWith('config:')?'Individual proxy configuration. For settings that do not fit a connection URI, use the full JSON subscription.':format==='sing-box'?'Scan in the official Sing-box app to import a remote profile.':'For clients that accept a Sing-box JSON subscription URL. You can also paste this URL into a remote profile.';
- return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>Connection format<select class="subscription-format" aria-label="Connection format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option>${(clientShareData.get(client.id)?.links||[]).map((link,index)=>`<option value="config:${index}" ${format==='config:'+index?'selected':''}>${e(protocolLabel(link.protocol))} · ${e(link.name)}</option>`).join('')}${clientShareData.get(client.id)?.portal_url?`<option value="portal" ${format==='portal'?'selected':''}>Private service page · all links & usage</option>`:''}</select></label><p class="note">${help}</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
+ return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>Connection format<select class="subscription-format" aria-label="Connection format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option>${(clientShareData.get(client.id)?.links||[]).map((link,index)=>`<option value="config:${index}" ${format==='config:'+index?'selected':''}>Configuration Link${(clientShareData.get(client.id)?.links||[]).length>1?' · '+e(link.name):''}</option>`).join('')}${clientShareData.get(client.id)?.portal_url?`<option value="portal" ${format==='portal'?'selected':''}>Private service page · all links & usage</option>`:''}</select></label><p class="note">${help}</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
 }
 function changeSubscriptionFormat(target) {
  const share=target.closest('.subscription-share'),client=state.clients.find(c=>c.id===share.dataset.clientId);
@@ -620,15 +633,15 @@ async function handle(action,target) {
  if(action==='change-password')return editAdminCredentials();
 }
 async function submitPanelForm(event){
- const form=event.target;if(!['modal-form','login-form','settings-form','access-form','telegram-form','traffic-settings-form','email-form'].includes(form.id))return;event.preventDefault();if(form.dataset.submitting==='true')return;form.dataset.submitting='true';form.setAttribute('aria-busy','true');const busy=$('#verification-status',form);if(busy)busy.textContent=form.dataset.busyMessage||'Checking your administrator credentials…';const submit=$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent=form.dataset.busyLabel||'Saving…';}
+ const form=event.target;if(!['modal-form','login-form','settings-form','access-form','telegram-form','traffic-settings-form','traffic-alert-form','email-form'].includes(form.id))return;event.preventDefault();if(form.dataset.submitting==='true')return;form.dataset.submitting='true';form.setAttribute('aria-busy','true');const busy=$('#verification-status',form);if(busy)busy.textContent=form.dataset.busyMessage||'Checking your administrator credentials…';const submit=event.submitter||$('[type=submit]',form),label=submit?.textContent;if(submit){submit.disabled=true;submit.textContent=form.dataset.busyLabel||'Saving…';}
  try {
   if(form.id==='login-form'){const result=await api('login',Object.fromEntries(new FormData(form)));if(result.two_factor_required){$('#login-2fa').hidden=false;form.elements.code.required=true;form.elements.code.focus();$('#login-error').textContent='Enter your authenticator or recovery code.';return;}csrf=result.csrf;form.elements.password.value='';form.elements.code.value='';form.elements.code.required=false;$('#login-2fa').hidden=true;$('#login-error').textContent='';await boot();}
   else if(form.id==='modal-form'&&modalSubmit){$('#form-error').textContent='';const close=await modalSubmit(form);if(close!==false&&form.isConnected&&$('#modal-form')===form)$('#modal').close();}
   else if(form.id==='email-form'){saveEmailForm(form);}
   else if(form.id==='telegram-form'){await saveTelegram(form);}
   else if(form.id==='access-form'){await saveAccess(form);}
-  else if(form.id==='traffic-settings-form'){await saveTrafficSettings(form);}
-  else if(form.id==='settings-form'){const f=new FormData(form);const d={...state.settings,time_zone:f.get('time_zone'),server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,core_features_enabled:form.elements.core_features_enabled.checked,dns_options:state.settings.dns_options||{}};await api('settings',{revision:Number(form.dataset.revision),settings:d});await load();toast('Settings saved and applied.');}
+  else if(['traffic-settings-form','traffic-alert-form'].includes(form.id)){await saveTrafficSettings(form);}
+  else if(form.id==='settings-form'){await saveSettings(form);}
  }catch(err){if(form.id==='modal-form'){const error=$('#form-error',form);if(error){error.textContent=err.message;if(err.uncertain&&form.classList.contains('verification-form')){const retry=document.createElement('button');retry.type='button';retry.className='btn sm';retry.dataset.action='integration-telegram-reload';retry.textContent='Load saved preferences';error.append(document.createElement('br'),retry);}error.tabIndex=-1;error.focus();}}else if(form.id==='login-form')$('#login-error').textContent=err.message;else toast(err.message,true);}finally{delete form.dataset.submitting;form.removeAttribute('aria-busy');if(busy)busy.textContent='';if(form.classList.contains('verification-form')){form.elements.current.value='';if(form.elements.code)form.elements.code.value='';}if(submit){submit.disabled=form.dataset.previewRequired==='true'&&!form.dataset.previewId;submit.textContent=label;}}
 }
 document.addEventListener('click',async event=>{const target=event.target.closest('[data-action]');if(!target)return;event.preventDefault();target.disabled=true;try{await handle(target.dataset.action,target);}catch(err){toast(err.message,true);}finally{target.disabled=false;}});
