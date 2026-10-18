@@ -24,7 +24,7 @@ def new_client(values, existing=()):
     row=copy.deepcopy(values)
     row.update(id=uuid.uuid4().hex,uuid=str(uuid.uuid4()),password=secrets.token_urlsafe(24),token=secrets.token_urlsafe(32))
     row['name']=row.get('name') or random_name(existing)
-    for key,value in {'enabled':True,'quota_bytes':0,'expires_at':'','note':'','group_ids':[],'tags':[]}.items():row.setdefault(key,value)
+    for key,value in {'enabled':True,'quota_bytes':0,'expires_at':'','note':'','group_ids':[],'tags':[],'email':'','telegram_id':''}.items():row.setdefault(key,value)
     return row
 
 

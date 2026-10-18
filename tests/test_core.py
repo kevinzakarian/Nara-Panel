@@ -336,6 +336,54 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(self.query_client_dns(port,'policy.nara.test')[-4:],socket.inet_aton('127.0.0.1'))
         self.assertGreater(BootstrapDNS.requests,before)
 
+    def test_dns_rule_account_and_inbound_metadata_survive_managed_dns_hijack(self):
+        from nara.clients import new_client
+        state=example_state('hysteria2',self.profile)
+        second=new_client({'name':'Second account','inbound_ids':['in1']})
+        state['clients'].append(second)
+        names=['account-one.nara.test','account-two.nara.test']
+        state['dns_servers']=[{'id':key,'tag':key,'mode':'native','config':{'type':'hosts','tag':key,'predefined':{name:[address] for name in names}}} for key,address in [('selected','192.0.2.11'),('fallback','192.0.2.22')]]
+        state['settings']['dns_final']='fallback'
+        state['dns_rules']=[{'id':'account-policy','mode':'native','config':{'auth_user':['client-user1'],'inbound':['proxy-in'],'query_type':['A'],'domain_suffix':['nara.test'],'action':'route','server':'selected'}}]
+        self.runtime.apply(state)
+        for index,address in [(0,'192.0.2.11'),(1,'192.0.2.22')]:
+            profile=copy.deepcopy(state);profile['clients']=[state['clients'][index]]
+            port,config=self.local_client(profile,fixture_dns=False)
+            process=self.start_client(config)
+            self.assertEqual(self.query_client_dns(port,names[index])[-4:],socket.inet_aton(address))
+            process.terminate();process.wait(timeout=5)
+
+    def test_traffic_rule_matches_authenticated_account_independently_of_display_name(self):
+        from nara.clients import new_client
+        state=example_state('vless',self.profile);state['settings']['block_private']=False
+        state['clients'][0]['name']='Renamed account'
+        state['clients'].append(new_client({'name':'Other account','inbound_ids':['in1']}))
+        state['route_rules']=[{'id':'account-policy','mode':'native','config':{'inbound':['proxy-in'],'auth_user':['client-user1'],'port':[self.target.server_port],'source_ip_cidr':['127.0.0.1/32'],'network':['tcp'],'action':'reject'}}]
+        self.runtime.apply(state)
+        port,config=self.local_client(state);process=self.start_client(config)
+        connection=http.client.HTTPConnection('127.0.0.1',port,timeout=5)
+        try:
+            connection.request('GET','http://127.0.0.1:'+str(self.target.server_port)+'/')
+            response=connection.getresponse();self.assertNotEqual(response.status,200)
+        except (OSError,http.client.HTTPException):pass
+        finally:connection.close();process.terminate();process.wait(timeout=5)
+        profile=copy.deepcopy(state);profile['clients'].reverse();self.transfer(profile)
+
+    def test_quota_removal_keeps_scoped_rules_inert_and_other_inbounds_running(self):
+        from nara.clients import new_client
+        state=example_state('vless',self.profile);state['settings']['block_private']=False
+        state['clients'][0]['quota_bytes']=1
+        second=copy.deepcopy(state['inbounds'][0]);second.update(id='in2',tag='second-in',port=free_port());state['inbounds'].append(second)
+        state['clients'].append(new_client({'name':'Unaffected account','inbound_ids':['in2']}))
+        state['route_rules']=[{'id':'policy','mode':'native','config':{'inbound':['proxy-in'],'auth_user':['client-user1'],'domain_suffix':['blocked.example'],'action':'reject'}}]
+        state['dns_rules']=[{'id':'dns-policy','mode':'native','config':{'inbound':['proxy-in'],'auth_user':['client-user1'],'domain_suffix':['blocked.example'],'action':'reject'}}]
+        self.runtime.apply(state);self.store.add_traffic([('user1','upload',1)])
+        self.runtime.apply(state)
+        self.assertTrue(self.runtime.running)
+        active=build_config(state,self.store.totals(),self.runtime.run_dir,self.runtime.stats_port)
+        self.assertEqual([row['tag'] for row in active['inbounds']],['second-in'])
+        profile=copy.deepcopy(state);profile['clients']=[state['clients'][1]];self.transfer(profile)
+
     def test_managed_dns_bridge_works_for_every_account_protocol(self):
         for protocol in ('vless','vmess','trojan','hysteria2','tuic','anytls'):
             with self.subTest(protocol=protocol):

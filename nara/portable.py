@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import secrets
 import time
-from . import __version__, notifications, traffic
+from . import __version__, notifications, traffic, client_delivery
 from .config import require, validate, host
 from .runtime import atomic_write
 
@@ -24,7 +24,7 @@ def document(store):
             row = db.execute('SELECT value FROM kv WHERE key=?', (key,)).fetchone()
             return json.loads(row[0]) if row else default
         return {'format': 'nara-portable', 'schema': 1, 'panel_version': __version__, 'created_at': time.time(),
-                'state': state, 'traffic': totals, 'telegram': value('telegram', None),
+                'state': state, 'traffic': totals, 'telegram': value('telegram', None),'client_delivery':value('client_delivery',None),
                 'traffic_settings': value('traffic_settings', traffic.DEFAULTS),
                 'managed_lifetime': value('managed_lifetime', sum(x['upload']+x['download'] for x in totals.values())),
                 'panel_traffic_baseline': value('panel_traffic_baseline', 0)}
@@ -68,6 +68,9 @@ def prepare(value, destination):
     require(telegram is None or isinstance(telegram, dict), 'Invalid Telegram backup settings')
     if telegram is not None:
         telegram = notifications.validate_settings({**telegram, 'enabled': False}, {'bot_token':'','chat_id':'','events':[],'summary_hour':9,'summary_minute':0,'enabled':False})
+    delivery=value.get('client_delivery')
+    require(delivery is None or isinstance(delivery,dict),'Invalid client delivery backup settings')
+    if delivery is not None:client_delivery.validate({**delivery,'smtp_enabled':False,'bot_enabled':False})
     for key in ('managed_lifetime','panel_traffic_baseline'):
         require(type(value.get(key,0)) is int and 0<=value.get(key,0)<=10**18, 'Invalid panel traffic baseline')
     return state, totals, conf, telegram
@@ -94,7 +97,7 @@ def restore(store, runtime, value, server_address=None):
         old_state = store.get('state'); was_running = runtime.running
         before = None
         old_totals = store.totals()
-        old_keys = {key: store.get(key) for key in ('traffic_settings','telegram','managed_lifetime','panel_traffic_baseline')}
+        old_keys = {key: store.get(key) for key in ('traffic_settings','telegram','client_delivery','managed_lifetime','panel_traffic_baseline')}
         try:
             if runtime.running:runtime.stop()
             old_totals=store.totals()  # Includes the final live collection.
@@ -103,10 +106,12 @@ def restore(store, runtime, value, server_address=None):
                 db.execute('DELETE FROM traffic')
                 db.executemany('INSERT INTO traffic VALUES(?,?,?)', [(key, row['upload'], row['download']) for key,row in totals.items()])
                 for key, item in {'traffic_settings':conf, 'telegram':telegram if telegram is not None else {**notifications.settings(store),'enabled':False},
+                                  'client_delivery':client_delivery.validate({**(value.get('client_delivery') or client_delivery.settings(store)),'smtp_enabled':False,'bot_enabled':False}),
                                   'managed_lifetime':value.get('managed_lifetime',0), 'panel_traffic_baseline':value.get('panel_traffic_baseline',0)}.items():
                     if key=='telegram':item={**item,'enabled':False}
                     db.execute('INSERT OR REPLACE INTO kv VALUES(?,?)',(key,json.dumps(item)))
                 db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued'")
+                db.execute("UPDATE client_messages SET status='cancelled' WHERE status='queued'")
             runtime.apply(state, save=True)
         except Exception:
             with store.connect() as db:

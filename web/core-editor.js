@@ -3,7 +3,7 @@
 const CoreSchema=(()=>{
  let catalog;
  const clone=value=>JSON.parse(JSON.stringify(value));
- const title=key=>(catalog?.labels&&Object.hasOwn(catalog.labels,key)?catalog.labels[key]:null)||({__proto__:null,dns:'DNS',tls:'TLS',ntp:'NTP',http:'HTTP',url:'URL',ip:'IP',uuid:'UUID',alpn:'ALPN',sni:'SNI',quic:'QUIC',tcp:'TCP',udp:'UDP',api:'API',cidr:'CIDR',srs:'SRS',mtu:'MTU',ech:'ECH',reality:'REALITY',utls:'uTLS',dhcp:'DHCP',ssh:'SSH',tuic:'TUIC',vmess:'VMess',vless:'VLESS',hysteria2:'Hysteria2',anytls:'AnyTLS'}[key]||key.replaceAll('-','_').split('_').map(word=>({__proto__:null,dns:'DNS',tls:'TLS',ip:'IP',http:'HTTP',url:'URL',tcp:'TCP',udp:'UDP',api:'API',alpn:'ALPN',sni:'SNI',mtu:'MTU',cidr:'CIDR',id:'ID',ssid:'SSID',bssid:'BSSID',wifi:'Wi-Fi',mac:'MAC',rtt:'RTT',bbr:'BBR'}[word]||word.charAt(0).toUpperCase()+word.slice(1))).join(' '));
+ const title=key=>(catalog?.labels&&Object.hasOwn(catalog.labels,key)?catalog.labels[key]:null)||({__proto__:null,dns:'DNS',dnssec:'DNSSEC',tls:'TLS',ntp:'NTP',http:'HTTP',url:'URL',ip:'IP',uuid:'UUID',alpn:'ALPN',sni:'SNI',quic:'QUIC',tcp:'TCP',udp:'UDP',api:'API',cidr:'CIDR',srs:'SRS',mtu:'MTU',ech:'ECH',reality:'REALITY',utls:'uTLS',dhcp:'DHCP',ssh:'SSH',tuic:'TUIC',vmess:'VMess',vless:'VLESS',hysteria2:'Hysteria2',anytls:'AnyTLS'}[key]||key.replaceAll('-','_').split('_').map(word=>({__proto__:null,dns:'DNS',dnssec:'DNSSEC',tls:'TLS',ip:'IP',http:'HTTP',url:'URL',tcp:'TCP',udp:'UDP',api:'API',alpn:'ALPN',sni:'SNI',mtu:'MTU',cidr:'CIDR',id:'ID',ssid:'SSID',bssid:'BSSID',wifi:'Wi-Fi',mac:'MAC',rtt:'RTT',bbr:'BBR'}[word]||word.charAt(0).toUpperCase()+word.slice(1))).join(' '));
  const ref=s=>s?.$ref?catalog.schema.$defs[s.$ref.split('/').at(-1)]:s||{};
  function merge(a,b){return {...a,...b,properties:{...a.properties,...b.properties},required:[...new Set([...(a.required||[]),...(b.required||[])])]};}
  function branches(raw){
@@ -41,7 +41,14 @@ const CoreSchema=(()=>{
   const dnsPorts={udp:53,tcp:53,tls:853,quic:853,https:443,h3:443};
   const guided=settings.layout==='dns';
   const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
-  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
+  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);if(settings.grouped)groupFields();for(const input of container.querySelectorAll('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
+  function groupFields(){
+   const root=container.querySelector(':scope > .schema-fields');if(!root)return;
+   const schema=choose(raw,value),basics=new Set([...(schema.required||[]),'tag','enabled','disabled','level','timestamp','output','server','server_port','interval','domain_resolver','system','name','mtu','address','private_key','public_key','listen','listen_port','peers','users','password','passwords','tls','domain','domains','email','api_token','api_key','token','auth_key','origin_ca_key','dns01_challenge','store','certificate','certificate_path','certificate_directory_path','providers','provider','cache_file','clash_api']);
+   const primary=document.createElement('div'),advanced=document.createElement('details'),summary=document.createElement('summary'),extra=document.createElement('div');primary.className=extra.className='fixed-fields';advanced.className='option-section';advanced.dataset.corePanel='fixed-advanced';summary.textContent='Advanced connection and system settings';advanced.append(summary,extra);
+   for(const node of [...root.children]){const key=node.dataset.coreField;(basics.has(key)?primary:extra).append(node);if(!basics.has(key)&&Object.hasOwn(value||{},key))advanced.open=true;}
+   root.className='schema-grouped';root.replaceChildren(primary);if(extra.childElementCount)root.append(advanced);
+  }
   function dnsObject(s,obj,set,id,label,root,depth,scope,variant=''){
    const props=s.properties||{},required=s.required||[],remote=root&&Object.hasOwn(dnsPorts,obj.type),tls=label==='TLS';
    const basic=(root?['tag',...(remote?['server','server_port','path','domain_resolver','detour']:['interface','endpoint','service','inet4_range','inet6_range','path','predefined']),...(props.tls?['tls']:[])]:tls?(settings.simple?['server_name','insecure']:['enabled','server_name','insecure']):Object.keys(obj));
@@ -67,7 +74,7 @@ const CoreSchema=(()=>{
    // Unknown future fields stay in the model and can be edited in JSON view.
    return `<div class="dns-field-grid ${root?'dns-root-fields':''}">${pinned.map(key=>field(key)+(key==='tag'?variant:'')).join('')}</div>${advanced}${!settings.simple&&unknown.length?'<p class="note">Additional stored fields are preserved. Use JSON view to edit them.</p>':''}`;
   }
-  function render(input,v,set,label,root=false,depth=0,scope=settings.scope||''){
+  function render(input,v,set,label,root=false,depth=0,scope=settings.scope||'',optional=false){
    if(depth>20)return '<p class="note">Nesting limit reached. Use the JSON view for this value.</p>';
    const id=String(sequence++);
    const all=branches(input).filter(branch=>!root||!settings.types||settings.types.includes(branch.properties?.type?.const)),s=choose(input,v),html=[];
@@ -84,53 +91,57 @@ const CoreSchema=(()=>{
      for(const [key,p] of Object.entries(props))if('const'in p&&!Object.hasOwn(obj,key))obj[key]=p.const;
      const variant=root&&all.length>1?html.pop():'';
      html.push(dnsObject(s,obj,set,id,label,root,depth,scope,variant));
-     if(!v||typeof v!=='object'||Array.isArray(v))set(obj);
+     if((!v||typeof v!=='object'||Array.isArray(v))&&(!settings.fixed||!optional))set(obj);
     }else{
-    const shown=new Set([...Object.keys(obj),...required,...Object.entries(props).filter(([k,p])=>'const'in p).map(([k])=>k)]);
-    html.push('<div class="schema-fields">');
+    const shown=new Set([...(settings.fixed?Object.keys(props).filter(key=>!settings.exclude?.includes(key)):[]),...Object.keys(obj),...required,...Object.entries(props).filter(([k,p])=>'const'in p).map(([k])=>k)]);
+    html.push('<div class="schema-fields '+(settings.fixed?'fixed-fields':'')+'">');
     for(const key of shown){
      const rawProperty=Object.hasOwn(props,key)?props[key]:s.additionalProperties,p=rawProperty===true?{}:rawProperty;if(!p||typeof p!=='object')continue;
-     const has=Object.hasOwn(obj,key),item=has?obj[key]:seed(p);
+     const has=Object.hasOwn(obj,key),item=has?obj[key]:settings.fixed&&!required.includes(key)?undefined:seed(p);
      if(!has&&required.includes(key))obj[key]=item;
      if('const'in p){if(!has)obj[key]=p.const;continue;}
      const reference=choose(p,item)['x-tag-reference'];
-     const help=reference?'Select a configured '+title(reference).toLowerCase()+'.':(catalog.help._documents?.[scope]?.[key]||catalog.help[key])?.description?.replace(/[`*_#]/g,'').slice(0,250)||'';
-     const control=render(p,item,x=>{Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)},Object.hasOwn(props,key)?title(key):key,false,depth+1,scope);
-     const remove=required.includes(key)?'':`<button type="button" class="schema-remove" aria-label="Remove ${e(title(key))}" data-core-remove="${id}" data-key="${e(key)}">×</button>`;
-     html.push(`<div class="schema-property"><div class="schema-property-control">${control}${help?`<small class="field-hint">${e(help)}</small>`:''}</div>${remove}</div>`);
+     const help=settings.help?.[key]|| (reference?'Select a configured '+title(reference).toLowerCase()+'.':(catalog.help._documents?.[scope]?.[key]||catalog.help[key])?.description?.replace(/[`*_#]/g,'').slice(0,250)||'');
+     const control=render(p,item,x=>{if(x===undefined||settings.fixed&&!required.includes(key)&&x==='')delete obj[key];else Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)},Object.hasOwn(props,key)?settings.labels?.[key]||title(key):key,false,depth+1,scope,!required.includes(key));
+     const remove=settings.fixed||required.includes(key)?'':`<button type="button" class="schema-remove" aria-label="Remove ${e(title(key))}" data-core-remove="${id}" data-key="${e(key)}">×</button>`;
+     html.push(`<div class="schema-property" data-core-field="${e(key)}"><div class="schema-property-control">${control}${help?`<small class="field-hint">${e(help)}</small>`:''}</div>${remove}</div>`);
     }
     const missing=Object.keys(props).filter(k=>!shown.has(k)&&!settings.exclude?.includes(k));
-    if(missing.length)html.push(`<label class="schema-add-label">Add option<select data-core-add="${id}" aria-label="Add option to ${e(label)}"><option value="">Choose an option…</option>${missing.map(k=>`<option value="${e(k)}">${e(title(k))}</option>`).join('')}</select></label>`);
+    if(missing.length&&!settings.fixed)html.push(`<label class="schema-add-label">Add option<select data-core-add="${id}" aria-label="Add option to ${e(label)}"><option value="">Choose an option…</option>${missing.map(k=>`<option value="${e(k)}">${e(title(k))}</option>`).join('')}</select></label>`);
     if(s.additionalProperties)html.push(`<div class="schema-map-add"><input data-core-map-key="${id}" aria-label="New key in ${e(label)}" placeholder="New name"><button type="button" class="btn sm" data-core-map-add="${id}">Add entry</button></div>`);
     html.push('</div>');
-    if(!v||typeof v!=='object'||Array.isArray(v))set(obj);
+    if((!v||typeof v!=='object'||Array.isArray(v))&&(!settings.fixed||!optional))set(obj);
     }
+   }else if(settings.fixed&&s.type==='array'&&['string','integer','number'].includes(choose(s.items,undefined).type)){
+    const item=choose(s.items,undefined);html.push(`<label>${e(label)}<textarea rows="3" data-core-lines="${id}" dir="ltr" autocomplete="off" spellcheck="false">${e((Array.isArray(v)?v:v===undefined?[]:[v]).join('\n'))}</textarea><small class="field-hint">One value per line.${item.enum?' Choices: '+e(item.enum.join(', '))+'.':''}</small></label>`);
    }else if(s.type==='array'){
     const array=Array.isArray(v)?v:v===undefined?[]:[v];
     html.push(`<fieldset class="schema-array"><legend>${e(label)}</legend>`);
     array.forEach((item,index)=>html.push(`<div class="schema-array-item">${render(s.items||{},item,x=>{array[index]=x;set(array)},`${label} ${index+1}`,false,depth+1,scope)}<button type="button" class="schema-remove" aria-label="Remove item ${index+1}" data-core-item-remove="${id}" data-index="${index}">×</button></div>`));
     html.push(`<button type="button" class="btn sm" data-core-item-add="${id}">Add ${e(label)} item</button></fieldset>`);
-    if(!Array.isArray(v))set(array);
+    if(!Array.isArray(v)&&(!settings.fixed||!optional))set(array);
    }else if(s['x-tag-reference']&&settings.references){const choices=[...new Set([...(settings.references[s['x-tag-reference']]||[]),...(v?[v]:[])])];html.push(`<label>${e(label)}<select ${common}><option value="">${guided?'None / default':'Choose…'}</option>${choices.map(tag=>`<option value="${e(tag)}" ${tag===v?'selected':''}>${e(tag)}</option>`).join('')}</select></label>`);
-   }else if(s.enum){html.push(`<label>${e(label)}<select ${common}>${s.enum.map(x=>`<option value="${e(x)}" ${x===v?'selected':''}>${e(catalog.labels?.[x]||String(x))}</option>`).join('')}</select></label>`);
-   }else if(s.type==='boolean')html.push(`<label class="check-field"><input type="checkbox" ${common} ${v?'checked':''}><span>${e(label)}</span></label>`);
+   }else if(s.enum){html.push(`<label>${e(label)}<select ${common}>${settings.fixed&&optional?`<option value="" ${v===undefined?'selected':''}>Default / any</option>`:''}${s.enum.map(x=>`<option value="${e(x)}" ${x===v?'selected':''}>${e(settings.valueLabels?.[label]?.[String(x)]||catalog.labels?.[x]||String(x))}</option>`).join('')}</select></label>`);
+   }else if(settings.fixed&&optional&&s.type==='boolean')html.push(`<label>${e(label)}<select ${common}><option value="" ${v===undefined?'selected':''}>${settings.positiveFlags?'Any / not required':'Core default'}</option><option value="true" ${v===true?'selected':''}>${settings.positiveFlags?'Require this condition':'Yes'}</option><option value="false" ${v===false?'selected':''}>${settings.positiveFlags?'Off (explicit false)':'No'}</option></select></label>`);
+   else if(s.type==='boolean')html.push(`<label class="check-field"><input type="checkbox" ${common} ${v?'checked':''}><span>${e(label)}</span></label>`);
    else if(['integer','number'].includes(s.type))html.push(`<label>${e(label)}<input type="number" ${common} value="${e(v??'')}" step="${s.type==='integer'?'1':'any'}" ${s.minimum!==undefined?`min="${s.minimum}"`:''} ${s.maximum!==undefined?`max="${s.maximum}"`:''}></label>`);
    else if(s.type==='string'||'const'in s){const secret=/password|private.key|secret|^key$/i.test(label);html.push(`<label>${e(label)}<textarea rows="${String(v||'').includes('\n')?4:1}" ${common} class="${secret?'schema-secret':''}" dir="ltr" autocomplete="off">${e(v??'')}</textarea></label>`);}
    else html.push(`<label>${e(label)} (JSON)<textarea rows="4" data-core-json="${id}" dir="ltr">${e(JSON.stringify(v??null,null,2))}</textarea></label>`);
    const content=html.join('');
-   return !root&&(s.type==='object'||s.properties)?`<details class="schema-object" open><summary>${e(label)}</summary>${content}</details>`:content;
+   return !root&&(s.type==='object'||s.properties)?`<details class="schema-object" ${!settings.fixed||v!==undefined?'open':''}><summary>${e(label)}</summary>${content}</details>`:content;
   }
   function readInput(input){
    const node=nodes.get(input.dataset.coreInput);if(!node)return;
    node.display=displayValue(input);
    const s=choose(node.input,node.value);let v=input.type==='checkbox'?input.checked:input.value;
    if(['integer','number'].includes(s.type)){if(v===''){node.set(undefined);return;}v=Number(v);}
+   if(settings.fixed&&s.type==='boolean'&&input.type!=='checkbox')v=v===''?undefined:v==='true';
    if(s.enum){v=s.enum.find(x=>String(x)===String(v));}
    node.set(v);
   }
   // Autofill and some input methods can update controls without an input event.
   // Keep untouched values byte-for-byte; synchronize only changed controls.
-  function syncInputs(){for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
+  function syncInputs(){for(const input of container.querySelectorAll('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);}for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
   container.addEventListener('input',event=>readInput(event.target));
   function change(event){
    const el=event.target;

@@ -61,19 +61,43 @@ function routeJSONEditor(collection,item={},preset,back){
  if(back)$('#route-guided').onclick=()=>{try{const f=$('#modal-form'),c=routeParseJSON(f.elements.route_json.value);back(routeRecord(item,c,f));}catch(err){$('#form-error').textContent=err.message;}};
 }
 function routeParseJSON(value){let c;try{c=JSON.parse(value);}catch{throw Error('Enter valid JSON.');}if(!c||Array.isArray(c)||typeof c!=='object')throw Error('Configuration must be a JSON object.');return c;}
+// Match schemas are pinned to the installed core, not the moving documentation site.
+function ruleMatchProperties(dns=false){return CoreSchema.byName(dns?'DNSRule':'Rule').oneOf[0].allOf[0].properties;}
+function ruleMatchExtrasHTML(c,dns=false){
+ const known=new Set((state.clients||[]).map(row=>'client-'+row.id));
+ return `<fieldset class="route-scope"><legend>Client accounts · any selected</legend><label>Find a client<input type="search" id="match-client-search" placeholder="Search client accounts" autocomplete="off"></label>${routeChecks('scope_client',(state.clients||[]).map(row=>['client-'+row.id,row.name]),c.auth_user)||'<p class="note">No panel clients yet.</p>'}<p class="note">Matches the authenticated account on a managed inbound. This is different from a detected client application.</p>${field('Other authenticated usernames (optional)','scope_auth_other',routeList(c.auth_user).filter(x=>!known.has(x)).join(', '),'text','Standalone inbounds use the authentication names configured in that listener.')}</fieldset><details class="option-section" id="additional-matches"><summary>Additional match conditions</summary><p class="note">Empty means any. Destination domains and destination IP conditions share an OR group. Destination ports, source addresses and source ports form separate groups; those groups and other conditions must all match. Rule sets use the core’s native merge and grouping rules. Invert negates the entire match.</p>${dns?'<p class="note">Source and account matches need metadata from a hijacked incoming DNS request. Core-generated lookups may have no incoming account. Response conditions need response evaluation; do not use an answer IP as a query address.</p>':''}${dns?'<p class="note">Protocol/process conditions apply only when the DNS request carries that metadata. The managed DNS bridge runs before custom traffic rules; account, inbound, domain and query-type matches are the useful defaults for managed profiles.</p>':'<p class="note">Detected protocol and client application need an earlier Detect protocol rule. Process, OS user, Wi-Fi and interface conditions describe this server/device, not a remote subscriber’s applications. Enable process or neighbor discovery in Routing defaults where needed.</p>'}<div id="match-extra-fields"></div></details>`;
+}
+function mountRuleMatchExtras(form,c,dns=false){
+ const props=ruleMatchProperties(dns),primary=dns?['domain','domain_suffix','domain_keyword','domain_regex','rule_set']:['domain','domain_suffix','domain_keyword','domain_regex','ip_cidr','source_ip_cidr','port','port_range','rule_set'];
+ const skip=new Set(['type','action','inbound','network','auth_user',...(dns?['query_type']:[])]);
+ const original=Object.fromEntries(Object.entries(c).filter(([key])=>Object.hasOwn(props,key)&&!skip.has(key)));
+ let editors=[],lastCombined;
+ function sync(){
+  const combined=form.elements[dns?'dns_match':'match_kind'].value==='combined';if(editors.length&&lastCombined===combined)return;
+  const value=editors.length?Object.assign({},...editors.map(editor=>editor.value())):original;
+  const fields=Object.fromEntries(Object.entries(props).filter(([key])=>!skip.has(key)&&(combined||!primary.includes(key))));
+  if(dns){const tags=(state.dns_rules||[]).filter(row=>row.enabled!==false).map(row=>legacyCoreConfig('dns_rules',row)).filter(rule=>rule.action==='evaluate'&&rule.tag).map(rule=>rule.tag);fields.match_response={enum:[true,false,...new Set([...tags,...(typeof c.match_response==='string'?[c.match_response]:[])])]};}
+  const groups=[[dns?'Domain patterns, response addresses & shared lists':'Destination & shared lists',['domain','domain_suffix','domain_keyword','domain_regex','ip_cidr','ip_is_private','rule_set','rule_set_ip_cidr_match_source']],['Connection & query',['ip_version','source_ip_cidr','source_ip_is_private','source_port','source_port_range','port','port_range','query_client_subnet','query_dnssec']],['Detected application',['protocol','client']],['Process on this server',['process_name','process_path','process_path_regex','package_name','package_name_regex','user','user_id']],['Network environment',['network_type','network_is_expensive','network_is_constrained','wifi_ssid','wifi_bssid','interface_address','network_interface_address','default_interface_address','source_mac_address','source_hostname','preferred_by','clash_mode']],['DNS response evaluation',['match_response','ip_accept_any','response_rcode','response_answer','response_ns','response_extra']],['Match behavior',['invert']]];
+  const container=$('#match-extra-fields',form);container.replaceChildren();editors=[];
+  for(const [title,keys] of groups){const selected=keys.filter(key=>Object.hasOwn(fields,key));if(!selected.length)continue;const section=document.createElement('section'),heading=document.createElement('h4'),body=document.createElement('div');section.className='match-field-group';heading.textContent=title;section.append(heading,body);container.append(section);
+   editors.push(CoreSchema.mount(body,{type:'object',properties:Object.fromEntries(selected.map(key=>[key,fields[key]]))},Object.fromEntries(Object.entries(value).filter(([key])=>selected.includes(key))),{fixed:true,positiveFlags:true,valueLabels:{'Match Response':{true:'Latest untagged evaluated response',false:'Query only (off)'}},labels:{ip_cidr:dns?'Response IP networks':'Destination IP networks',ip_is_private:dns?'Private response address':'Private destination address',client:'Detected client application',user:'Process OS username',user_id:'Process OS user ID'},references:coreReferences()}));
+  }
+  lastCombined=combined;
+ }
+ sync();form.addEventListener('change',sync);
+ const search=$('#match-client-search',form);search.addEventListener('input',()=>{const needle=search.value.trim().toLowerCase();for(const row of $$('label',search.closest('fieldset').querySelector('.route-checks')))row.hidden=!row.textContent.toLowerCase().includes(needle);});
+ form.ruleMatches=()=>{const extra=Object.assign({},...editors.map(editor=>editor.value())),auth=[...new Set([...new FormData(form).getAll('scope_client'),...routeLines(form.elements.scope_auth_other.value)])];if(auth.length)extra.auth_user=auth;return extra;};
+ return editors;
+}
 function routeGuidedRule(c){
- const families=[['domain','domain_suffix','domain_keyword','domain_regex'],['ip_cidr','source_ip_cidr'],['port','port_range'],['rule_set']];
- if(routeList(c.network).some(x=>!['tcp','udp','icmp'].includes(x)))return false;
- const matches=families.filter(keys=>keys.some(key=>Object.hasOwn(c,key)));
- if(c.type&&c.type!=='default'||c.invert||!Object.hasOwn(routeActions,c.action||'route')||matches.length>1)return false;
- if(matches[0]&&matches[0][0]!=='port'&&matches[0].filter(k=>Object.hasOwn(c,k)).length>1)return false;
- const allowed=['type','action','outbound','inbound','network',...families.flat()];
- return Object.keys(c).every(k=>allowed.includes(k));
+ if(c.type&&c.type!=='default'||!Object.hasOwn(routeActions,c.action||'route'))return false;
+ const allowed=new Set([...Object.keys(ruleMatchProperties()),'action','outbound']);
+ return Object.keys(c).every(key=>allowed.has(key));
 }
 function editRouteRule(item={},preset){
  const c=preset||legacyCoreConfig('route_rules',item);
  if(!routeGuidedRule(c))return routeJSONEditor('route_rules',item,c,editRouteRule);
- const family=['domain','domain_suffix','domain_keyword','domain_regex'].some(k=>Object.hasOwn(c,k))?'domains':['ip_cidr','source_ip_cidr'].some(k=>Object.hasOwn(c,k))?'addresses':['port','port_range'].some(k=>Object.hasOwn(c,k))?'ports':c.rule_set?'sets':Object.keys(c).length?'all':'domains';
+ const family=([['domain','domain_suffix','domain_keyword','domain_regex'],['ip_cidr','source_ip_cidr'],['port','port_range'],['rule_set']].filter(keys=>keys.some(k=>Object.hasOwn(c,k))).length>1||['domain','domain_suffix','domain_keyword','domain_regex','ip_cidr','source_ip_cidr'].filter(k=>Object.hasOwn(c,k)).length>1)?'combined':['domain','domain_suffix','domain_keyword','domain_regex'].some(k=>Object.hasOwn(c,k))?'domains':['ip_cidr','source_ip_cidr'].some(k=>Object.hasOwn(c,k))?'addresses':['port','port_range'].some(k=>Object.hasOwn(c,k))?'ports':c.rule_set?'sets':Object.keys(c).length?'all':'domains';
  const domainKind=['domain','domain_keyword','domain_regex'].find(k=>Object.hasOwn(c,k))||'domain_suffix',ipKind=c.source_ip_cidr?'source_ip_cidr':'ip_cidr';
  const inbounds=[...(state.inbounds||[]),...(state.endpoints||[])].filter(x=>x.enabled!==false).map(routeTag).filter(Boolean);
  const sets=(state.rule_sets||[]).filter(x=>x.enabled!==false).map(routeTag).filter(Boolean);
@@ -81,15 +105,15 @@ function editRouteRule(item={},preset){
  for(const tag of routeList(c.inbound))if(!inbounds.includes(tag))inbounds.push(tag);
  for(const tag of routeList(c.rule_set))if(!sets.includes(tag))sets.push(tag);
  openModal(item.id?'Edit traffic rule':'New traffic rule','Choose the traffic, then decide what happens to it.',routeMeta(item)+
- routeSection('1','What traffic should match?','Choose one kind of match. Values within a list match any entry.',routeChoices('match_kind',[['domains','Domains'],['addresses','IP addresses'],['ports','Ports'],['sets','Rule sets'],['all','All traffic']],family)+
+ routeSection('1','What traffic should match?','Start with a match, or combine several conditions. Values within a list match any entry.',routeChoices('match_kind',[['domains','Domains'],['addresses','IP addresses'],['ports','Ports'],['sets','Rule sets'],['all','All traffic'],['combined','Combine conditions']],family)+
  `<div data-route-match="domains">${routeChoices('domain_kind',[['domain_suffix','Domain & subdomains'],['domain','Exact domain'],['domain_keyword','Keyword'],['domain_regex','Regular expression']],domainKind,'compact')}${textField('Domains / patterns','domain_values',routeList(c[domainKind]).join('\n'),'One per line. Use hostnames such as example.com, without https:// or a path.')}<p class="note">For IP-only connections, place a Detect protocol rule above domain rules to read a hostname when available.</p></div>`+
  `<div data-route-match="addresses">${routeChoices('ip_kind',[['ip_cidr','Destination IP'],['source_ip_cidr','Source IP']],ipKind,'compact')}${textField('IP addresses / networks','ip_values',routeList(c[ipKind]).join('\n'),'One per line, such as 203.0.113.8 or 2001:db8::/32.')}</div>`+
  `<div data-route-match="ports">${field('Destination ports','port_values',[...routeList(c.port),...routeList(c.port_range).map(x=>String(x).replace(':','-'))].join(', '),'text','Separate with commas or new lines. For example: 80, 443, 8000-9000.')}</div>`+
  `<div data-route-match="sets">${sets.length?routeChecks('match_set',sets.map(x=>[x,x]),c.rule_set):'<p class="note">Create a shared rule set first, or choose another match type.</p>'}</div><div data-route-match="all"><p class="route-warning">Matches all traffic within the scope below. A routing or blocking action here can make later rules unreachable.</p></div>`)+
  routeSection('2','What should happen?','',routeChoices('rule_action',Object.entries(routeActions).map(([key,[label,help]])=>[key,label,help]),c.action||'route')+`<div id="route-target">${selectField('Destination','rule_outbound',[...new Set([...routeDestinations(),...(c.outbound?[c.outbound]:[])])].map(x=>[x,routeDestinationName(x)]),c.outbound||'direct')}<p class="note">Need another server? Add it under Destinations first.</p></div><p class="note" id="route-action-help"></p>`)+
- routeSection('3','Limit the scope','Optional. The match above AND every selected scope group must match. Leave a group empty for any.',`<fieldset class="route-scope"><legend>Inbound · any selected</legend>${inbounds.length?routeChecks('scope_inbound',inbounds.map(x=>[x,x]),c.inbound):'<p class="note">All incoming connections</p>'}</fieldset><fieldset class="route-scope"><legend>Network · any selected</legend>${routeChecks('scope_network',[['tcp','TCP'],['udp','UDP'],['icmp','ICMP']],c.network)}</fieldset>`)+
+ routeSection('3','Limit the scope','Optional. The match above AND every selected scope group must match. Leave a group empty for any.',`<fieldset class="route-scope"><legend>Inbound · any selected</legend>${inbounds.length?routeChecks('scope_inbound',inbounds.map(x=>[x,x]),c.inbound):'<p class="note">All incoming connections</p>'}</fieldset><fieldset class="route-scope"><legend>Network · any selected</legend>${routeChecks('scope_network',[['tcp','TCP'],['udp','UDP'],['icmp','ICMP']],c.network)}</fieldset>`+ruleMatchExtrasHTML(c))+
  '<div class="route-editor-footer"><span>Need logical groups or more options?</span><button type="button" class="text-link" id="route-to-json">Edit advanced JSON</button></div>',async form=>{await saveRecord('route_rules',routeRecord(item,readRouteRule(form),form));});
- const form=$('#modal-form');
+ const form=$('#modal-form');mountRuleMatchExtras(form,c);
  const sync=()=>{for(const node of $$('[data-route-match]',form))node.hidden=node.dataset.routeMatch!==form.elements.match_kind.value;$('#route-target').hidden=form.elements.rule_action.value!=='route';$('#route-action-help').textContent=({'hijack-dns':'Use this for DNS requests only, typically destination port 53. DNS rules select the resolver.',sniff:'Detection continues to later rules. Put this before rules that match a detected protocol.',resolve:'Resolution uses your DNS rules and continues to later rules. Put this before IP-based matches.'})[form.elements.rule_action.value]||'';};
  form.addEventListener('change',sync);sync();
  $('#route-to-json').onclick=()=>{try{const config=readRouteRule(form);routeJSONEditor('route_rules',routeRecord(item,config,form),config,editRouteRule);}catch(err){$('#form-error').textContent=err.message;}};
@@ -104,7 +128,7 @@ function readRouteRule(form){
  }
  if(kind==='sets'){c.rule_set=f.getAll('match_set');if(!c.rule_set.length)throw Error('Select at least one rule set.');}
  const inbounds=f.getAll('scope_inbound'),network=f.getAll('scope_network');if(inbounds.length)c.inbound=inbounds;if(network.length)c.network=network;
- c.action=f.get('rule_action');if(c.action==='route')c.outbound=f.get('rule_outbound');
+ Object.assign(c,form.ruleMatches?.()||{});c.action=f.get('rule_action');if(c.action==='route')c.outbound=f.get('rule_outbound');
  return c;
 }
 function editRouteDefaults(){
@@ -126,11 +150,18 @@ function routeGuidedDestination(c){
  if(c.tls&&!Object.keys(c.tls).every(k=>['enabled','server_name','insecure'].includes(k)))return false;
  return true;
 }
-function editRouteDestination(item={}){
- const c=legacyCoreConfig('outbounds',item),initial=c.type||'';
- if(initial&&!routeGuidedDestination(c))return routeJSONEditor('outbounds',item,c);
+function importRouteDestination(item={}){
+ openModal('Import external destination','Paste a connection URI, subscription URL or Sing-box JSON. Review the extracted fields before saving.',`${textField('External link or JSON','external_link','','HTTP / HTTPS subscription URLs, Sing-box remote profile links, or individual proxy links.')}<p class="note">Only public subscription hosts can be fetched. Plain HTTP sends the subscription link without encryption. Local files, commands and local resource references are never imported.</p>`,async form=>{
+  const session=csrf,result=await api('destination-import',{value:form.elements.external_link.value});if(session!==csrf)return false;
+  const show=()=>{openModal('Choose a destination','A subscription may contain several proxies. Import one at a time.',selectField('Destination','import_choice',result.destinations.map((c,index)=>[String(index),c.tag+' · '+protocolLabel(c.type)+' · '+c.server]),'0'),form=>{const config=result.destinations[Number(form.elements.import_choice.value)];editRouteDestination(item,config);return false;},'Review fields');};
+  if(result.destinations.length===1){editRouteDestination(item,result.destinations[0]);return false;}show();return false;
+ },'Read link');
+}
+function editRouteDestination(item={},preset){
+ const c=preset||legacyCoreConfig('outbounds',item),initial=c.type||'';
+ if(initial&&!routeGuidedDestination(c))return preset?editCoreRecord('outbounds',item,c):routeJSONEditor('outbounds',item,c);
  const candidates=routeDestinations().filter(x=>x!==(c.tag||''));
- openModal(item.id?'Edit destination':'Add destination','Connect directly, chain through a proxy server, or group existing destinations.',routeMeta(item)+`<div class="form-grid">${field('Destination tag','tag',c.tag||'','text','A unique name used by traffic rules.')}${selectField('Connection type','destination_type',[['','Choose a connection type'],...coreCatalog.types.outbounds.map(x=>[x,protocolLabel(x)+(Object.hasOwn(routeProxyFields,x)?'':' · Advanced JSON')])],initial)}</div><div id="route-connection-fields"></div><div class="route-editor-footer"><span>Transport, dial options or other advanced settings?</span><button class="text-link" type="button" id="destination-to-json">Edit advanced JSON</button></div>`,async form=>{await saveRecord('outbounds',routeRecord(item,readRouteDestination(form),form));});
+ openModal(item.id?'Edit destination':'Add destination','Connect directly, chain through a proxy server, or group existing destinations.',`<div class="inline-buttons section-gap">${btn('External link','route-destination-import','download','',`data-id="${e(item.id||'')}"`)}</div>`+routeMeta(item)+`<div class="form-grid">${field('Destination tag','tag',c.tag||'','text','A unique name used by traffic rules.')}${selectField('Connection type','destination_type',[['','Choose a connection type'],...coreCatalog.types.outbounds.map(x=>[x,protocolLabel(x)+(Object.hasOwn(routeProxyFields,x)?'':' · Advanced JSON')])],initial)}</div><div id="route-connection-fields"></div><div class="route-editor-footer"><span>Transport, dial options or other advanced settings?</span><button class="text-link" type="button" id="destination-to-json">Edit advanced JSON</button></div>`,async form=>{await saveRecord('outbounds',routeRecord(item,readRouteDestination(form),form));});
  const form=$('#modal-form');form.elements.tag.required=true;form.elements.destination_type.required=true;
  const draw=()=>{
   const type=form.elements.destination_type.value,server=!['direct','selector','urltest',''].includes(type),group=['selector','urltest'].includes(type),keys=routeProxyFields[type];
@@ -180,6 +211,7 @@ function readRouteSet(form){
  return config;
 }
 async function handleRouting(action,target){
+ if(action==='route-destination-import')return importRouteDestination((state.outbounds||[]).find(row=>row.id===target.dataset.id)||{});
  const id=target.dataset.id,find=collection=>(state[collection]||[]).find(x=>x.id===id);
  if(action==='route-warp-new')return createWARP();
  if(action==='route-use-destination')return editRouteRule({}, {domain_suffix:[],action:'route',outbound:id});

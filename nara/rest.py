@@ -4,7 +4,7 @@ import re
 import time
 import uuid
 from urllib.parse import parse_qs,urlsplit
-from . import __version__,api_keys,native,clients,notifications,traffic,client_links
+from . import __version__,api_keys,native,clients,notifications,traffic,client_links,client_portal
 from .config import require,build_config,client_config,eligible
 
 RESOURCES={'clients':'clients','groups':'client_groups','inbounds':'inbounds','tls':'tls',
@@ -71,7 +71,7 @@ def openapi():
     for path,summary in [('/clients/bulk','Create up to 500 clients with one apply'),('/clients/bulk/preview','Preview generated names and settings'),
                          ('/clients/actions','Apply one action to selected clients'),('/clients/actions/preview','Preview an action without applying')]:
         add(path,'post',summary,'clients:write',True)
-    for suffix in ('profile','subscription','links'):
+    for suffix in ('profile','subscription','links','portal'):
         add('/clients/{id}/'+suffix,'get','Read private client '+suffix,'read + secrets:read')
         paths['/clients/{id}/'+suffix]['get']['parameters']=[{'name':'id','in':'path','required':True,'schema':{'type':'string'}}]
     for path,scope,summary in [('/core/start','core:control','Start or reapply core'),('/core/stop','core:control','Stop core'),
@@ -179,10 +179,11 @@ class API:
             if path.startswith('core/options/') and path.split('/')[-1] in OPTIONS:
                 section=path.split('/')[-1]
                 return 200,{'data':visible(state.get('core_options',{}).get(section,{}),secret),'revision':state['revision'],**({'default_resolver':state['settings']['dns_final']} if section=='dns' else {})}
-            match=re.fullmatch(r'clients/([A-Za-z0-9_-]+)/(?P<kind>profile|subscription|links)',path)
+            match=re.fullmatch(r'clients/([A-Za-z0-9_-]+)/(?P<kind>profile|subscription|links|portal)',path)
             if match:
                 self.need('secrets:read');client=next((row for row in state['clients'] if row['id']==match[1]),None)
                 if not client:raise Fault(404,'not_found','Client not found')
+                if match['kind']=='portal':return 200,{'data':{'url':client_portal.url(state,self.access,'http://'+self.h.headers.get('Host','')+'/',client)},'revision':state['revision']}
                 if match['kind']=='links':return 200,{'data':client_links.links(state,client,self.store.totals()),'revision':state['revision']}
                 if match['kind']=='profile':
                     active=self.runtime.active
@@ -229,7 +230,7 @@ class API:
             patch={k:v for k,v in data.items() if k!='revision'}
             require('id' not in patch,'Record IDs cannot be set or changed')
             if collection=='clients':
-                require(set(patch)<={'name','note','enabled','quota_bytes','expires_at','inbound_ids','group_ids','tags'},'Unsupported client field')
+                require(set(patch)<={'name','note','enabled','quota_bytes','expires_at','inbound_ids','group_ids','tags','email','telegram_id'},'Unsupported client field')
             if collection=='client_groups':require(set(patch)<={'name','description'},'Unsupported group field')
             record=merge_patch(row,patch) if row else patch
             if collection in native.EXTRA_COLLECTIONS or collection in ('dns_servers','dns_rules','rule_sets') or collection=='inbounds' and 'config' in record:

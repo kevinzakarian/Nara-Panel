@@ -40,7 +40,7 @@ def initial_state():
             "clients": [], "client_groups": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "type": "udp",
             "server": "1.1.1.1", "port": 53}],
             "settings": {"server_address": "", "public_url": "", "subscription_url": "", "dns_final": "bootstrap",
-                         "block_private": True, "time_zone": "UTC"}}
+                         "block_private": True, "time_zone": "UTC", "core_features_enabled": False}}
 
 
 def require(ok, message):
@@ -89,6 +89,7 @@ def validate(state):
             require(bool(re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", row.get("id", ""))), "Invalid record ID")
             ids.append(row["id"])
         require(len(ids) == len(set(ids)), "Duplicate record ID")
+    require(isinstance(state["settings"].get("core_features_enabled", True), bool), "Invalid Core features visibility")
     tls_ids = {x["id"] for x in state["tls"]}
     inbound_ids = {x["id"] for x in state["inbounds"]}
     dns_tags = {x.get("tag") for x in state["dns_servers"]}
@@ -217,6 +218,9 @@ def validate(state):
         group_names.append(group["name"].strip().casefold())
     require(len(group_names) == len(set(group_names)), "Group names must be unique")
     for c in state["clients"]:
+        from .client_portal import contact
+        contact(c.get("email", ""), "email")
+        contact(c.get("telegram_id", ""), "telegram")
         require(isinstance(c.get("group_ids", []), list) and len(c.get("group_ids", [])) <= 20 and all(isinstance(x, str) for x in c.get("group_ids", [])) and set(c.get("group_ids", [])) <= group_ids, "Choose up to 20 valid client groups")
         require(isinstance(c.get("tags", []), list) and len(c.get("tags", [])) <= 20 and all(isinstance(x, str) and 1 <= len(x) <= 32 for x in c.get("tags", [])), "Use up to 20 tags of 1–32 characters")
         require(isinstance(c.get("note", ""), str) and len(c.get("note", "")) <= 1000, "Client note is too long")
@@ -235,7 +239,7 @@ def validate(state):
         require(bool(re.fullmatch(r"[A-Za-z0-9_-]{32,128}", c.get("token", ""))), "Invalid subscription token")
     for k in ("server_address", "public_url", "subscription_url"):
         value = state["settings"].get(k, "")
-        require(isinstance(value, str), "Invalid settings")
+        require(isinstance(value, str) and len(value.encode("utf-8")) <= 2048 and not any(ord(char)<33 or ord(char)==127 for char in value), "Public addresses must contain at most 2048 bytes without spaces or control characters")
         if value and k == "server_address":
             host(value)
         elif value:
@@ -391,7 +395,7 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
     for key in ("endpoints", "services", "certificate_providers", "http_clients", "network_namespaces"):
         if state.get(key):
             config[key] = [native.record(r) for r in state[key] if check_all or r.get("enabled", True)]
-    native.validate_references(config)
+    native.validate_references(config, {row.get("tag", "") for row in state["inbounds"]+state.get("endpoints", [])})
     return config
 
 

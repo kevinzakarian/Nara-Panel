@@ -19,7 +19,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, normalize_dns_record, require, validate
-from . import native, warp, security, clients, notifications, accounts, api_keys, rest, traffic, portable, client_links, migration
+from . import native, warp, security, clients, notifications, accounts, api_keys, rest, traffic, portable, client_links, migration, destination_import, client_portal, client_delivery
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
 from .store import password_matches
@@ -98,6 +98,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
     warp_lock = threading.Lock()
     account_lock = threading.RLock()
     api_limits, api_limit_lock = {}, threading.Lock()
+    portal_limits = {}
     migrations = migration.Manager(store, runtime) if role == "panel" else None
 
     class Handler(BaseHTTPRequestHandler):
@@ -125,6 +126,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header('X-Robots-Tag','noindex, nofollow, noarchive')
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
             for name, value in (headers or {}).items():
@@ -199,6 +201,25 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
         do_DELETE = do_PATCH
         do_PUT = do_PATCH
 
+        def portal_allowed(self):
+            now=time.monotonic();peer=self.client_address[0]
+            with throttle_lock:
+                if len(portal_limits)>=2048:
+                    for key in list(portal_limits):
+                        if now-portal_limits[key][0]>60:portal_limits.pop(key,None)
+                    if peer not in portal_limits and len(portal_limits)>=2048:return False
+                start,count=portal_limits.get(peer,(now,0))
+                if now-start>=60:start,count=now,0
+                portal_limits[peer]=(start,count+1)
+                return count<120
+
+        def portal_context(self, path):
+            match=re.fullmatch(r"/portal/([a-f0-9]{64})/(api|pair)?",path)
+            if not match:return None
+            model=store.get('state');client=client_portal.find(model,match[1])
+            if not client:return None
+            return model,client,match[2]
+
         def get(self):
             if base_path and urlsplit(self.path).path == base_path:
                 return self.send(308, "", headers={"Location": base_path + "/"})
@@ -207,6 +228,27 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 return self.send(404, {"error": "Not found"})
             if path == "/api/health":
                 return self.send(200, {"ok": True, "version": __version__, "core_running": runtime.running})
+            if role == 'subscription' and path.startswith('/portal-assets/'):
+                files={'style.css':'client-portal.css','portal.js':'client-portal.js','qrcodegen.js':'vendor/qrcodegen.js','subscription-qr.js':'subscription-qr.js'}
+                asset=files.get(path[len('/portal-assets/'):])
+                if asset:
+                    file=web_dir/asset
+                    return self.send(200,file.read_bytes(),mimetypes.guess_type(str(file))[0] or 'text/plain')
+                return self.send(404,{'error':'Not found'})
+            if role == 'subscription' and path.startswith('/portal/'):
+                if not self.portal_allowed():return self.send(429,{'error':'Too many requests; try again shortly'})
+                if re.fullmatch(r'/portal/[a-f0-9]{64}',path):
+                    return self.send(308,'',headers={'Location':base_path+path+'/'})
+                context=self.portal_context(path)
+                if not context:return self.send(404,{'error':'Service link is unavailable'})
+                model,client,action=context
+                if not action:return self.send(200,(web_dir/'client-portal.html').read_bytes(),'text/html; charset=utf-8')
+                if action=='api':
+                    current='http://'+self.headers.get('Host','')+base_path+'/'
+                    result=client_portal.data(model,access,current,client,store.totals())
+                    result['bot_enabled']=bool((store.get('client_delivery') or {}).get('bot_enabled'))
+                    return self.send(200,result)
+                return self.send(404,{'error':'Not found'})
             if role == "subscription" and path.startswith("/") and path.count("/") == 1 and len(path) > 1:
                 token = path[1:]
                 if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
@@ -243,6 +285,8 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     return self.send(200, rest.openapi())
                 if path == '/api/api-keys':
                     return self.send(200, {'keys': api_keys.listing(store), 'scopes': api_keys.SCOPES})
+                if path == '/api/client-delivery':
+                    return self.send(200,client_delivery.public_settings(store))
                 if path == '/api/telegram':
                     return self.send(200, {**notifications.public_settings(store), 'event_labels': {k: v[1] for k, v in notifications.EVENTS.items() if k != 'test'}})
                 if path == "/api/options":
@@ -263,7 +307,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     model=store.get('state')
                     client=next((x for x in model['clients'] if x['id']==path.rsplit('/',1)[-1]),None)
                     require(client is not None,'Client no longer exists')
-                    return self.send(200, {'links':client_links.links(model,client,store.totals())})
+                    return self.send(200, {'links':client_links.links(model,client,store.totals()),'portal_url':client_portal.url(model,access,'http://'+self.headers.get('Host','')+base_path+'/',client),'telegram_paired':bool(client_delivery.binding(store,client))})
                 if path == "/api/dashboard":
                     with runtime.lock:
                         status = runtime.status()
@@ -294,7 +338,14 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
 
         def do_POST(self):
             if role != "panel":
-                return self.send(404, {"error": "Not found"})
+                try:
+                    self.same_origin()
+                    context=self.portal_context(self.route_path() or '')
+                    if not context or context[2]!='pair':return self.send(404,{'error':'Not found'})
+                    if not self.portal_allowed():return self.send(429,{'error':'Too many requests; try again shortly'})
+                    self.json_body()
+                    return self.send(200,client_delivery.pair(store,context[1]))
+                except ValueError as exc:return self.send(400,{'error':str(exc)})
             try:
                 self.same_origin()
                 self.post()
@@ -353,6 +404,17 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
+            if path in ('/api/client-delivery','/api/client-delivery/test'):
+                with account_lock:accounts.verify(store,store.get('admin'),data,self.cookie_token())
+                return self.send(200,client_delivery.test_smtp(store) if path.endswith('/test') else client_delivery.save(store,data.get('settings')))
+            if path in ('/api/client-send','/api/client-unpair'):
+                model=store.get('state');client=next((row for row in model['clients'] if row['id']==data.get('id')),None)
+                require(client is not None,'Client no longer exists')
+                if path.endswith('unpair'):
+                    client_delivery.unpair(store,client['id']);return self.send(200,{'ok':True})
+                return self.send(200,client_delivery.enqueue(store,client,data.get('channel'),data.get('template_id','service')))
+            if path == '/api/destination-import':
+                return self.send(200, destination_import.preview(data.get('value')))
             if path in ('/api/migration/probe','/api/migration/start'):
                 request_host=urlsplit('//'+self.headers.get('Host','')).hostname
                 require(secure_cookie or request_host in ('127.0.0.1','::1','localhost') and ipaddress.ip_address(self.client_address[0]).is_loopback,'Enable panel HTTPS before providing root SSH credentials')
@@ -433,7 +495,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     store.set('admin', admin)
                 if path.endswith('/check'):
                     return self.send(200, {'bot': notifications.bot_info(value['bot_token'])})
-                return self.send(200, {'chats': notifications.chats(value['bot_token'])})
+                return self.send(200, {'chats': store.get('client_bot_chats',[]) if client_delivery.settings(store)['bot_enabled'] and value['bot_token']==notifications.settings(store)['bot_token'] else notifications.chats(value['bot_token'])})
             if path in ('/api/telegram', '/api/telegram/test'):
                 with account_lock:
                     admin = store.get('admin')
@@ -651,6 +713,8 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
     threading.Thread(target=subscription.serve_forever, kwargs={"poll_interval": .5}, daemon=True).start()
     threading.Thread(target=runtime.worker, daemon=True).start()
     notifier = notifications.Worker(store, runtime)
+    messenger=client_delivery.Worker(store,runtime,access)
+    threading.Thread(target=messenger.run,daemon=True).start()
     threading.Thread(target=notifier.run, daemon=True).start()
     print("NARA panel: http://" + bind + ":" + str(port) + normalize_web_path(web_path) + "/", flush=True)
     print("Subscriptions: http://" + bind + ":" + str(sub_port) + normalize_web_path(sub_path) + "/", flush=True)
@@ -663,6 +727,7 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
         subscription.server_close()
         runtime.shutdown.set()
         store.notification_wakeup.set()
+        store.client_delivery_wakeup.set()
         with runtime.lock:
             runtime.stop()
         server.server_close()

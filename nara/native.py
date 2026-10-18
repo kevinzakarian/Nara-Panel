@@ -148,7 +148,7 @@ def _matches(schema, value):
     return True
 
 
-def validate_references(config):
+def validate_references(config, inbound_matches=()):
     """The core defers some route lookups until traffic arrives; reject typos now."""
     tags = lambda rows: {r['tag'] for r in rows if r.get('tag')}
     endpoints = tags(config.get('endpoints',[]))
@@ -161,6 +161,7 @@ def validate_references(config):
         'http_client': tags(config.get('http_clients',[])),
         'certificate_provider': tags(config.get('certificate_providers',[])),
     }
+    inbound_match_tags=registry['inbound']|set(inbound_matches)
     forward = [r.get('tag') for r in config.get('outbounds',[])+config.get('endpoints',[]) if r.get('tag')]
     if len(forward) != len(set(forward)):
         raise ValueError('Outbounds and endpoints must have unique tags')
@@ -175,8 +176,12 @@ def validate_references(config):
                 if selected is not None: walk(selected,value,path)
                 return
         reference=schema.get('x-tag-reference')
-        if reference and isinstance(value,str) and value and value not in registry[reference]:
-            raise ValueError('Unknown '+reference.replace('_',' ')+' reference at '+path+': '+value)
+        if reference and isinstance(value,str) and value:
+            allowed=registry[reference]
+            # Match strings remain valid when an account quota temporarily removes
+            # its listener. Dial/listen detours still need a live target.
+            if reference=='inbound' and path.startswith(('config.route.rules[','config.dns.rules[')):allowed=inbound_match_tags
+            if value not in allowed:raise ValueError('Unknown '+reference.replace('_',' ')+' reference at '+path+': '+value)
         if isinstance(value,dict):
             for key,item in value.items():
                 child=schema.get('properties',{}).get(key)

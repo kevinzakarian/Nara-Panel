@@ -54,6 +54,13 @@ def save_settings(store, value, previous):
     """Commit preferences and pending-message cancellation before waking delivery."""
     with store.connect() as db:
         db.execute("INSERT OR REPLACE INTO kv VALUES('telegram',?)", (json.dumps(value),))
+        if value.get('bot_token')!=previous.get('bot_token'):
+            row=db.execute("SELECT value FROM kv WHERE key='client_delivery'").fetchone()
+            db.execute("DELETE FROM kv WHERE key IN ('client_bot_chats','client_bot_offset','client_bot_status')")
+            if row:
+                delivery=json.loads(row[0]);delivery['bot_enabled']=False;delivery['bot_username']=''
+                db.execute("INSERT OR REPLACE INTO kv VALUES('client_delivery',?)",(json.dumps(delivery),))
+                db.execute("UPDATE client_messages SET status='cancelled' WHERE channel='telegram' AND status='queued'")
         if not value['enabled'] or any(value.get(key) != previous.get(key) for key in ('bot_token', 'chat_id', 'enabled')):
             db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued'")
         else:
@@ -61,6 +68,7 @@ def save_settings(store, value, previous):
             placeholders = ','.join('?' for _ in allowed)
             db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued' AND event NOT IN (" + placeholders + ")", allowed)
     store.notification_wakeup.set()
+    store.client_delivery_wakeup.set()
 
 
 def enqueue(store, event, detail='', dedupe=None, window=900):
@@ -119,6 +127,25 @@ def call(token,method,payload):
 
 def send(token,chat_id,message):
     call(token,'sendMessage',{'chat_id':chat_id,'text':message[:4000],'link_preview_options':{'is_disabled':True}})
+
+
+def send_photo(token,chat_id,png):
+    """Upload a generated private QR directly; no external image hosting or URL fetch."""
+    import secrets
+    boundary='nara-'+secrets.token_hex(16)
+    body=(f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
+          f'--{boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\nYour private NARA service page: connection links, QR codes and remaining traffic/time. Keep this QR private.\r\n'
+          f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="nara-service.png"\r\nContent-Type: image/png\r\n\r\n').encode()+png+f'\r\n--{boundary}--\r\n'.encode()
+    req=request.Request('https://api.telegram.org/bot'+token+'/sendPhoto',body,{'Content-Type':'multipart/form-data; boundary='+boundary},method='POST')
+    try:
+        with request.build_opener(request.ProxyHandler({}),NoRedirect()).open(req,timeout=12) as response:
+            raw=response.read(65537)
+            if len(raw)>65536 or json.loads(raw).get('ok') is not True:raise DeliveryError('Telegram rejected the QR image')
+    except error.HTTPError as exc:
+        exc.close()
+        raise DeliveryError('Telegram rejected the private QR image; check bot and recipient access') from None
+    except (error.URLError,OSError,ValueError,TypeError,AttributeError):
+        raise DeliveryError('Could not deliver the private QR image; check bot and recipient access') from None
 
 
 def bot_info(token):

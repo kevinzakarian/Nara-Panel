@@ -23,6 +23,7 @@ def password_matches(password, encoded):
 class Store:
     def __init__(self, directory):
         self.notification_wakeup = threading.Event()
+        self.client_delivery_wakeup = threading.Event()
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.directory.chmod(0o700)
@@ -40,8 +41,12 @@ class Store:
                     scopes TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, last_used REAL, revoked INTEGER DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, event TEXT NOT NULL, payload TEXT NOT NULL,
                     created REAL NOT NULL, attempts INTEGER DEFAULT 0, available REAL DEFAULT 0, status TEXT DEFAULT 'queued');
+                CREATE TABLE IF NOT EXISTS client_messages(id INTEGER PRIMARY KEY,client_id TEXT,channel TEXT,recipient TEXT,template_id TEXT,created REAL,available REAL,attempts INTEGER DEFAULT 0,status TEXT DEFAULT 'queued',error TEXT DEFAULT '',stage INTEGER DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS client_bot_pairs(token_hash TEXT PRIMARY KEY,client_id TEXT,capability TEXT,bot_hash TEXT,expires REAL);
+                CREATE TABLE IF NOT EXISTS client_bot_bindings(client_id TEXT PRIMARY KEY,chat_id TEXT,bot_hash TEXT,capability TEXT,created REAL);
                 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at REAL, message TEXT);
             """)
+            if 'stage' not in {row[1] for row in db.execute('PRAGMA table_info(client_messages)')}:db.execute('ALTER TABLE client_messages ADD COLUMN stage INTEGER DEFAULT 0')
             db.execute("INSERT OR IGNORE INTO kv VALUES('state', ?)", (json.dumps(initial_state()),))
         self.path.chmod(0o600)
         with self.connect() as db:
