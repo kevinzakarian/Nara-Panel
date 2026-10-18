@@ -336,7 +336,8 @@ class APITests(unittest.TestCase):
         self.server.RequestHandlerClass=make_handler(self.store,self.runtime,Path('web'),web_path=self.web_path,access=Access(self.store.directory,{'NARA_ACCESS_MANAGED':'1'}))
         self.assertEqual(self.request('/api/update-panel',{'version':'9.0.0;id'})[0],400)
         before=self.store.get('state')
-        status,data,_=self.request('/api/update-panel',{'version':'9.0.0'})
+        proof=self.request('/api/backup/create',{'current':'test-password-123'})[1]['proof']
+        status,data,_=self.request('/api/update-panel',{'version':'9.0.0','confirmed':True,'backup_proof':proof})
         self.assertEqual(status,200,data)
         job=json.loads((self.store.directory/'access-request.json').read_text())
         self.assertEqual(set(job),{'id','operation','version','created_at'})

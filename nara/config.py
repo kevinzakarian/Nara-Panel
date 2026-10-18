@@ -371,7 +371,7 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
             "route": {"rules": dns_bridge + ([{"ip_is_private": True, "action": "reject"}] if state["settings"]["block_private"] else []),
                       "rule_set": sets, "final": "direct", "default_domain_resolver": state["settings"]["dns_final"]},
             "experimental": {"v2ray_api": {"listen": "127.0.0.1:" + str(stats_port),
-                             "stats": {"enabled": True, "users": ["client-" + c["id"] for c in clients]}}}}
+                             "stats": {"enabled": True, "inbounds": [i["tag"] for i in inbounds], "users": ["client-" + c["id"] for c in clients]}}}}
     core = copy.deepcopy(state.get("core_options", {}))
     for key, value in core.items():
         require(isinstance(value, dict), key + " settings must be an object")

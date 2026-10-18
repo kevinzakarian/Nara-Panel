@@ -69,7 +69,7 @@ class Access:
         return {**self.values, 'revision': signature(self.values),
                 'managed': self.config.get('NARA_ACCESS_MANAGED') == '1',
                 'subscription_scheme': self.config.get('NARA_SUB_SCHEME', 'http'),
-                'public_host': self.config.get('NARA_PUBLIC_HOST', '')}
+                'public_host': self.config.get('NARA_PUBLIC_HOST', ''), 'subscription_host': self.config.get('NARA_PUBLIC_SUB_HOST', '')}
 
     def request(self, values, expected, current_url):
         if not self.info()['managed']:
@@ -172,7 +172,7 @@ def apply_job(paths, job):
             atomic_write(paths.https / 'current/Caddyfile', proxy)
             atomic_write(paths.https / 'current/metadata.json', json.dumps({**metadata,
                 'url': public_url(metadata['host'], values['panel_port'], values['web_path'], 'https'),
-                'subscription_url': public_url(metadata['host'], values['subscription_port'], values['sub_path'], 'https')}))
+                'subscription_url': public_url(metadata.get('subscription_host',metadata['host']), values['subscription_port'], values['sub_path'], 'https')}))
             for file in ('Caddyfile', 'metadata.json'):
                 shutil.chown(paths.https / ('current/' + file), user='root', group='nara-https')
                 (paths.https / ('current/' + file)).chmod(0o640)

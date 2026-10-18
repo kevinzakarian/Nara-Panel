@@ -4,7 +4,7 @@ import re
 import time
 import uuid
 from urllib.parse import parse_qs,urlsplit
-from . import __version__,api_keys,native,clients,notifications
+from . import __version__,api_keys,native,clients,notifications,traffic,client_links
 from .config import require,build_config,client_config,eligible
 
 RESOURCES={'clients':'clients','groups':'client_groups','inbounds':'inbounds','tls':'tls',
@@ -53,7 +53,7 @@ def openapi():
             operation['parameters']=[revision]
             operation['requestBody']={'required':method!='delete','content':{'application/json':{'schema':{'type':'object','additionalProperties':True}}}}
         paths.setdefault(path,{})[method]=operation
-    for path,label,scope in [('/status','Panel and core status','read'),('/core/status','Core status','read'),('/stats','Metrics and client traffic totals','read'),
+    for path,label,scope in [('/status','Panel and core status','read'),('/core/status','Core status','read'),('/stats','Metrics and client traffic totals','read'),('/traffic','Traffic history (kind, id, range)','read'),
                              ('/state','Full panel model with secrets hidden by default','read'),('/schema','Exact Sing-box JSON schema','read'),
                              ('/openapi.json','This API specification','read'),('/settings','Server connection settings','read'),
                              ('/core/config','Rendered active server configuration','read + secrets:read'),('/updates','Cached release information','read'),
@@ -71,7 +71,7 @@ def openapi():
     for path,summary in [('/clients/bulk','Create up to 500 clients with one apply'),('/clients/bulk/preview','Preview generated names and settings'),
                          ('/clients/actions','Apply one action to selected clients'),('/clients/actions/preview','Preview an action without applying')]:
         add(path,'post',summary,'clients:write',True)
-    for suffix in ('profile','subscription'):
+    for suffix in ('profile','subscription','links'):
         add('/clients/{id}/'+suffix,'get','Read private client '+suffix,'read + secrets:read')
         paths['/clients/{id}/'+suffix]['get']['parameters']=[{'name':'id','in':'path','required':True,'schema':{'type':'string'}}]
     for path,scope,summary in [('/core/start','core:control','Start or reapply core'),('/core/stop','core:control','Stop core'),
@@ -167,7 +167,8 @@ class API:
             if path=='state':return 200,{'data':visible(state,secret),'revision':state['revision']}
             if path in ('status','core/status'):return 200,{'data':{'panel_version':__version__,'core':self.runtime.status()},'revision':state['revision']}
             if path=='stats':
-                with self.runtime.lock:return 200,{'data':{'metrics':self.metrics.read(self.store.directory),'totals':self.store.totals()},'revision':state['revision']}
+                with self.runtime.lock:return 200,{'data':{'metrics':self.metrics.read(self.store.directory),'totals':self.store.totals(),'traffic':traffic.summary(self.store)},'revision':state['revision']}
+            if path=='traffic':return 200,{'data':traffic.history(self.store,query.get('kind',['client'])[0],query.get('id',[''])[0],query.get('range',['24h'])[0])}
             if path=='settings':return 200,{'data':visible(state['settings'],secret),'revision':state['revision']}
             if path=='core/config':
                 self.need('secrets:read')
@@ -178,10 +179,11 @@ class API:
             if path.startswith('core/options/') and path.split('/')[-1] in OPTIONS:
                 section=path.split('/')[-1]
                 return 200,{'data':visible(state.get('core_options',{}).get(section,{}),secret),'revision':state['revision'],**({'default_resolver':state['settings']['dns_final']} if section=='dns' else {})}
-            match=re.fullmatch(r'clients/([A-Za-z0-9_-]+)/(?P<kind>profile|subscription)',path)
+            match=re.fullmatch(r'clients/([A-Za-z0-9_-]+)/(?P<kind>profile|subscription|links)',path)
             if match:
                 self.need('secrets:read');client=next((row for row in state['clients'] if row['id']==match[1]),None)
                 if not client:raise Fault(404,'not_found','Client not found')
+                if match['kind']=='links':return 200,{'data':client_links.links(state,client,self.store.totals()),'revision':state['revision']}
                 if match['kind']=='profile':
                     active=self.runtime.active
                     live=next((row for row in (active or {}).get('clients',[]) if row['id']==client['id']),None)

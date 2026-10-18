@@ -16,10 +16,10 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from .http import BoundedHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, normalize_dns_record, require, validate
-from . import native, warp, security, clients, notifications, accounts, api_keys, rest
+from . import native, warp, security, clients, notifications, accounts, api_keys, rest, traffic, portable, client_links, migration
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
 from .store import password_matches
@@ -98,6 +98,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
     warp_lock = threading.Lock()
     account_lock = threading.RLock()
     api_limits, api_limit_lock = {}, threading.Lock()
+    migrations = migration.Manager(store, runtime) if role == "panel" else None
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "NARA"
@@ -135,7 +136,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             require(self.headers.get("Content-Type", "").split(";")[0] == "application/json", "Request must use application/json")
             require(not self.headers.get("Transfer-Encoding") and len(self.headers.get_all("Content-Length", [])) == 1, "Use one Content-Length without Transfer-Encoding")
             length = int(self.headers.get("Content-Length", "0"))
-            require(0 < length <= 1_048_576, "Request is too large or empty")
+            require(0 < length <= (16*1024*1024 if self.route_path() in ('/api/backup/preview', '/api/backup/restore') else 1_048_576), "Request is too large or empty")
             raw = self.rfile.read(length)
             require(len(raw) == length, "Incomplete request body")
             def invalid_constant(value):
@@ -253,12 +254,22 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     for profile in state["tls"]:
                         profile.pop("private_key", None)
                     return self.send(200, native.redact(state))
+                if path == '/api/migration':
+                    return self.send(200, migrations.status())
+                if path == '/api/traffic':
+                    query=parse_qs(urlsplit(self.path).query)
+                    return self.send(200, traffic.history(store, query.get('kind',['client'])[0], query.get('id',[''])[0], query.get('range',['24h'])[0]))
+                if path.startswith('/api/client-links/'):
+                    model=store.get('state')
+                    client=next((x for x in model['clients'] if x['id']==path.rsplit('/',1)[-1]),None)
+                    require(client is not None,'Client no longer exists')
+                    return self.send(200, {'links':client_links.links(model,client,store.totals())})
                 if path == "/api/dashboard":
                     with runtime.lock:
                         status = runtime.status()
                         return self.send(200, {"metrics": metrics.read(store.directory), "core": status,
                                                "panel_version": __version__, "updates": updates.status(status["version"]),
-                                               "totals": store.totals(), "events": store.events()})
+                                               "totals": store.totals(), "traffic": traffic.summary(store), "events": store.events()})
                 if path == "/api/config":
                     return self.send(200, build_config(store.get("state"), store.totals(), runtime.run_dir, runtime.stats_port))
                 if path.startswith("/api/export/"):
@@ -274,7 +285,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             assets["/dns-presets.js"] = "dns-presets.js"
             assets["/routing.js"] = "routing.js"
             assets["/dns-rules.js"] = "dns-rules.js"
-            for script in ("account.js", "integrations.js", "clients.js"):
+            for script in ("account.js", "integrations.js", "clients.js", "insights.js", "transfer.js"):
                 assets["/" + script] = script
             if path in assets:
                 file = web_dir / assets[path]
@@ -342,13 +353,51 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
+            if path in ('/api/migration/probe','/api/migration/start'):
+                request_host=urlsplit('//'+self.headers.get('Host','')).hostname
+                require(secure_cookie or request_host in ('127.0.0.1','::1','localhost') and ipaddress.ip_address(self.client_address[0]).is_loopback,'Enable panel HTTPS before providing root SSH credentials')
+                require(not (store.directory/'access-request.json').exists(),'Another maintenance operation is pending')
+                with account_lock:
+                    accounts.verify(store,store.get('admin'),data,self.cookie_token())
+                return self.send(200, migration.probe(store,data) if path.endswith('/probe') else migrations.start(data))
+            if path == '/api/traffic/settings':
+                value=traffic.validate(data.get('settings'))
+                store.set('traffic_settings', value)
+                store.audit('Server traffic and alert policy saved')
+                return self.send(200, {'ok':True})
+            if path == '/api/traffic/reset':
+                with runtime.lock:
+                    if runtime.running:runtime.collect()
+                    traffic.sample_host(store)
+                    traffic.reset(store,data.get('kind'))
+                return self.send(200, {'ok':True})
+            if path in ('/api/backup/create','/api/backup/restore','/api/clients-csv'):
+                with account_lock:
+                    accounts.verify(store,store.get('admin'),data,self.cookie_token())
+                if path=='/api/backup/create':
+                    with runtime.lock:
+                        if runtime.running:runtime.collect()
+                        result=portable.snapshot(store)
+                    proof=secrets.token_urlsafe(32)
+                    store.set('prepared_update_backup',{'proof':proof,'session':hashlib.sha256(self.cookie_token().encode()).hexdigest(),'expires':time.time()+900,'filename':result['filename']})
+                    return self.send(200,{**result,'proof':proof})
+                if path=='/api/backup/restore':
+                    return self.send(200,portable.restore(store,runtime,data.get('backup')))
+                current='http://'+self.headers.get('Host','')+base_path+'/'
+                return self.send(200,{'csv':client_links.export(store,access,current,data.get('ids'))})
+            if path=='/api/backup/preview':
+                return self.send(200,portable.preview(store,data.get('backup')))
             if path == "/api/warp":
                 return self.send(200, self.provision_warp(data))
             if path == "/api/check-updates":
                 started = updates.start()
                 return self.send(200, {"started": started, "updates": updates.status(runtime.version())})
             if path == "/api/update-panel":
+                require(migrations.status().get("status")!="running","Wait for the server migration to finish before updating")
+                prepared=store.get('prepared_update_backup',{})
+                require(data.get('confirmed') is True and isinstance(data.get('backup_proof'),str) and hmac.compare_digest(prepared.get('proof',''),data['backup_proof']) and prepared.get('expires',0)>time.time() and prepared.get('session')==hashlib.sha256(self.cookie_token().encode()).hexdigest(),'Confirm the update and download a fresh private backup first')
                 result = access.request_update(data.get('version'))
+                store.set('prepared_update_backup',{})
                 store.audit('Panel update requested: ' + result['version'])
                 return self.send(200, result)
             if path == "/api/access":

@@ -3,6 +3,7 @@ import json
 import ipaddress
 import os
 import shutil
+import sqlite3
 import socket
 import subprocess
 import threading
@@ -70,10 +71,11 @@ class Runtime:
 
     def collect(self):
         counters = stats.query(self.stats_port)
-        deltas = []
+        deltas, inbound_deltas = [], []
+        inbound_ids = {row['tag']: row['id'] for row in (self.active or {}).get('inbounds', [])}
         for name, value in counters.items():
             parts = name.split(">>>")
-            if len(parts) != 4 or parts[0] != "user" or not parts[1].startswith("client-") or parts[2] != "traffic":
+            if len(parts) != 4 or parts[0] not in ("user", "inbound") or parts[2] != "traffic":
                 continue
             direction = {"uplink": "upload", "downlink": "download"}.get(parts[3])
             if not direction:
@@ -81,8 +83,11 @@ class Runtime:
             previous = self.baseline.get(name, 0)
             require(value >= previous, "Traffic counter reset unexpectedly")
             if value > previous:
-                deltas.append((parts[1][7:], direction, value - previous))
-        self.store.add_traffic(deltas)
+                if parts[0] == 'user' and parts[1].startswith('client-'):
+                    deltas.append((parts[1][7:], direction, value - previous))
+                elif parts[0] == 'inbound' and parts[1] in inbound_ids:
+                    inbound_deltas.append((inbound_ids[parts[1]], direction, value - previous))
+        self.store.add_traffic(deltas, inbound_deltas)
         self.baseline = counters
         self.last_stats = time.time()
         self.stats_error = ""
@@ -250,6 +255,11 @@ class Runtime:
             except Exception as exc:
                 self.error = str(exc)
         while not self.shutdown.wait(5):
+            try:
+                from .traffic import sample_host
+                sample_host(self.store)
+            except (OSError, ValueError, sqlite3.Error):
+                pass
             with self.lock:
                 if not self.running:
                     if self.process is not None:

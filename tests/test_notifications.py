@@ -51,10 +51,11 @@ class NotificationTests(unittest.TestCase):
 
     def test_resource_alert_requires_sustained_usage_and_recovers_once(self):
         self.enable(['resource_alert','resource_recovery']);self.worker.metrics.read=mock.Mock(return_value={'cpu_percent':95,'memory_total':100,'memory_used':10,'disk_total':100,'disk_used':10})
-        for _ in range(2):self.worker.poll()
-        self.assertEqual(self.rows(),[]);self.worker.poll();self.worker.poll()
+        for now in (1000,1060):self.worker.poll(now)
+        self.assertEqual(self.rows(),[])
+        for now in (1120,1180,1240,1300,1360):self.worker.poll(now)
         self.assertEqual([row[0] for row in self.rows()],['resource_alert'])
-        self.worker.metrics.read.return_value['cpu_percent']=20;self.worker.poll();self.worker.poll()
+        self.worker.metrics.read.return_value['cpu_percent']=20;self.worker.poll(1420);self.worker.poll(1480)
         self.assertEqual([row[0] for row in self.rows()],['resource_alert','resource_recovery'])
 
     def test_delivery_retries_rate_limits_without_exposing_bot_token(self):

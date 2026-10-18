@@ -33,6 +33,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS traffic(id TEXT PRIMARY KEY, upload INTEGER NOT NULL DEFAULT 0,
                     download INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS traffic_history(kind TEXT NOT NULL,id TEXT NOT NULL,step INTEGER NOT NULL,at INTEGER NOT NULL,upload INTEGER NOT NULL,download INTEGER NOT NULL,PRIMARY KEY(kind,id,step,at));
+                CREATE INDEX IF NOT EXISTS traffic_history_time ON traffic_history(step,at);
                 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, csrf TEXT NOT NULL, expires REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS api_keys(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
                     scopes TEXT NOT NULL, created REAL NOT NULL, expires REAL NOT NULL, last_used REAL, revoked INTEGER DEFAULT 0);
@@ -42,6 +44,8 @@ class Store:
             """)
             db.execute("INSERT OR IGNORE INTO kv VALUES('state', ?)", (json.dumps(initial_state()),))
         self.path.chmod(0o600)
+        with self.connect() as db:
+            db.execute("INSERT OR IGNORE INTO kv SELECT 'managed_lifetime',CAST(COALESCE(SUM(upload+download),0) AS TEXT) FROM traffic")
 
     @contextlib.contextmanager
     def connect(self):
@@ -93,8 +97,8 @@ class Store:
         with self.connect() as db:
             return {r[0]: {"upload": r[1], "download": r[2]} for r in db.execute("SELECT id,upload,download FROM traffic")}
 
-    def add_traffic(self, deltas):
-        if not deltas:
+    def add_traffic(self, deltas, inbound_deltas=()):
+        if not deltas and not inbound_deltas:
             return
         with self.connect() as db:
             for client_id, direction, value in deltas:
@@ -104,6 +108,22 @@ class Store:
                 query={"upload":"UPDATE traffic SET upload=upload+? WHERE id=?",
                        "download":"UPDATE traffic SET download=download+? WHERE id=?"}[direction]
                 db.execute(query, (value, client_id))
+                from .traffic import record
+                record(db, 'client', client_id, value if direction == 'upload' else 0, value if direction == 'download' else 0, time.time())
+            from .traffic import record
+            for ident, direction, value in inbound_deltas:
+                if direction not in ('upload', 'download') or value < 0:
+                    raise ValueError('Invalid inbound traffic counter')
+                record(db, 'inbound', ident, value if direction == 'upload' else 0, value if direction == 'download' else 0, time.time())
+            amount = sum(value for _, _, value in deltas)
+            db.execute("INSERT OR IGNORE INTO kv VALUES('managed_lifetime','0')")
+            db.execute("UPDATE kv SET value=CAST(CAST(value AS INTEGER)+? AS TEXT) WHERE key='managed_lifetime'", (amount,))
+            db.execute("INSERT OR IGNORE INTO kv VALUES('traffic_history_since',?)", (json.dumps(time.time()),))
+            row = db.execute("SELECT value FROM kv WHERE key='history_pruned'").fetchone()
+            now = time.time()
+            if not row or now-float(row[0]) > 3600:
+                db.execute('DELETE FROM traffic_history WHERE (step=300 AND at<?) OR (step=3600 AND at<?)', (now-2*86400, now-100*86400))
+                db.execute("INSERT OR REPLACE INTO kv VALUES('history_pruned',?)", (json.dumps(now),))
 
     def session(self, raw):
         with self.connect() as db:

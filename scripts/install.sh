@@ -88,7 +88,9 @@ if systemctl is-active --quiet nara-panel; then
     was_running=1
     systemctl stop nara-panel
 fi
-if { [ "${NARA_KEEP_ENTRY:-0}" = 1 ] || [ -f /etc/nara-panel/https/current/metadata.json ]; } && [ -f "$setup_dir/panel.env" ]; then
+if [ -n "${NARA_PROVISION_FILE:-}" ]; then
+    PYTHONDONTWRITEBYTECODE=1 python3 -m nara.provision "$NARA_PROVISION_FILE" "$setup_dir/panel.env"
+elif { [ "${NARA_KEEP_ENTRY:-0}" = 1 ] || [ -f /etc/nara-panel/https/current/metadata.json ]; } && [ -f "$setup_dir/panel.env" ]; then
     PYTHONDONTWRITEBYTECODE=1 python3 -m nara.install_config "$setup_dir/panel.env" --keep-panel
 else
     PYTHONDONTWRITEBYTECODE=1 python3 -m nara.install_config "$setup_dir/panel.env"

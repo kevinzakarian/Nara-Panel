@@ -39,7 +39,7 @@ jobs:
           SING_BOX_TEST_BINARY: /tmp/nara-core/sing-box
         run: |
           pip install -r requirements.txt
-          python -m unittest tests.test_core tests.test_auto_apply tests.test_credentials tests.test_panel_update tests.test_warp tests.test_security tests.test_bulk_clients tests.test_rest tests.test_notifications tests.test_audit -v
+          python -m unittest tests.test_core tests.test_auto_apply tests.test_credentials tests.test_panel_update tests.test_warp tests.test_security tests.test_bulk_clients tests.test_rest tests.test_notifications tests.test_audit tests.test_insights -v
           if command -v go; then exit 1; fi
   service-units:
     runs-on: ubuntu-24.04
@@ -64,3 +64,26 @@ jobs:
           sudo systemctl show nara-panel-access.service -p User -p CapabilityBoundingSet -p AmbientCapabilities -p NoNewPrivileges -p SecureBits -p PrivateUsers -p SystemCallFilter
           sudo journalctl -u nara-panel-access.service -u nara-panel.service --no-pager -n 100
           sudo test ! -f /var/log/nara-panel-update.log || sudo cat /var/log/nara-panel-update.log
+
+  migration-destination:
+    if: ${{ !inputs.service_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Prepare isolated SSH migration verification
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv openssh-client openssh-server
+          python3 -m venv /tmp/nara-migration-verifier
+          /tmp/nara-migration-verifier/bin/pip install -r requirements.txt
+      - name: Migrate through pinned SSH to this fresh disposable VM
+        run: |
+          sudo env GITHUB_ACTIONS=true PYTHONDONTWRITEBYTECODE=1 /tmp/nara-migration-verifier/bin/python scripts/verify-migration.py "$GITHUB_WORKSPACE"
+      - name: Read private fixture diagnostics on failure
+        if: failure()
+        run: |
+          sudo journalctl -u nara-panel --no-pager -n 60
+          sudo test ! -f /var/log/nara-migration.log || sudo tail -100 /var/log/nara-migration.log

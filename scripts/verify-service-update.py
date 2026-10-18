@@ -130,7 +130,9 @@ def controller(source):
             req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers=headers)
             with opener.open(req,timeout=5) as response:return json.load(response)
         csrf=request('login',{'username':'fixture','password':'fixture-only-password'})['csrf']
-        job=request('update-panel',{'version':FUTURE},csrf)
+        private=request('backup/create',{'current':'fixture-only-password'},csrf)
+        assert Path(private['path']).stat().st_mode&0o777==0o600
+        job=request('update-panel',{'version':FUTURE,'confirmed':True,'backup_proof':private['proof']},csrf)
         deadline=time.monotonic()+180
         while time.monotonic()<deadline:
             time.sleep(.5)

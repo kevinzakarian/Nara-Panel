@@ -126,3 +126,9 @@ The panel's API access page includes a short guide and OpenAPI download. The Ope
 ## Panel time zone
 
 `GET /settings` returns `time_zone` (an IANA name; legacy records without it use `UTC`). `PATCH /settings` accepts, for example, `{"revision":12,"time_zone":"Asia/Tehran"}` with the same revision and `config:write` requirements as other settings. The setting controls panel display and Telegram daily summary scheduling. It does not change the OS clock, stored expiry instants or generated Sing-box configuration. Unsupported/malformed zones are rejected atomically. Telegram credentials, events and daily summary hour/minute still require the browser’s administrator verification flow.
+
+### Traffic history and share links (0.10)
+
+`GET /api/v1/stats` also includes independent server allowance and managed display counters in `data.traffic`. `GET /api/v1/traffic?kind=client&id=CLIENT_ID&range=24h` accepts `kind=client|inbound|server` (`id=host` for the server), and `range=6h|24h|week|month|3months`. These endpoints require `read`. Client protocol share links use `GET /api/v1/clients/CLIENT_ID/links` and require both `read` and `secrets:read`.
+
+Portable backup/restore, credential-bearing CSV downloads and SSH migration use the browser administrator workflow with current-password/fresh-2FA verification. Machine API keys do not grant root SSH migration or backup download access.

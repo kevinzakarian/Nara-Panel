@@ -15,6 +15,7 @@ EVENTS={
  'config_saved':('✅','Configuration applied'), 'apply_failed':('⚠️','Configuration rejected'),
  'quota_warning':('📊','Traffic allowance is running low'), 'quota_reached':('⛔','Traffic allowance reached'),
  'expiry_warning':('⏳','Account expires soon'), 'expired':('⌛','Account expired'),
+ 'server_traffic_warning':('📈','Server monthly traffic warning'),
  'resource_alert':('🚨','Server resource alert'), 'resource_recovery':('🌿','Server resources recovered'),
  'daily_summary':('📬','Your daily NARA overview'), 'test':('🎉','NARA notifications are connected')}
 
@@ -174,18 +175,41 @@ class Worker:
             if expires and expires-now<=86400:
                 event='expired' if expires<=now else 'expiry_warning'
                 enqueue(self.store,event,f'Client: {row["name"]}\nExpiry: {dt.datetime.fromtimestamp(expires,dt.timezone.utc).isoformat()}',f'{event}:{row["id"]}:{expires}',86400)
+        from . import traffic
+        limits=traffic.settings(self.store)
+        host=traffic.summary(self.store, now)
+        allowance=limits['monthly_bytes']
+        if allowance and limits['traffic_percent'] and host['cycle']['used']>=allowance*limits['traffic_percent']/100:
+            marker=f"{host['cycle']['start']}:{host['cycle']['since']}:{allowance}:{limits['traffic_percent']}"
+            if self.store.get('server_traffic_notified')!=marker and enqueue(self.store,'server_traffic_warning',f"Monthly server traffic: {host['cycle']['used']/1024**3:.2f} / {allowance/1024**3:.2f} GiB ({100*host['cycle']['used']/allowance:.1f}%).",None):
+                self.store.set('server_traffic_notified',marker)
         if 'resource_alert' in config['events'] or 'resource_recovery' in config['events']:
             m=self.metrics.read(self.store.directory)
-            values={'CPU':m.get('cpu_percent'),'Memory':100*m['memory_used']/m['memory_total'] if m.get('memory_total') else None,
-                    'Disk':100*m['disk_used']/m['disk_total'] if m.get('disk_total') else None}
-            for name,value in values.items():
-                if value is None:continue
-                self.resource_samples[name]=self.resource_samples.get(name,0)+1 if value>=90 else 0
-                if self.resource_samples[name]>=3 and name not in self.resource_alerts:
-                    enqueue(self.store,'resource_alert',f'{name} usage is {value:.0f}%. Check the server workload and available capacity.',name+':high',3600)
+            rates=host['rates']
+            values={'CPU':(m.get('cpu_percent'),limits['cpu_percent'],'%'),
+                    'Memory':(100*m['memory_used']/m['memory_total'] if m.get('memory_total') else None,limits['memory_percent'],'%'),
+                    'Disk':(100*m['disk_used']/m['disk_total'] if m.get('disk_total') else None,limits['disk_percent'],'%'),
+                    'Bandwidth':((sum(rates.values())*8/1_000_000) if host['available'] and rates and all(x is not None for x in rates.values()) else None,limits['bandwidth_mbps'],'Mbps')}
+            fingerprint=tuple(limits.items())
+            if getattr(self,'resource_policy',None)!=fingerprint:
+                self.resource_samples.clear();self.resource_alerts.clear();self.resource_policy=fingerprint
+            for name,(value,threshold,unit) in values.items():
+                sample=self.resource_samples.get(name,{})
+                if value is None or not threshold:
+                    self.resource_samples.pop(name,None)
+                    continue
+                # Missing/stale samples break the sustained interval. A 10% recovery
+                # margin prevents flapping; each incident emits once until recovery.
+                consecutive=0<=now-sample.get('last',now)<=90
+                above=value>=threshold
+                phase='high' if above else 'recovery' if value<threshold*0.9 else 'middle'
+                since=sample.get('since',now) if consecutive and sample.get('phase')==phase else now
+                self.resource_samples[name]={'since':since,'last':now,'phase':phase}
+                if above and now-since>=limits['duration_minutes']*60 and name not in self.resource_alerts:
+                    enqueue(self.store,'resource_alert',f'{name}: {value:.1f} {unit}, above {threshold} {unit} for at least {limits["duration_minutes"]} minutes.',name+':high',3600)
                     self.resource_alerts.add(name)
-                elif value<80 and name in self.resource_alerts:
-                    enqueue(self.store,'resource_recovery',f'{name} usage returned to {value:.0f}%.',name+':recovered',3600)
+                elif value<threshold*0.9 and name in self.resource_alerts and not above and now-since>=60:
+                    enqueue(self.store,'resource_recovery',f'{name} returned to {value:.1f} {unit}.',name+':recovered',3600)
                     self.resource_alerts.remove(name)
         local=dt.datetime.fromtimestamp(now,timezones.zone(timezones.name(state)))
         if 'daily_summary' in config['events'] and (local.hour,local.minute)>=(config['summary_hour'],config.get('summary_minute',0)):

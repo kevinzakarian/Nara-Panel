@@ -15,7 +15,7 @@ echo 'Refreshing package lists and upgrading installed system packages before op
 echo 'This may restart services. The server will not reboot automatically.'
 apt-get update </dev/null
 DEBIAN_FRONTEND=noninteractive apt-get -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade -y </dev/null
-DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip python3 iproute2 tzdata </dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl tar gzip python3 iproute2 tzdata openssh-client </dev/null
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 trap 'exit 130' INT
