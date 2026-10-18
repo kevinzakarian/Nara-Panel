@@ -625,3 +625,6 @@ The final schema-vocabulary review found native service credentials missing from
 
 
 After the native-secret redaction fix, **33 targeted Python tests passed** (`tests.test_audit`, `tests.test_rest`, `tests.test_native`), and Ruff F rules remained clean. The final Linux run below includes the thirteenth audit regression on both architectures.
+
+
+[Final Linux run 39099593470](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39099593470), at implementation commit `b9d0bc09e961e2633bf95afc03b67b5fa633b515`, passed **109 tests on amd64 and 109 on arm64** in Go-free/Git-free Python containers. Service-unit validation and the real path-triggered systemd upgrade fixture also passed. This run includes the final native-service secret-redaction regression and unused-import cleanup; earlier green runs were superseded during review. The isolated preview/core, temporary private data and browser tab were removed after inspection.
