@@ -13,7 +13,9 @@ RESOURCES={'clients':'clients','groups':'client_groups','inbounds':'inbounds','t
  'http-clients':'http_clients','network-namespaces':'network_namespaces'}
 OPTIONS=('log','dns','ntp','certificate','route','experimental')
 SECRET_NAMES={'password','passwords','uuid','token','tokens','auth','auth_str','authorization','cookie','headers','key','private_key',
-              'private_keys','secret_key','preshared_key','pre_shared_key','license','secret','access_key_secret','api_key','api_token','mac_key','client_secret'}
+              'private_keys','secret_key','preshared_key','pre_shared_key','license','secret','access_key_secret','api_key','api_token','mac_key','client_secret',
+              'account_key','auth_key','client_key','client_key_password','private_key_passphrase','mca_key','mca_key_password',
+              'origin_ca_key','static_key','submission_key','userkey','security_token','zone_token'}
 
 
 class Fault(ValueError):

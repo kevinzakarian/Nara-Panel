@@ -619,3 +619,9 @@ An isolated preview used 18 demonstration accounts and the real local core, with
 
 
 Final cleanup: Ruff F rules passed for `nara/` and `scripts/` after removal of six unused imports. **29 targeted Python tests** (credentials, audit regressions and release checks) passed after that cleanup. The mobile notification view was saved in [notifications-mobile-0.8.1.jpg](screenshots/notifications-mobile-0.8.1.jpg); all twelve main pages were inspected at the mobile width. The temporary browser was closed and its viewport restored.
+
+
+The final schema-vocabulary review found native service credentials missing from machine Read-scope redaction. Tailscale auth keys, certificate-provider/account/static keys, client key material and passphrases are now hidden without `secrets:read`. A real REST permission regression verifies both hidden Read responses and explicit Secrets responses while retaining public keys. This adds a thirteenth dedicated audit test.
+
+
+After the native-secret redaction fix, **33 targeted Python tests passed** (`tests.test_audit`, `tests.test_rest`, `tests.test_native`), and Ruff F rules remained clean. The final Linux run below includes the thirteenth audit regression on both architectures.

@@ -64,6 +64,17 @@ class ReviewAPITests(unittest.TestCase):
 class OperationAPITests(unittest.TestCase):
     setUp=test_api.APITests.setUp;tearDown=test_api.APITests.tearDown;login=test_api.APITests.login;request=test_api.APITests.request;key=test_rest.RestTests.key;call=test_rest.RestTests.call;web_path=''
     # Only the new regression runs here; existing REST coverage remains in its module.
+    def test_read_only_keys_cannot_read_native_service_credentials(self):
+        from nara import rest
+        secret_names=('account_key','auth_key','client_key','client_key_password','private_key_passphrase','mca_key','mca_key_password','origin_ca_key','static_key','submission_key','userkey','security_token','zone_token')
+        state=example_state();state['endpoints']=[{'id':'fixture','tag':'tailscale','mode':'native','config':{'type':'tailscale','tag':'tailscale','auth_key':'PRIVATE_FIXTURE'}}]
+        state['core_options']={'certificate':{name:'PRIVATE_FIXTURE' for name in secret_names}}
+        self.store.set('state',state)
+        status,value,_=self.call('GET','state',key=self.key(['read']));self.assertEqual(status,200,value);self.assertNotIn('PRIVATE_FIXTURE',json.dumps(value))
+        status,value,_=self.call('GET','state',key=self.key(['read','secrets:read']));self.assertEqual(status,200,value);self.assertIn('PRIVATE_FIXTURE',json.dumps(value))
+        public={'public_key':'PUBLIC','host_key':'PUBLIC','key_id':'identifier','certificate_authority':['PUBLIC']}
+        self.assertEqual(rest.visible(public),public)
+
     def test_operation_status_accepts_the_actual_urlsafe_job_id_format(self):
         key=self.key(['read']);ident='ABcd_ef-GHijkLmnoPqrStuVwxyz0123'
         self.assertEqual(len(ident),32)
