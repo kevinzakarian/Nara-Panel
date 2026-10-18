@@ -434,6 +434,54 @@ class CoreTests(unittest.TestCase):
                     process.terminate();process.wait(timeout=5)
                 self.runtime.stop()
 
+    def test_authenticated_live_presence_and_private_api_authentication(self):
+        from nara import presence
+        import grpc
+        state = example_state('vless', self.profile)
+        state['settings']['block_private'] = False
+        self.runtime.apply(state)
+        port, config = self.local_client(state)
+        client = self.start_client(config)
+        release, received = threading.Event(), threading.Event()
+        target = socket.socket()
+        target.bind(('127.0.0.1', 0));target.listen(1);target.settimeout(5)
+        def hold():
+            try:
+                peer, _ = target.accept()
+                with peer:
+                    peer.settimeout(5)
+                    if peer.recv(32):received.set()
+                    release.wait(5)
+            except OSError:
+                pass
+        worker = threading.Thread(target=hold, daemon=True);worker.start()
+        try:
+            with socket.create_connection(('127.0.0.1', port), 3) as connection:
+                connection.settimeout(5)
+                address = '127.0.0.1:' + str(target.getsockname()[1])
+                connection.sendall(('CONNECT '+address+' HTTP/1.1\r\nHost: '+address+'\r\n\r\n').encode())
+                self.assertIn(b'200', connection.recv(4096))
+                connection.sendall(b'presence-probe')
+                self.assertTrue(received.wait(3))
+                self.assertGreaterEqual(presence.query(self.runtime.presence_port, self.runtime.presence_secret).get('user1', 0), 1)
+                self.runtime.collect_presence()
+                snapshot = self.runtime.presence_status()
+                self.assertTrue(snapshot['available'])
+                self.assertGreaterEqual(snapshot['counts'].get('user1', 0), 1)
+                with self.assertRaises(grpc.RpcError):
+                    presence.query(self.runtime.presence_port, 'invalid-test-secret')
+            release.set()
+            for _ in range(20):
+                self.runtime.collect_presence()
+                if not self.runtime.presence_counts.get('user1'):break
+                time.sleep(.1)
+            self.assertEqual(self.runtime.presence_counts.get('user1', 0), 0)
+            self.runtime.stop()
+            self.assertFalse(self.runtime.presence_status()['counts'])
+        finally:
+            release.set();target.close();worker.join(timeout=2)
+            client.terminate();client.wait(timeout=5)
+
     def test_client_modes_change_traffic_path_and_preserve_selection(self):
         state = example_state('hysteria2',self.profile)
         state['settings']['block_private'] = False

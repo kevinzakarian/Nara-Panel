@@ -324,7 +324,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     require(client is not None, "Apply the client changes first")
                     return self.send(200, client_config(state, client, store.totals()))
                 return self.send(404, {"error": "Not found"})
-            assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/style.css": "style.css", "/favicon.svg": "favicon.svg",
+            assets = {"/": "index.html", "/index.html": "index.html", "/app.js": "app.js", "/themes.js": "themes.js", "/themes.css": "themes.css", "/style.css": "style.css", "/favicon.svg": "favicon.svg",
                       "/vendor/qrcodegen.js": "vendor/qrcodegen.js", "/subscription-qr.js": "subscription-qr.js", "/options.js": "options.js"}
             assets["/core-editor.js"] = "core-editor.js"
             assets["/dns-presets.js"] = "dns-presets.js"

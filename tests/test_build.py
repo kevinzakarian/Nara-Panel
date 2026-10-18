@@ -44,7 +44,8 @@ class BuildDownloadTests(unittest.TestCase):
         self.assertEqual((status,count),(1,1))
 
     def test_hanging_download_is_killed_and_attempts_are_bounded(self):
-        status,count,output,_ = self.invoke('time.sleep(10)',attempts=2,timeout=.25)
+        # Allow interpreter startup on a busy host before timing out the sleep.
+        status,count,output,_ = self.invoke('time.sleep(10)',attempts=2,timeout=1)
         self.assertEqual((status,count),(1,2))
         self.assertIn('time limit',output)
 

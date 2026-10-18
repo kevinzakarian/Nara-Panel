@@ -54,3 +54,23 @@ test('native editor output for every action passes the real pinned core check',{
 });
 
 test('unchanged omitted or empty default type and action fields are preserved',()=>{const f=app();try{for(const config of [{domain:'example.com',outbound:'direct'},{type:'',action:'route',domain_suffix:[],outbound:'direct'}]){f.w.testRule.edit(false,config);assert.deepEqual(JSON.parse(JSON.stringify(f.w.testRule.read())),config);}}finally{f.close();}});
+
+test('native choices use searchable multiple selection and survive action remounts',()=>{
+ const f=app();try{
+  f.w.testRule.init({...fixture,state:{...fixture.state,clients:[{id:'alice',name:'Alice'}],inbounds:[{tag:'entry'}]}});
+  f.w.testRule.editRouteRule();
+  const row=f.row('auth_user'),choice=row.querySelector('[data-core-choice][value="client-alice"]');assert.ok(choice);assert.match(choice.parentElement.textContent,/Alice/);
+  choice.checked=true;choice.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  f.change(f.w.document.querySelector('[name=native_rule_action]'),'reject');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.w.testRule.read().auth_user)),['client-alice']);
+  const network=f.row('network'),udp=network.querySelector('[data-core-choice][value=udp]');udp.checked=true;udp.dispatchEvent(new f.w.Event('change',{bubbles:true}));
+  assert.deepEqual(JSON.parse(JSON.stringify(f.w.testRule.read().network)),['udp']);
+  const filter=network.querySelector('[data-core-filter]');filter.value='tcp';filter.dispatchEvent(new f.w.Event('input',{bubbles:true}));assert.equal(udp.closest('[data-choice-label]').hidden,true);
+  network.querySelector('[data-core-choice-clear]').click();assert.equal(f.w.testRule.read().network,undefined);
+ }finally{f.close();}
+});
+test('combo custom identities and unknown stored values retain native scalar/list semantics',()=>{
+ const f=app();try{f.w.testRule.edit(false,{action:'reject',auth_user:'native-login'});assert.equal(f.w.testRule.read().auth_user,'native-login');const row=f.row('auth_user');row.querySelector('[data-core-custom]').value='second-login';row.querySelector('[data-core-choice-add]').click();assert.deepEqual(JSON.parse(JSON.stringify(f.w.testRule.read().auth_user)),['native-login','second-login']);assert.ok(f.w.document.querySelector('.native-more-fields'));assert.equal(f.row('source_port').hidden,true);f.w.document.querySelector('.native-more-fields').click();assert.equal(f.row('source_port').hidden,false);}finally{f.close();}
+});
+
+test('DNS query type dropdown also accepts a native numeric record type',()=>{const f=app();try{f.w.testRule.edit(true,{action:'reject'});const row=f.row('query_type');row.querySelector('[data-core-custom]').value='65401';row.querySelector('[data-core-choice-add]').click();assert.deepEqual(JSON.parse(JSON.stringify(f.w.testRule.read().query_type)),[65401]);}finally{f.close();}});

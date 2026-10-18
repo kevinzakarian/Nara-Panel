@@ -1,9 +1,7 @@
-# Verification — NARA 0.13.0 · 2026-10-18
+# Verification — NARA 0.14.0 · 2026-10-18
 
-- **176 frontend tests passed without skips**, including every pinned rule/action field, nested logical rules, typed unions, action/type switching, lossless round trips, required targets and JSON conversion. Editor output for all eight traffic actions, six DNS actions and both logical forms was checked with the real Sing-box 1.14.3 binary (16 configurations).
-- **33 targeted Python tests passed without skips**: native-schema coverage and real-core auto-apply behavior. No backend logic changed in this release. The previous full 345-test backend run remains recorded at tag v0.12.0.
-- Browser verification used a disposable loopback preview with synthetic accounts and a real core. Native traffic and DNS rules were saved successfully and applied automatically. Horizontal field tabs, native field labels and action-specific targets were visually checked. Screenshots: `screenshots/routing-rule-0.13.0.png` and `screenshots/dns-rule-0.13.0.png`. No live customer configuration was modified.
+Verification is in progress for the final implementation. Frontend checks exercise all native rule fields/actions, typed scalar/list round trips, searchable choices, custom identities and numeric DNS query types, safe action remounting, all three appearance palettes, device preference changes and live client badges. Real-core tests cover traffic forwarding/accounting, an authenticated open connection, exclusion after closing it, and rejection of invalid private monitor credentials.
 
-The real core confirmed that 1.14.3 route-action `fallback_delay` is numeric (not a duration string), that nested DNS response fields need `match_response` on the same child, and that logical `respond` cannot bind a response tag from its children. Forms keep the pinned vocabulary rather than importing newer documentation-only fields.
+Browser verification uses disposable loopback services and synthetic accounts. The update-available banner in screenshots is simulated fixture data. No production server, customer account or external notification is modified. Screenshots show real panel rendering rather than the earlier generated concepts.
 
-Fresh native Linux verification passed all four jobs on implementation commit `b033d9f64b70cc8a1e18db6e04930803d0d8dd76`: Linux amd64 and arm64 without Go/Git, a real systemd panel upgrade with a live WAL database, and SSH migration to a disposable destination. [GitHub Actions run](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39147070012). The final documentation-only commit adds this evidence; implementation files are unchanged.
+Final test totals and native Linux CI evidence will be recorded before publication.

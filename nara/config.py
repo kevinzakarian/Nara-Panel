@@ -40,7 +40,7 @@ def initial_state():
             "clients": [], "client_groups": [], "dns_servers": [{"id": "bootstrap", "tag": "bootstrap", "label": "Cloudflare", "type": "udp",
             "server": "1.1.1.1", "port": 53}],
             "settings": {"server_address": "", "public_url": "", "subscription_url": "", "dns_final": "bootstrap",
-                         "block_private": True, "time_zone": "UTC", "core_features_enabled": True}}
+                         "block_private": True, "time_zone": "UTC", "core_features_enabled": True, "skin": "ember", "color_mode": "light"}}
 
 
 def require(ok, message):
@@ -90,6 +90,8 @@ def validate(state):
             ids.append(row["id"])
         require(len(ids) == len(set(ids)), "Duplicate record ID")
     require(isinstance(state["settings"].get("core_features_enabled", True), bool), "Invalid Core features visibility")
+    require(state['settings'].get('skin', 'ember') in ('ember', 'volt', 'lagoon'), 'Choose Ember, Volt or Lagoon')
+    require(state['settings'].get('color_mode', 'light') in ('light', 'dark', 'system'), 'Choose Light, Dark or System appearance')
     tls_ids = {x["id"] for x in state["tls"]}
     inbound_ids = {x["id"] for x in state["inbounds"]}
     dns_tags = {x.get("tag") for x in state["dns_servers"]}

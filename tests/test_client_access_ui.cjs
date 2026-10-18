@@ -15,7 +15,7 @@ function app(patch={}){
  w.TestApp.setup(JSON.parse(JSON.stringify(fixture)),patch);let saved;w.TestApp.saveWith(async(collection,record)=>saved=JSON.parse(JSON.stringify({collection,record})));
  const form=()=>w.document.querySelector('#modal-form');
  const choose=(name,value)=>{const element=w.document.querySelector(`input[name="${name}"][value="${value}"]`);element.checked=true;element.dispatchEvent(new w.Event('change',{bubbles:true}));};
- const control=label=>[...w.document.querySelectorAll('[data-core-input],[data-core-lines],[data-core-native-lines],[data-core-union]')].find(el=>el.closest('label')?.textContent.trim().startsWith(label));
+ const control=label=>[...w.document.querySelectorAll('[data-core-input],[data-core-lines],[data-core-native-lines],[data-core-union]')].find(el=>el.closest('[data-core-field]')?.dataset.coreField===label||el.closest('label')?.textContent.trim().startsWith(label));
  return {w,d:w.document,form,choose,control,saved:()=>saved,close:()=>w.close()};
 }
 const inbound={id:'in1',tag:'proxy-in',enabled:true,type:'vless'};

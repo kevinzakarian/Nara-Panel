@@ -3,6 +3,7 @@ import json
 import ipaddress
 import os
 import shutil
+import secrets
 import sqlite3
 import socket
 import subprocess
@@ -10,7 +11,7 @@ import threading
 import time
 import tempfile
 from pathlib import Path
-from . import stats
+from . import stats, presence
 from .config import build_config, client_config, eligible, require, validate
 
 
@@ -46,6 +47,13 @@ class Runtime:
         self.generation = None
         self._build_cache = None
         self._eligible_clients = None
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            self.presence_port = listener.getsockname()[1]
+        self.presence_secret = secrets.token_urlsafe(32)
+        self.presence_counts = {}
+        self.presence_checked = None
+        self.presence_error = ''
 
     @property
     def running(self):
@@ -94,6 +102,29 @@ class Runtime:
         self.stats_error = ""
         self.failures = 0
 
+    def collect_presence(self):
+        try:
+            self.presence_counts = presence.query(self.presence_port, self.presence_secret)
+            self.presence_checked = time.time()
+            self.presence_error = ''
+        except Exception:
+            self.presence_error = 'Live connection status is unavailable'
+
+    def presence_status(self):
+        fresh = self.running and self.presence_checked is not None and time.time() - self.presence_checked < 20 and not self.presence_error
+        return {'available': bool(fresh), 'checked_at': self.presence_checked,
+                'counts': dict(self.presence_counts) if fresh else {},
+                'running': self.running}
+
+    def with_presence(self, config):
+        services = config.setdefault('services', [])
+        require(not any(row.get('tag') == '__nara_presence' or row.get('listen_port') == self.presence_port for row in services), 'A service conflicts with the private connection monitor')
+        require(not any(row.get('listen_port') == self.presence_port for row in config['inbounds']), 'An inbound conflicts with the private connection monitor')
+        services.append({'type': 'api', 'tag': '__nara_presence', 'listen': '127.0.0.1',
+                         'listen_port': self.presence_port, 'secret': self.presence_secret, 'dashboard': False,
+                         'access_control_allow_origin': ['http://localhost'], 'access_control_allow_private_network': False})
+        return config
+
     def traffic_totals(self, refresh=False):
         """One serialized sample keeps bot, portal and quota accounting consistent."""
         with self.lock:
@@ -117,7 +148,7 @@ class Runtime:
                 atomic_write(generation / (t["id"] + ".key"), t["private_key"])
             usage = self.store.totals() if totals is None else totals
             # Check inactive and unassigned inbounds too, without opening their ports.
-            checked_config = build_config(state, usage, generation, self.stats_port, check_all=True)
+            checked_config = self.with_presence(build_config(state, usage, generation, self.stats_port, check_all=True))
             self.check_config(checked_config, generation, "server configuration")
             managed = [i for i in state["inbounds"] if i.get("mode") != "native"]
             if managed:
@@ -130,7 +161,7 @@ class Runtime:
                         "password": "validation-only-not-a-real-user", "enabled": True,
                         "inbound_ids": [i["id"] for i in probe["inbounds"]]}
                 self.check_config(client_config(probe, user, {}), generation, "client export")
-            config = build_config(state, usage, generation, self.stats_port)
+            config = self.with_presence(build_config(state, usage, generation, self.stats_port))
             atomic_write(generation / "config.json", json.dumps(config, indent=2))
             return generation, config
         except Exception:
@@ -192,6 +223,8 @@ class Runtime:
             self.log_file.close()
             self.log_file = None
         self.process = None
+        self.presence_counts = {}
+        self.presence_checked = None
 
     def apply(self, state, persist=True, save=False, reset_client=None):
         with self.lock:
@@ -208,7 +241,7 @@ class Runtime:
             was_running = self.running
             # Link rotation, notes, public URL, and equivalent edits need no restart.
             if save and was_running and old and not reset_client:
-                expected = build_config(state, usage(), old, self.stats_port)
+                expected = self.with_presence(build_config(state, usage(), old, self.stats_port))
                 certificates_match = all((old / (t["id"] + suffix)).exists() and
                     (old / (t["id"] + suffix)).read_text() == t[key]
                     for t in state["tls"] for suffix, key in ((".crt", "certificate"), (".key", "private_key")))
@@ -223,7 +256,7 @@ class Runtime:
             self.stop()
             try:
                 # Final counters can cross a quota boundary while validation runs.
-                config = build_config(state, usage(), generation, self.stats_port)
+                config = self.with_presence(build_config(state, usage(), generation, self.stats_port))
                 atomic_write(generation / "config.json", json.dumps(config, indent=2))
                 self.launch(generation)
                 if persist:
@@ -233,7 +266,7 @@ class Runtime:
                 shutil.rmtree(generation, ignore_errors=True)
                 self.error = str(exc)
                 if was_running and old and self.active:
-                    old_config = build_config(self.active, self.store.totals(), old, self.stats_port)
+                    old_config = self.with_presence(build_config(self.active, self.store.totals(), old, self.stats_port))
                     atomic_write(old / "config.json", json.dumps(old_config, indent=2))
                     try:
                         self.launch(old)
@@ -256,7 +289,7 @@ class Runtime:
     def status(self):
         return {"running": self.running, "version": self.version(), "tags": self.build_info()["tags"], "started": self.started,
                 "active_revision": self.active.get("revision") if self.active else None,
-                "last_stats": self.last_stats, "stats_error": self.stats_error,
+                "last_stats": self.last_stats, "stats_error": self.stats_error, "presence": self.presence_status(),
                 "error": self.error, "stats_port": self.stats_port}
 
     def worker(self):
@@ -288,6 +321,7 @@ class Runtime:
                         self.error = "Core stopped because traffic accounting was unavailable; this prevents bypassing traffic limits"
                         self.store.audit(self.error)
                     continue
+                self.collect_presence()
                 try:
                     self.enforce_limits()
                 except Exception:

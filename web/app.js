@@ -102,12 +102,13 @@ async function load(silent=false) {
    if(next.core.active_revision!==null&&next.core.active_revision!==state.revision){model=await api('state');if(session!==csrf)return;}
    state=model;dashboard=next;
   }else {const values=await Promise.all([api('state'),api('dashboard'),api('access')]);if(session!==csrf)return;[state,dashboard,accessSettings]=values;}
+  if(typeof NaraTheme!=='undefined'&&(!silent||page!=='settings'))NaraTheme.apply(state.settings,true);
   $$('.panel-version').forEach(el=>el.textContent='v'+dashboard.panel_version);
   $('#sidebar-core').textContent=dashboard.core.running?'Core is running':'Core is stopped';
   $('.core-label .status-dot').classList.toggle('on',dashboard.core.running);
   $('.core-label .status-dot').classList.toggle('off',!dashboard.core.running);
   $('#updated').textContent='Updated at '+time(Date.now()/1000)+' · '+panelTimeZone();
-  if (!silent || page==='dashboard') render(); else renderNav();
+  if (!silent || page==='dashboard') render(); else if(page==='clients'){renderNav();refreshClientConnections();}else renderNav();
  })();
  try{await refreshPending;}finally{refreshPending=null;}
 }
@@ -123,7 +124,8 @@ function render() {
  if (!state || !dashboard) return;
  page=Object.hasOwn(titles,location.hash.slice(1))?location.hash.slice(1):'dashboard';
  if(page==='core'&&state.settings.core_features_enabled===false)page='settings';
- renderNav();$('#crumb').textContent=titles[page];document.title=titles[page]+' · NARA';
+ if(page!=='settings'&&typeof NaraTheme!=='undefined')NaraTheme.apply(state.settings);
+ $('#content').dataset.page=page;renderNav();$('#crumb').textContent=titles[page];document.title=titles[page]+' · NARA';
  $('#content').innerHTML=({dashboard:renderDashboard,inbounds:renderInbounds,tls:renderTLS,dns:renderDNS,routing:renderRouting,core:renderCore,clients:renderClients,settings:renderSettings,account:renderAccount,notifications:renderNotifications,email:renderEmail,api:renderAPI,about:renderAbout}[page])();
 }
 function metric(label,value,symbol,color,foot) {return `<article class="stat-card"><div class="stat-head">${label}<span class="stat-symbol ${color}">${icon(symbol)}</span></div><div class="stat-number">${value}</div><div class="stat-foot">${foot}</div></article>`;}
@@ -149,7 +151,7 @@ function chart(samples) {
  if (!samples || samples.length<2) return `<div class="chart-empty">${icon('traffic')}<span>${dashboard.metrics.platform==='Linux'?'Collecting traffic samples…':'Live traffic metrics are available when running on Linux.'}</span></div>`;
  const max=Math.max(1024,...samples.flatMap(s=>[s.rx,s.tx])),w=600,h=110;
  const path=key=>samples.map((s,i)=>`${i?'L':'M'}${(i*w/(samples.length-1)).toFixed(1)},${(h-s[key]/max*(h-10)).toFixed(1)}`).join(' ');
- return `<svg viewBox="0 0 600 110" preserveAspectRatio="none" role="img" aria-label="Server upload and download traffic"><defs><linearGradient id="trafficFill" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#e8ad86" stop-opacity=".22"/><stop offset="1" stop-color="#e8ad86" stop-opacity="0"/></linearGradient></defs>${[10,40,75,109].map(y=>`<path d="M0 ${y}H600" stroke="#f0f3f4" fill="none"/>`).join('')}<path d="${path('rx')} L600,110 L0,110Z" fill="url(#trafficFill)"/><path d="${path('rx')}" stroke="#e0a17c" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"/><path d="${path('tx')}" stroke="#8bb6a7" stroke-width="1.8" fill="none" vector-effect="non-scaling-stroke"/></svg><div class="chart-labels"><span>${time(samples[0].at)}</span><span>${time(samples.at(-1).at)}</span></div>`;
+ return `<svg viewBox="0 0 600 110" preserveAspectRatio="none" role="img" aria-label="Server upload and download traffic"><defs><linearGradient id="trafficFill" x1="0" x2="0" y1="0" y2="1"><stop stop-color="var(--chart-accent,var(--accent))" stop-opacity=".22"/><stop offset="1" stop-color="var(--chart-accent,var(--accent))" stop-opacity="0"/></linearGradient></defs>${[10,40,75,109].map(y=>`<path d="M0 ${y}H600" stroke="var(--border)" fill="none"/>`).join('')}<path d="${path('rx')} L600,110 L0,110Z" fill="url(#trafficFill)"/><path d="${path('rx')}" stroke="var(--chart-accent,var(--accent))" stroke-width="2" fill="none" vector-effect="non-scaling-stroke"/><path d="${path('tx')}" stroke="var(--chart-upload)" stroke-width="1.8" fill="none" vector-effect="non-scaling-stroke"/></svg><div class="chart-labels"><span>${time(samples[0].at)}</span><span>${time(samples.at(-1).at)}</span></div>`;
 }
 function inboundTLS(item){
  if(item.tls_id)return `<span class="tls-tag">${icon('lock')}${e(state.tls.find(profile=>profile.id===item.tls_id)?.server_name||'')}</span>`;
@@ -204,25 +206,31 @@ function zoneClock(name=panelTimeZone()){
  try{return new Intl.DateTimeFormat('en-GB',{timeZone:name,dateStyle:'medium',timeStyle:'short'}).format(new Date());}catch{return 'Choose a valid time zone';}
 }
 function updateZonePreview(){const input=$('#settings-form [name=time_zone]'),preview=$('#time-zone-preview');if(input&&preview)preview.textContent=zoneClock(input.value)+' · '+input.value;}
+function renderAppearanceSettings(){
+ const skin=state.settings.skin||'ember',mode=state.settings.color_mode||'light';
+ return `<section class="card appearance-card settings-section" id="settings-appearance"><div class="card-header"><div><span class="section-kicker">APPEARANCE</span><h2>Make NARA yours</h2><p>Three skins, each with a matching light and dark appearance.</p></div></div><div class="card-body"><div class="skin-grid" role="radiogroup" aria-label="Panel skin">${[['ember','Ember','Warm copper and charcoal'],['volt','Volt','Bold yellow and graphite'],['lagoon','Lagoon','Calm turquoise and slate']].map(([key,name,description])=>`<label class="skin-choice" data-swatch="${key}"><input type="radio" name="skin" value="${key}" ${checked(key===skin)}><b>${name}</b><small>${description}</small><span class="skin-preview" aria-hidden="true"><i></i><span><em></em><em></em><em></em></span></span></label>`).join('')}</div><fieldset class="appearance-mode"><legend>Appearance</legend>${[['light','Light'],['dark','Dark'],['system','Follow device']].map(([key,name])=>`<label><input type="radio" name="color_mode" value="${key}" ${checked(mode===key)}>${name}</label>`).join('')}</fieldset><p class="settings-save-note">Preview changes instantly. Save settings to use this appearance across your panel.</p></div></section>`;
+}
+function previewAppearance(){const form=document.querySelector('#settings-form');if(form)NaraTheme.apply({skin:form.elements.skin.value,color_mode:form.elements.color_mode.value});}
+
 function renderSettings() {
  const zones=optionSchema?.time_zones||['UTC','Asia/Tehran','Europe/London','America/New_York'];
- return heading('<button class="btn primary" type="submit" form="settings-form">'+icon('check')+'Save settings</button>')+pendingBanner()+`<form id="settings-form" data-revision="${state.revision}"><div class="management-layout"><div class="management-stack">
-  <section class="card"><div class="card-header"><div><span class="section-kicker">CONNECTION</span><h2>Server & client defaults</h2><p>Addresses and DNS used in generated client profiles</p></div>${icon('routing')}</div><div class="card-body preference-fields">
+ return heading('<button class="btn primary" type="submit" form="settings-form">'+icon('check')+'Save settings</button>')+pendingBanner()+`<form id="settings-form" data-revision="${state.revision}"><nav class="settings-contents" aria-label="Settings sections"><a href="#settings-appearance">Appearance</a><a href="#settings-connection">Connection</a><a href="#settings-region">Time & region</a><a href="#settings-access">Panel access</a><a href="#settings-traffic">Server traffic</a><a href="#settings-transfer">Backup & migration</a><a href="#settings-service">Maintenance</a></nav>${renderAppearanceSettings()}<div class="management-layout"><div class="management-stack">
+  <section class="card settings-section" id="settings-connection"><div class="card-header"><div><span class="section-kicker">CONNECTION</span><h2>Server & client defaults</h2><p>Addresses and DNS used in generated client profiles</p></div>${icon('routing')}</div><div class="card-body preference-fields">
    ${field('Public server IP or domain','server_address',state.settings.server_address,'text','The address clients connect to, without a scheme or port.')}
    <div class="form-grid">${field('Public panel URL (optional)','public_url',state.settings.public_url,'url','Your external panel address, for example https://panel.example.com.')}${field('Public subscription URL (optional)','subscription_url',state.settings.subscription_url||'','url','For an external reverse proxy. Leave blank to use the subscription port and subPath.')}</div>
    ${selectField('Default DNS','dns_final',state.dns_servers.map(d=>[d.tag,d.label?d.label+' · '+d.tag:d.tag]),state.settings.dns_final)}
    <p class="note">Rule and Global mode use this resolver and your DNS rules. Direct mode uses device DNS. <a class="text-link" href="#dns">Manage DNS →</a></p>
    <label class="check-field"><input name="block_private" type="checkbox" ${checked(state.settings.block_private)}>Block client access to private network IP addresses</label>
   </div></section>
-  <section class="card"><div class="card-header"><div><span class="section-kicker">TIME & REGION</span><h2>Panel time zone</h2><p>One clock for displayed times and daily Telegram summaries</p></div>${icon('clock')}</div><div class="card-body preference-fields">
+  <section class="card settings-section" id="settings-region"><div class="card-header"><div><span class="section-kicker">TIME & REGION</span><h2>Panel time zone</h2><p>One clock for displayed times and daily Telegram summaries</p></div>${icon('clock')}</div><div class="card-body preference-fields">
    <div class="timezone-picker">${selectField('Time zone','time_zone',['UTC',...zones.filter(name=>name!=='UTC')].map(name=>[name,name.replaceAll('_',' ')]),panelTimeZone())}<small id="time-zone-help" class="field-hint">Choose a region and city. Daylight saving changes follow the selected region.</small></div>
    <div class="zone-preview"><span>${icon('clock')}<b id="time-zone-preview" role="status">${e(zoneClock())} · ${e(panelTimeZone())}</b></span>${btn('Use my device time zone','settings-device-zone','refresh','sm','type="button"')}</div>
    <p class="note">Existing installations use UTC until you choose another zone. <a class="text-link" href="#notifications">Set the daily summary time →</a></p>
   </div></section>
- ${renderAccessSettings(true)}
- ${typeof renderTrafficSettings==='function'?renderTrafficSettings(true):''}
- ${typeof renderTransferSettings==='function'?renderTransferSettings():''}
- </div><aside class="management-stack" aria-label="Service and account shortcuts">
+ <div class="settings-section" id="settings-access">${renderAccessSettings(true)}</div>
+ <div class="settings-section" id="settings-traffic">${typeof renderTrafficSettings==='function'?renderTrafficSettings(true):''}</div>
+ <div class="settings-section" id="settings-transfer">${typeof renderTransferSettings==='function'?renderTransferSettings():''}</div>
+ </div><aside class="management-stack settings-section" id="settings-service" aria-label="Service and account shortcuts">
   <section class="card"><div class="card-header"><h2>Advanced workspace</h2></div><div class="card-body"><label class="check-field"><input type="checkbox" name="core_features_enabled" ${checked(state.settings.core_features_enabled!==false)}>Show Core features in navigation</label><p class="note">Access endpoints, system services, certificates and core diagnostics. Hiding the menu keeps existing configurations active.</p></div></section>
   <section class="card"><div class="card-header"><div><span class="section-kicker">SERVICE</span><h2>Sing-box core</h2></div>${badge(dashboard.core?.running?'Running':'Stopped',dashboard.core?.running?'green':'red')}</div><div class="card-body preference-fields"><p class="note">Validate your configuration or control the core process.</p><div class="service-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop core','stop','power','danger')}</div><p class="note">Start the core after an intentional stop or unexpected exit.</p></div></section>
   ${panelUpdateCard()}
@@ -230,7 +238,7 @@ function renderSettings() {
  </aside></div></form>`;
 }
 async function saveSettings(form){
- const f=new FormData(form),settings={...state.settings,time_zone:f.get('time_zone'),server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,core_features_enabled:form.elements.core_features_enabled.checked,dns_options:state.settings.dns_options||{}};
+ const f=new FormData(form),settings={...state.settings,skin:f.get('skin')||state.settings.skin||'ember',color_mode:f.get('color_mode')||state.settings.color_mode||'light',time_zone:f.get('time_zone'),server_address:f.get('server_address'),public_url:f.get('public_url'),subscription_url:f.get('subscription_url'),dns_final:f.get('dns_final'),block_private:form.elements.block_private.checked,core_features_enabled:form.elements.core_features_enabled.checked,dns_options:state.settings.dns_options||{}};
  const accessChanged=accessSettings.managed&&['web_path','sub_path','panel_port','subscription_port'].some(key=>String(f.get(key))!==String(accessSettings[key]));
  if(accessChanged){
   const panel=Number(f.get('panel_port')),subscription=Number(f.get('subscription_port'));
@@ -378,7 +386,7 @@ function updateBanner(){
   const item=updates[key]||{},name=key==='panel'?'NARA':'Sing-box';
   const installed=key==='panel'?'v'+dashboard.panel_version:(core.version||'Not installed').replace('sing-box version ','');
   const message=updates.checking?'Checking for updates…':item.error?'Update check unavailable':item.available?'New version '+item.latest:item.known?'Up to date':'Not checked yet';
-  return `<div class="release-component"><div><b>${name}</b><span class="mono">${e(installed)}</span>${key==='core'?badge(core.running?'Running':'Stopped',core.running?'green':''):''}</div><div class="release-state">${item.available?badge('Update available','orange'):''}<span${item.error?' title="Last known result is retained."':''}>${e(message)}</span>${item.available?`<a class="text-link" href="${e(item.url)}" target="_blank" rel="noopener noreferrer">View release ↗</a>${key==='panel'&&accessSettings.managed?btn('Update panel','update-panel','download','sm',`data-id="${e(item.latest)}"`):''}`:''}${item.error?'<small class="release-detail">Last known result is retained.</small>':item.checked_at?`<small>Checked ${e(date(item.checked_at))} ${e(time(item.checked_at))}</small>`:''}</div></div>`;
+  return `<div class="release-component" title="${e(item.checked_at?'Last checked: '+date(item.checked_at)+' '+time(item.checked_at):'Update status')}"><div><b>${name}</b><span class="mono">${e(installed)}</span>${key==='core'?badge(core.running?'Running':'Stopped',core.running?'green':''):''}</div><div class="release-state">${item.available?badge('v'+String(item.latest).replace(/^v/, '')+' available','orange'):''}<span${item.available?' class="release-detail"':''}${item.error?' title="Last known result is retained."':''}>${e(message)}</span>${item.available?`<a class="text-link" href="${e(item.url)}" target="_blank" rel="noopener noreferrer">Release ↗</a>${key==='panel'&&accessSettings.managed?btn('Update panel','update-panel','download','sm',`data-id="${e(item.latest)}"`):''}`:''}${item.error?'<small class="release-detail">Last known result is retained.</small>':item.checked_at?`<small class="release-checked">Checked ${e(time(item.checked_at))}</small>`:''}</div></div>`;
  }).join('')}</div></section>`;
 }
 function legacyCoreConfig(collection,row){
@@ -654,9 +662,9 @@ window.addEventListener('hashchange',()=>{if($('#modal').open)$('#modal').close(
 $('#refresh').innerHTML=icon('refresh');$('#refresh').addEventListener('click',async()=>{try{await load();toast('Server data refreshed.');}catch(err){toast(err.message,true);}});
 $('#logout').addEventListener('click',async()=>{try{await api('logout',{});showLogin();}catch(err){toast(err.message,true);}});
 $('#mobile-menu').addEventListener('click',()=>$('.sidebar').classList.toggle('open'));
-document.addEventListener('input',event=>{if(event.target.matches('#settings-form [name=time_zone]'))updateZonePreview();});
+document.addEventListener('input',event=>{if(event.target.matches('#settings-form [name=skin],#settings-form [name=color_mode]'))previewAppearance();if(event.target.matches('#settings-form [name=time_zone]'))updateZonePreview();});
 document.addEventListener('change',event=>{if(event.target.matches('#telegram-form [name=event],#telegram-form [name=summary_hour],#telegram-form [name=summary_minute]'))updateSummarySchedule();});
-document.addEventListener('click',event=>{if($('.sidebar').classList.contains('open')&&!event.target.closest('.sidebar,#mobile-menu'))$('.sidebar').classList.remove('open');});
+document.addEventListener('click',event=>{const anchor=event.target.closest('.settings-contents a');if(anchor){event.preventDefault();$(anchor.getAttribute('href'))?.scrollIntoView({behavior:'smooth',block:'start'});}if($('.sidebar').classList.contains('open')&&!event.target.closest('.sidebar,#mobile-menu'))$('.sidebar').classList.remove('open');});
 $('#modal').addEventListener('close',()=>{if(!$('#modal').open){$('#modal-body').replaceChildren();modalSubmit=null;previewConfig=null;}});
 let lastRefreshError=0;
 setInterval(()=>{if(csrf&&!accessChangePending&&!document.hidden&&!$('#modal').open)load(true).catch(err=>{if(Date.now()-lastRefreshError>60000){lastRefreshError=Date.now();toast(err.message,true);}});},5000);

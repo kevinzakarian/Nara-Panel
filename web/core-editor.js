@@ -37,6 +37,9 @@ const CoreSchema=(()=>{
  function byName(name){return catalog.schema.$defs[name];}
  function protocolSchema(direction,type){return branches(byName(direction)).find(x=>x.properties?.type?.const===type);}
  function mount(container,raw,initial={},settings={}){
+  container.__coreSchemaCleanup?.();const handlers=[];
+  const listen=(node,event,handler)=>{node.addEventListener(event,handler);handlers.push(()=>node.removeEventListener(event,handler));};
+  container.__coreSchemaCleanup=()=>handlers.forEach(remove=>remove());
   const fieldTitle=key=>settings.nativeNames?key:title(key);
   function scalarSchemas(raw){const s=ref(raw);return s.anyOf?s.anyOf.flatMap(scalarSchemas):s.type==='array'?scalarSchemas(s.items):[s];}
   function parseNative(text,raw,label){const choices=scalarSchemas(raw);for(const s of choices){if(s.type==='string'&&(!s.enum||s.enum.includes(text)))return text;if(['integer','number'].includes(s.type)&&text.trim()!==''&&Number.isFinite(Number(text))&&(s.type!=='integer'||Number.isInteger(Number(text)))&&(s.minimum===undefined||Number(text)>=s.minimum)&&(s.maximum===undefined||Number(text)<=s.maximum))return Number(text);}throw Error('Invalid value for '+label+': '+text.slice(0,80));}
@@ -44,7 +47,7 @@ const CoreSchema=(()=>{
   const dnsPorts={udp:53,tcp:53,tls:853,quic:853,https:443,h3:443};
   const guided=settings.layout==='dns';
   const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
-  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);if(settings.grouped)groupFields();for(const input of container.querySelectorAll('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;for(const input of container.querySelectorAll('[data-core-native-lines]'))nodes.get(input.dataset.coreNativeLines).display=input.value;for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
+  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);if(settings.grouped)groupFields();for(const input of container.querySelectorAll('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;for(const input of container.querySelectorAll('[data-core-native-lines]'))nodes.get(input.dataset.coreNativeLines).display=input.value;for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);settings.afterDraw?.(container,value);}
   function groupFields(){
    const root=container.querySelector(':scope > .schema-fields');if(!root)return;
    const schema=choose(raw,value),basics=new Set([...(schema.required||[]),'tag','enabled','disabled','level','timestamp','output','server','server_port','interval','domain_resolver','system','name','mtu','address','private_key','public_key','listen','listen_port','peers','users','password','passwords','tls','domain','domains','email','api_token','api_key','token','auth_key','origin_ca_key','dns01_challenge','store','certificate','certificate_path','certificate_directory_path','providers','provider','cache_file','clash_api']);
@@ -86,7 +89,16 @@ const CoreSchema=(()=>{
     if(array&&scalars.every(s=>['string','integer','number'].includes(s.type))){
      nodes.set(id,{input,value:v,set,label,nativeList:true,display:undefined});
      const enums=[...new Set(scalars.flatMap(s=>s.enum||[]))];
-     return `<label>${e(label)}<textarea rows="2" data-core-native-lines="${id}" dir="ltr" autocomplete="off" spellcheck="false">${e((Array.isArray(v)?v:v===undefined?[]:[v]).join('\n'))}</textarea><small class="field-hint">One value per line.${enums.length?' Values: '+e(enums.join(', '))+'.':''}</small></label>`;
+     const list=Array.isArray(v)?v:v===undefined?[]:[v],key=path.split('.').at(-1),provided=settings.choiceFields?.[key];
+     const reference=scalars.find(s=>s['x-tag-reference'])?.['x-tag-reference'];
+     const choices=provided?.values||enums.map(x=>[x,String(x)]);
+     if(!choices.length&&reference)choices.push(...(settings.references?.[reference]||[]).map(x=>[x,x]));
+     if(provided||enums.length||reference){
+      const known=new Set(choices.map(([value])=>String(value)));for(const item of list)if(!known.has(String(item)))choices.push([item,String(item)+' · stored value']);
+      const selected=list.map(item=>choices.find(([value])=>String(item)===String(value))?.[1]||String(item));
+      return `<div class="native-combo"><span class="combo-label">${e(label)}</span><textarea hidden aria-hidden="true" rows="2" data-core-native-lines="${id}">${e(list.join('\n'))}</textarea><details data-core-combo="${id}"><summary aria-label="Choose ${e(label)}"><span data-combo-summary>${e(selected.length?selected.join(', '):'Any / not set')}</span><span aria-hidden="true">⌄</span></summary><div class="combo-popover"><input type="search" data-core-filter="${id}" aria-label="Search ${e(label)}" placeholder="Search…" autocomplete="off"><div class="combo-options">${choices.map(([value,text])=>`<label data-choice-label><input type="checkbox" data-core-choice="${id}" value="${e(value)}" ${list.some(item=>String(item)===String(value))?'checked':''}><span>${e(text)}</span></label>`).join('')||'<small>No configured items available.</small>'}</div>${(provided?.custom||!provided&&!reference&&scalars.some(s=>['integer','number'].includes(s.type)||s.type==='string'&&!s.enum))?`<div class="combo-custom"><input data-core-custom="${id}" aria-label="Custom ${e(label)}" placeholder="Native value"><button type="button" class="btn sm" data-core-choice-add="${id}">Add</button></div>`:''}<button type="button" class="text-link" data-core-choice-clear="${id}">Clear selection</button></div></details></div>`;
+     }
+     return `<label>${e(label)}<textarea rows="2" data-core-native-lines="${id}" dir="ltr" autocomplete="off" spellcheck="false">${e(list.join('\n'))}</textarea><small class="field-hint">One value per line.</small></label>`;
     }
     const types=[...new Set(options.map(s=>s.type))];
     if(types.length>1&&options.every(s=>['string','integer','number','boolean'].includes(s.type))){
@@ -158,22 +170,28 @@ const CoreSchema=(()=>{
   }
   // Autofill and some input methods can update controls without an input event.
   // Keep untouched values byte-for-byte; synchronize only changed controls.
-  function syncInputs(){for(const input of container.querySelectorAll('[data-core-native-lines]')){const node=nodes.get(input.dataset.coreNativeLines);if(input.value!==node.display){const values=input.value.split('\n').filter(text=>text!=='').map(text=>parseNative(text,node.input,node.label));node.set(values.length?values:undefined);}}for(const input of container.querySelectorAll('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);}for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
-  container.addEventListener('input',event=>readInput(event.target));
+  function syncInputs(){for(const input of container.querySelectorAll('[data-core-native-lines]')){const node=nodes.get(input.dataset.coreNativeLines);if(input.value!==node.display){const values=input.value.split('\n').filter(text=>text!=='').map(text=>parseNative(text,node.input,node.label));node.set(values.length?values:undefined);node.display=input.value;}}for(const input of container.querySelectorAll('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);node.display=input.value;}for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
+  listen(container,'input',event=>{readInput(event.target);if(event.target.dataset.coreFilter!==undefined){const term=event.target.value.toLowerCase();for(const row of event.target.closest('.combo-popover').querySelectorAll('[data-choice-label]'))row.hidden=!row.textContent.toLowerCase().includes(term);}});
   function change(event){
    const el=event.target;
    syncInputs();
+   if(el.dataset.coreChoice!==undefined){
+    const box=el.closest('[data-core-combo]'),id=el.dataset.coreChoice,source=container.querySelector('[data-core-native-lines="'+id+'"]');
+    const selected=[...box.querySelectorAll('[data-core-choice]:checked')];source.value=selected.map(input=>input.value).join('\n');syncInputs();box.querySelector('[data-combo-summary]').textContent=selected.map(input=>input.parentElement.textContent.trim()).join(', ')||'Any / not set';
+   }
    if(el.dataset.coreUnion!==undefined){const node=nodes.get(el.dataset.coreUnion),schema=node.unionOptions[Number(el.value)];unionDrafts.set(node.path,Number(el.value));node.set(schema?seed(schema):undefined);draw();}
    if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=node.variants[Number(el.value)],old=node.value||{};let fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];if(guided&&node.root&&dnsPorts[fresh.type]&&old.server_port===dnsPorts[old.type])fresh.server_port=dnsPorts[fresh.type];if(node.root&&settings.transformType)fresh=settings.transformType(fresh,old);node.set(fresh);draw();}
    if(el.dataset.coreToggle!==undefined){const node=nodes.get(el.dataset.coreToggle),s=choose(node.input,node.value),obj=node.value||{};if(el.checked)Object.defineProperty(obj,el.dataset.key,{value:seed(s.properties[el.dataset.key]),writable:true,enumerable:true,configurable:true});else delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   }
   const changeControl=event=>{try{change(event);}catch(error){if(!settings.nativeUnions)throw error;const output=container.closest('form')?.querySelector('.form-error');if(output)output.textContent=error.message;}};
-  container.addEventListener('change',changeControl);
-  if(settings.typeContainer)settings.typeContainer.addEventListener('change',changeControl);
-  container.addEventListener('click',event=>{
+  listen(container,'change',changeControl);
+  if(settings.typeContainer)listen(settings.typeContainer,'change',changeControl);
+  listen(container,'click',event=>{
    const el=event.target.closest('button');if(!el)return;
    syncInputs();
+   if(el.dataset.coreChoiceClear!==undefined){const box=el.closest('[data-core-combo]');for(const input of box.querySelectorAll('[data-core-choice]'))input.checked=false;container.querySelector('[data-core-native-lines="'+el.dataset.coreChoiceClear+'"]').value='';box.querySelector('[data-combo-summary]').textContent='Any / not set';syncInputs();}
+   if(el.dataset.coreChoiceAdd!==undefined){const id=el.dataset.coreChoiceAdd,input=container.querySelector('[data-core-custom="'+id+'"]'),text=input.value.trim();if(!text)return;const box=el.closest('[data-core-combo]');let option=[...box.querySelectorAll('[data-core-choice]')].find(node=>node.value===text);if(!option){const label=document.createElement('label');label.dataset.choiceLabel='';option=document.createElement('input');option.type='checkbox';option.dataset.coreChoice=id;option.value=text;const caption=document.createElement('span');caption.textContent=text;label.append(option,caption);box.querySelector('.combo-options').append(label);}option.checked=true;change({target:option});input.value='';}
    if(el.dataset.coreRemove!==undefined){const node=nodes.get(el.dataset.coreRemove),obj=node.value;delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreItemRemove!==undefined){const node=nodes.get(el.dataset.coreItemRemove),array=node.value;array.splice(Number(el.dataset.index),1);node.set(array);draw();}
    if(el.dataset.coreItemAdd!==undefined){const node=nodes.get(el.dataset.coreItemAdd),s=choose(node.input,node.value),array=Array.isArray(node.value)?node.value:[];array.push(seed(s.items||{}));node.set(array);draw();}

@@ -409,3 +409,17 @@ An empty default rule is a valid catch-all. Domain/address conditions share an O
 NARA record metadata (display label and enabled state) is separate from native configuration. Existing rules are preserved; editing and JSON conversion retain scalar/list values, explicit false/zero/empty values, logical nesting and unknown stored fields. Fields introduced in newer documentation, such as 1.15-only match fields, are not exposed to the 1.14.3 core. Existing managed-DNS and private-network policies are unchanged and remain visible in Routing.
 
 ![Native DNS action form](screenshots/dns-rule-0.13.0.png)
+
+
+## 0.14.0 · Ember, Volt and Lagoon
+
+Settings → Appearance offers **Ember**, **Volt** and **Lagoon**, each in Light, Dark or Follow device mode. Selection previews immediately; the single Save settings button saves it for the panel. A small local appearance cache avoids a light flash on reload. The skins share geometry and use local CSS/system fonts, with no external theme framework or remote assets. Settings has section shortcuts and a persistent save heading.
+
+Traffic and DNS rule forms retain the native 1.14.3 model. Inbound tags, authenticated users, shared rule sets, networks and protocol choices use searchable multiple selection. Managed accounts display their names while saving the actual `auth_user` identity; `client` continues to mean the sniffed application. Existing scalar/list and unknown stored values remain intact. Common match fields appear first, additional fields stay available, and a live summary links directly to the selected action/destination.
+
+Clients now separates **Active** (account eligibility) from **Online** (open authenticated traffic connections). The monitor reads the official 1.14.3 `daemon.StartedService/SubscribeConnections` initial snapshot, excludes closed connections and sends only aggregate client counts to administrators. It uses a separate loopback-only API service with a random secret and port, no dashboard download, and bounded polling. It does not alter a user-configured Clash API or API service. An idle VPN may have no open traffic flows; unavailable/stale monitoring is displayed explicitly rather than treated as proof of being offline. Counts update on the regular dashboard refresh without replacing client selections.
+
+The Overview version strip no longer shrinks one component beneath the other when an update is available. Compact update text, responsive timestamps (full time remains in the tooltip) and horizontal overflow on narrow screens keep the strip on one line.
+
+![Appearance settings](screenshots/settings-skins-0.14.0.png)
+![Routing choices](screenshots/routing-combos-0.14.0.png)
