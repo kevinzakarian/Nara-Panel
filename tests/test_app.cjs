@@ -10,7 +10,7 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(['web/account.js','web/integrations.js','web/clients.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},tls(){return renderTLS()},updates(value,managed){dashboard={updates:{panel:value}};accessSettings={managed};return panelUpdateCard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
+ w.eval(['web/account.js','web/integrations.js','web/clients.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},tls(){return renderTLS()},settings(){return renderSettings()},updates(value,managed){dashboard={updates:{panel:value}};accessSettings={managed};return panelUpdateCard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
  w.TestApp.setup(JSON.parse(JSON.stringify(fixture)));
  return {w,dom,close(){w.close()}};
 }
@@ -249,3 +249,10 @@ test('opening an existing resolver preserves its custom endpoint and label',()=>
 test('DNS resolver detour is editable without advanced menus and preserves a WARP tag',async()=>{
  const f=app();try{let saved;f.w.TestApp.saveWith(async(collection,record)=>{saved=JSON.parse(JSON.stringify(record))});f.w.TestApp.editCoreRecord('dns_servers',{id:'d',mode:'native',config:{type:'udp',tag:'via-warp',server:'1.1.1.1',server_port:53,detour:'warp'}});const field=f.w.document.querySelector('[data-dns-field=detour]');assert.ok(field);assert.equal(f.w.document.querySelector('[data-core-add]'),null);await f.w.TestApp.submit();assert.equal(saved.config.detour,'warp');}finally{f.close()}
 });
+
+
+test('settings form retains its rendered revision while a background refresh updates state',()=>{const f=app();try{
+ f.w.TestApp.updates({known:true,available:false},true);const root=f.w.document.createElement('div');root.innerHTML=f.w.TestApp.settings();assert.equal(root.querySelector('#settings-form').dataset.revision,'0');
+ const data=JSON.parse(JSON.stringify(fixture));data.state.revision=9;f.w.TestApp.setup(data);assert.equal(root.querySelector('#settings-form').dataset.revision,'0');
+ assert.match(fs.readFileSync('web/app.js','utf8'),/revision:Number\(form.dataset.revision\)/);
+}finally{f.close()}});

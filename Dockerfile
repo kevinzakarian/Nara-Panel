@@ -12,7 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-cert
     && useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin nara
 WORKDIR /app
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade 'pip>=26.2,<27' \
+    && python -m pip install --no-cache-dir -r requirements.txt
 COPY --from=core /core/sing-box /usr/local/bin/sing-box
 COPY --from=core /core/libcronet.so /usr/local/bin/libcronet.so
 COPY --from=core /core/libcronet.LICENSE /usr/local/bin/libcronet.LICENSE

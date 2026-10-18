@@ -62,8 +62,8 @@ class UpdateTests(unittest.TestCase):
         response.__enter__.return_value=response
         response.url=CORE_URL
         response.read.return_value=json.dumps({'tag_name':'v1.14.3','padding':'x'*300000}).encode()
-        with mock.patch('nara.updates.urllib.request.urlopen',return_value=response):
+        with mock.patch('nara.updates.open_https',return_value=response):
             self.assertEqual(fetch(CORE_URL)['tag_name'],'v1.14.3')
         response.read.return_value=b'x'*(MAX_RESPONSE+1)
-        with mock.patch('nara.updates.urllib.request.urlopen',return_value=response),self.assertRaisesRegex(ValueError,'too large'):
+        with mock.patch('nara.updates.open_https',return_value=response),self.assertRaisesRegex(ValueError,'too large'):
             fetch(CORE_URL)

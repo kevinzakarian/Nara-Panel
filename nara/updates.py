@@ -4,6 +4,7 @@ import re
 import threading
 import time
 import urllib.request
+from .network import open_https
 from . import __version__
 
 PANEL_URL = "https://api.github.com/repos/kevinzakarian/Nara-Panel/releases/latest"
@@ -18,7 +19,7 @@ def version(value):
 
 def fetch(url):
     request = urllib.request.Request(url, headers={"User-Agent": "Nara-Panel/" + __version__, "Accept": "application/json"})
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with open_https(request, timeout=10) as response:
         if not response.url.startswith("https://"):
             raise ValueError("An HTTPS response is required")
         body = response.read(MAX_RESPONSE + 1)

@@ -4,13 +4,13 @@ const integrationLoading=new Set();
 function integrationLoad(kind,force=false){
  if(integrationLoading.has(kind))return;
  if(!force&&(kind==='api'?apiKeyData:telegramData))return;
- integrationLoading.add(kind);
- api(kind==='api'?'api-keys':'telegram').then(value=>{if(kind==='api')apiKeyData=value;else telegramData=value;}).catch(error=>{if(kind==='api')apiKeyData={keys:[],scopes:{},error:error.message};else telegramData={error:error.message};}).finally(()=>{integrationLoading.delete(kind);if(page===(kind==='api'?'api':'notifications'))render();});
+ integrationLoading.add(kind);const session=csrf;
+ api(kind==='api'?'api-keys':'telegram').then(value=>{if(session!==csrf)return;if(kind==='api')apiKeyData=value;else telegramData=value;}).catch(error=>{if(session!==csrf)return;if(kind==='api')apiKeyData={keys:[],scopes:{},error:error.message};else telegramData={error:error.message};}).finally(()=>{integrationLoading.delete(kind);if(session===csrf&&page===(kind==='api'?'api':'notifications'))render();});
 }
 function renderAPI(){
  if(!apiKeyData){integrationLoad('api');return heading()+'<p class="note">Loading API access…</p>';}
  const base=new URL('api/v1/',location.href.split('#')[0]).href;
- return heading(btn('Create API key','integration-key-new','key','primary'))+`<section class="card"><div class="card-header"><div><h2>Connect another program to NARA</h2><p>An API lets scripts or other apps manage this panel without using the browser.</p></div>${icon('code')}</div><div class="card-body"><ol class="api-steps"><li>Create a key with only the permissions your program needs.</li><li>Copy it once and store it privately. Keys can be revoked at any time.</li><li>Send requests to this address with the key in the Authorization header.</li></ol><code class="secret-output">${e(base)}</code><p class="note">Use HTTPS for remote automation. A key is a credential: do not put it in a URL or share it with clients.</p><div class="inline-buttons">${btn('API guide & examples','integration-api-guide','code')}${btn('Download OpenAPI','integration-openapi','download')}${btn('Refresh','integration-api-refresh','refresh')}</div>${apiKeyData.error?`<p class="error-text">${e(apiKeyData.error)}</p>`:''}</div></section><section class="card section-gap"><div class="card-header"><div><h2>Your API keys</h2><p>Only the key name and access details remain visible after creation.</p></div></div>${apiKeyData.keys.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Permissions</th><th>Expires</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${apiKeyData.keys.map(row=>`<tr><td><b>${e(row.name)}</b></td><td>${row.scopes.map(scope=>badge(scope,'blue')).join(' ')}</td><td>${date(row.expires)}</td><td>${row.last_used?date(row.last_used):'Never'}</td><td>${badge(row.revoked?'Revoked':row.expires<=Date.now()/1000?'Expired':'Active',row.revoked?'':row.expires<=Date.now()/1000?'orange':'green')}</td><td>${row.revoked?'':rowBtn('Revoke API key','integration-key-revoke','trash',row.id)}</td></tr>`).join('')}</tbody></table></div>`:empty('No API keys yet','Create a read-only key to start exploring your panel API.','integration-key-new','Create API key','key')}</section>`;
+ return heading(btn('Create API key','integration-key-new','key','primary'))+`<section class="card"><div class="card-header"><div><h2>Connect another program to NARA</h2><p>An API lets scripts or other apps manage this panel without using the browser.</p></div>${icon('code')}</div><div class="card-body"><ol class="api-steps"><li>Create a key with only the permissions your program needs.</li><li>Copy it once and store it privately. Keys can be revoked at any time.</li><li>Send requests to this address with the key in the Authorization header.</li></ol><code class="secret-output">${e(base)}</code><p class="note">Use HTTPS for remote automation. A key is a credential: do not put it in a URL or share it with clients.</p><div class="inline-buttons">${btn('API guide & examples','integration-api-guide','code')}${btn('Download OpenAPI','integration-openapi','download')}${btn('Refresh','integration-api-refresh','refresh')}</div>${apiKeyData.error?`<p class="error-text">${e(apiKeyData.error)}</p>`:''}</div></section><section class="card section-gap"><div class="card-header"><div><h2>Your API keys</h2><p>Only the key name and access details remain visible after creation.</p></div></div>${apiKeyData.keys.length?`<div class="table-wrap"><table><thead><tr><th>Name</th><th>Permissions</th><th>Expires</th><th>Last used</th><th>Status</th><th></th></tr></thead><tbody>${apiKeyData.keys.map(row=>`<tr><td><b>${e(row.name)}</b></td><td>${row.scopes.map(scope=>badge(scope,'blue')).join(' ')}</td><td>${date(row.expires)}</td><td>${row.last_used?e(date(row.last_used))+' · '+e(time(row.last_used)):'Never'}</td><td>${badge(row.revoked?'Revoked':row.expires<=Date.now()/1000?'Expired':'Active',row.revoked?'':row.expires<=Date.now()/1000?'orange':'green')}</td><td>${row.revoked?'':rowBtn('Revoke API key','integration-key-revoke','trash',row.id)}</td></tr>`).join('')}</tbody></table></div>`:empty('No API keys yet','Create a read-only key to start exploring your panel API.','integration-key-new','Create API key','key')}</section>`;
 }
 function createAPIKey(){
  openModal('Create API key','The complete key is shown once after creation.',`<div class="form-grid">${field('Key name','name','','text','For example: billing integration or server dashboard.')}${selectField('Expires after','days',[[7,'7 days'],[30,'30 days'],[90,'90 days'],[365,'365 days']],90)}</div><fieldset class="route-scope"><legend>Permissions</legend>${Object.entries(apiKeyData.scopes).map(([scope,label])=>`<label class="check-field"><input type="checkbox" name="scope" value="${e(scope)}" ${checked(scope==='read')}><span><b>${e(scope)}</b><small class="field-hint">${e(label)}</small></span></label>`).join('')}</fieldset>${adminReauth()}`,async form=>{
@@ -30,14 +30,71 @@ function showAPIGuide(){
 }
 function renderNotifications(){
  if(!telegramData){integrationLoad('telegram');return heading()+'<p class="note">Loading notification settings…</p>';}
- const t=telegramData;if(t.error)return heading()+`<p class="error-text">${e(t.error)}</p>`+btn('Retry','integration-telegram-refresh','refresh');
- const categories=[['Service & security',['panel_started','core_up','core_down','login','login_failed','admin_changed','api_key','config_saved','apply_failed']],['Clients & traffic',['clients_created','clients_updated','clients_deleted','quota_warning','quota_reached','expiry_warning','expired']],['Server & summaries',['resource_alert','resource_recovery','daily_summary']]];
- return heading(btn('Send test notification','integration-telegram-test','check','',t.enabled?'':'disabled'))+`<section class="card"><div class="card-header"><div><h2>Your Telegram bot</h2><p>Choose what reaches you, without opening the panel.</p></div>${badge(t.enabled?'Enabled':'Not enabled',t.enabled?'green':'')}</div><div class="card-body"><ol class="api-steps"><li>Create a bot with <a class="text-link" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> and copy its token.</li><li>Start your bot in Telegram. Enter the destination Chat ID; add the bot as an administrator for a channel.</li><li>Choose events, enable notifications and save. Use Send test notification to verify delivery.</li></ol><p class="note">Messages contain operational state, client names and usage totals for selected events. Passwords, API keys, private keys and subscription links are excluded.</p></div></section><section class="card section-gap"><div class="card-header"><h2>Notification preferences</h2></div><form id="telegram-form" class="card-body"><label class="check-field"><input name="enabled" type="checkbox" ${checked(t.enabled)}>Enable Telegram notifications</label><div class="form-grid">${field('Bot token','bot_token','','password',t.token_configured?'A token is stored. Leave blank to keep it.':'Paste the token from BotFather.')}${field('Chat ID or @channel','chat_id',t.chat_id||'','text','For a private chat, enter its numeric Chat ID.')}${selectField('Daily summary time (UTC)','summary_hour',Array.from({length:24},(_,hour)=>[hour,String(hour).padStart(2,'0')+':00 UTC']),t.summary_hour??9)}</div><div class="inline-buttons section-gap"><button type="button" class="btn" data-action="integration-telegram-chats">Find recent bot chats</button></div><div id="telegram-chats"></div><div class="notification-groups">${categories.map(([title,events])=>`<fieldset class="route-scope"><legend>${title}</legend>${events.map(event=>`<label class="check-field"><input name="event" type="checkbox" value="${event}" ${checked(t.events?.includes(event))}>${e(t.event_labels[event]||event)}</label>`).join('')}</fieldset>`).join('')}</div><p class="note">Quota alerts begin at 80%; expiry alerts begin 24 hours before expiry. Resource alerts need sustained usage at or above 90%. The worker checks health about every 30 seconds and sends at most one daily summary per UTC day.</p>${adminReauth()}<button class="btn primary" type="submit">${icon('check')}Save notifications</button><p class="note">Re-enter your current password${adminProfile.two_factor?' and a fresh verification code':''} to change the bot destination or notification preferences.</p></form></section><section class="card section-gap"><div class="card-header"><h2>Delivery status</h2></div><div class="card-body">${t.delivery?.at?`<p>${badge(t.delivery.ok?'Delivered':'Needs attention',t.delivery.ok?'green':'orange')} ${e(t.delivery.message)} · ${e(time(t.delivery.at))}</p>`:'<p class="note">No delivery attempts yet.</p>'}<p class="note">Messages are queued and retried on temporary network failures. Notifications cannot report a complete server/panel outage while this panel is offline.</p>${btn('Refresh delivery status','integration-telegram-refresh','refresh')}${t.recent?.length?`<div class="table-wrap section-gap"><table><thead><tr><th>Event</th><th>Time</th><th>Status</th></tr></thead><tbody>${t.recent.map(row=>`<tr><td>${e(t.event_labels[row.event]||'Test notification')}</td><td>${e(time(row.created))}</td><td>${badge(row.status,row.status==='sent'?'green':row.status==='failed'?'red':'')}</td></tr>`).join('')}</tbody></table></div>`:''}</div></section>`;
+ const t=telegramData;
+ if(t.error)return heading()+`<p class="error-text">${e(t.error)}</p>`+btn('Retry','integration-telegram-refresh','refresh');
+ const categories=[
+  ['Service & security',['panel_started','core_up','core_down','login','login_failed','admin_changed','api_key','config_saved','apply_failed']],
+  ['Clients & traffic',['clients_created','clients_updated','clients_deleted','quota_warning','quota_reached','expiry_warning','expired']],
+  ['Server & summaries',['resource_alert','resource_recovery','daily_summary']]
+ ];
+ return heading(btn('Send test message','integration-telegram-test','check','',t.enabled?'':'disabled'))+`
+ <section class="card notification-setup">
+  <div class="card-header"><div><h2>Connect your Telegram bot</h2><p>Set up the connection, then choose which updates to receive.</p></div>${badge(t.enabled?'Enabled':'Not enabled',t.enabled?'green':'')}</div>
+  <div class="card-body"><details class="setup-help"><summary>How to get a bot token and Chat ID</summary><ol class="api-steps"><li>Create a bot with <a class="text-link" href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a> and copy its token.</li><li>Start your bot in Telegram, then use Find recent bot chats to choose a destination. For a channel, give the bot permission to post.</li><li>Enable notifications, save your choices and send a test message.</li></ol></details></div>
+ </section>
+ <section class="card section-gap">
+  <div class="card-header"><div><h2>Notification preferences</h2><p>Saved only after administrator verification</p></div></div>
+  <form id="telegram-form" class="card-body">
+   <div class="form-grid">${field('Bot token','bot_token','','password',t.token_configured?'A token is stored. Leave blank to keep it.':'Paste the token from BotFather.')}${field('Chat ID or @channel','chat_id',t.chat_id||'','text','Find your private/group Chat ID below, or enter a channel username.')}</div>
+   <div class="inline-buttons notification-tools"><button type="button" class="btn" data-action="integration-telegram-check">${icon('check')}Test bot</button><button type="button" class="btn" data-action="integration-telegram-chats">${icon('clients')}Find recent bot chats</button></div>
+   <p class="note">These buttons use the token above, or the saved token when blank. Each asks for your current NARA administrator password${adminProfile.two_factor?' and a fresh verification code':''} in a separate window.</p>
+   <div id="telegram-connection" role="status"></div><div id="telegram-chats"></div>
+   <div class="notification-schedule"><label class="check-field"><input name="enabled" type="checkbox" ${checked(t.enabled)}>Enable Telegram notifications</label>${selectField('Daily summary time (UTC)','summary_hour',Array.from({length:24},(_,hour)=>[hour,String(hour).padStart(2,'0')+':00 UTC']),t.summary_hour??9)}</div>
+   <div class="notification-groups">${categories.map(([title,events])=>`<fieldset class="route-scope"><legend>${title}</legend>${events.map(event=>`<label class="check-field"><input name="event" type="checkbox" value="${event}" ${checked(t.events?.includes(event))}>${e(t.event_labels[event]||event)}</label>`).join('')}</fieldset>`).join('')}</div>
+   <p class="note">Quota alerts begin at 80%; expiry alerts begin 24 hours before expiry. Resource alerts require sustained usage at or above 90%. Messages exclude passwords, API keys, private keys and subscription links.</p>
+   <div class="form-save-bar"><p>Saving requires your current administrator password${adminProfile.two_factor?' and a fresh verification code':''}.</p><button class="btn primary" type="submit">${icon('check')}Save notifications</button></div>
+  </form>
+ </section>
+ <section class="card section-gap"><div class="card-header"><div><h2>Delivery status</h2><p>Queued messages and recent attempts</p></div>${btn('Refresh','integration-telegram-refresh','refresh','sm')}</div><div class="card-body">
+  ${t.delivery?.at?`<p>${badge(t.delivery.ok?'Delivered':'Needs attention',t.delivery.ok?'green':'orange')} ${e(t.delivery.message)} · ${e(time(t.delivery.at))}</p>`:'<p class="note">No delivery attempts yet. Save and enable notifications to send a test message.</p>'}
+  <p class="note">Temporary failures retry automatically. Notifications cannot report a complete server/panel outage while this panel is offline.</p>
+  ${t.recent?.length?`<div class="table-wrap"><table><thead><tr><th>Event</th><th>Time</th><th>Status</th></tr></thead><tbody>${t.recent.map(row=>`<tr><td>${e(t.event_labels[row.event]||'Test notification')}</td><td>${e(time(row.created))}</td><td>${badge(row.status,row.status==='sent'?'green':row.status==='failed'?'red':'')}</td></tr>`).join('')}</tbody></table></div>`:''}
+ </div></section>`;
 }
-async function saveTelegram(form){
- const f=new FormData(form);await api('telegram',{current:f.get('current'),code:f.get('code')||'',settings:{enabled:form.elements.enabled.checked,bot_token:f.get('bot_token'),chat_id:String(f.get('chat_id')||'').trim(),events:f.getAll('event'),summary_hour:Number(f.get('summary_hour'))}});integrationLoad('telegram',true);toast('Notification preferences saved.');
+function notificationPreferences(form){
+ const f=new FormData(form);
+ return {enabled:form.elements.enabled.checked,bot_token:String(f.get('bot_token')||'').trim(),chat_id:String(f.get('chat_id')||'').trim(),events:f.getAll('event'),summary_hour:Number(f.get('summary_hour'))};
 }
-function testTelegram(){openModal('Send a test notification','A test message is sent to the configured Telegram chat.',adminReauth(),async form=>{await api('telegram/test',Object.fromEntries(new FormData(form)));toast('Test notification queued. Check delivery status shortly.');integrationLoad('telegram',true);},'Send test');requireAdminInputs($('#modal-form'));}
+function notificationVerification(title,description,run,label){
+ openModal(title,description,`<p class="note">Enter your current NARA administrator password. This is the password you use to sign in to this panel.</p>${adminReauth()}`,run,label);
+ requireAdminInputs($('#modal-form'));
+}
+function saveTelegram(form){
+ const settings=notificationPreferences(form);
+ notificationVerification('Save notification preferences','Confirm the bot destination and event choices.',async auth=>{
+  await api('telegram',{...Object.fromEntries(new FormData(auth)),settings});
+  integrationLoad('telegram',true);toast('Notification preferences saved.');
+ },'Save notifications');
+}
+function testTelegram(){
+ notificationVerification('Send a test message','Queues a message to your saved Telegram destination.',async form=>{
+  await api('telegram/test',Object.fromEntries(new FormData(form)));
+  toast('Test message queued. Refresh delivery status shortly.');integrationLoad('telegram',true);
+ },'Send test message');
+}
+function notificationToken(form){
+ const token=String(form.elements.bot_token.value||'').trim();
+ if(!token&&!telegramData?.token_configured)throw Error('Enter a bot token first.');
+ return token;
+}
+function checkTelegramBot(){
+ const parent=$('#telegram-form'),token=notificationToken(parent);
+ notificationVerification('Test bot connection','Checks the bot token with Telegram. No message is sent and your preferences are not saved.',async form=>{
+  const result=await api('telegram/check',{...Object.fromEntries(new FormData(form)),bot_token:token});
+  if(parent.isConnected)$('#telegram-connection').innerHTML=`<div class="hint-box success">${icon('check')}Connected to <b>@${e(result.bot.username)}</b>${result.bot.name?' · '+e(result.bot.name):''}</div>`;
+  toast('Bot connection verified.');
+ },'Test bot');
+}
 async function handleIntegration(action,target){
  if(action==='integration-key-new')return createAPIKey();
  if(action==='integration-key-revoke')return revokeAPIKey(target.dataset.id);
@@ -46,12 +103,16 @@ async function handleIntegration(action,target){
  if(action==='integration-api-refresh')return integrationLoad('api',true);
  if(action==='integration-telegram-refresh')return integrationLoad('telegram',true);
  if(action==='integration-telegram-chats')return findTelegramChats();
+ if(action==='integration-telegram-check')return checkTelegramBot();
  if(action==='integration-telegram-chat'){const form=$('#telegram-form');form.elements.chat_id.value=target.dataset.id;toast('Chat selected. Save your notification preferences.');return;}
  if(action==='integration-telegram-test')return testTelegram();
 }
 
-async function findTelegramChats(){
- const form=$('#telegram-form'),f=new FormData(form);const result=await api('telegram/chats',{current:f.get('current'),code:f.get('code')||'',bot_token:f.get('bot_token')||''});
- if(form.elements.code)form.elements.code.value='';
- $('#telegram-chats').innerHTML=result.chats.length?`<div class="hint-box">Choose a destination, then save preferences.</div><div class="inline-buttons section-gap">${result.chats.map(chat=>btn(e(chat.name)+' · '+e(chat.id),'integration-telegram-chat','clients','sm',`data-id="${e(chat.id)}"`)).join('')}</div>`:'<p class="note">No recent chats found. Send a message to your bot in Telegram, then try again. You can also enter a Chat ID manually.</p>';
+function findTelegramChats(){
+ const parent=$('#telegram-form'),token=notificationToken(parent);
+ notificationVerification('Find recent bot chats','Reads recent chat IDs from your bot. Start the bot in Telegram first. Your preferences are not saved.',async form=>{
+  const result=await api('telegram/chats',{...Object.fromEntries(new FormData(form)),bot_token:token});
+  if(!parent.isConnected)return;
+  $('#telegram-chats').innerHTML=result.chats.length?`<div class="hint-box">Choose a destination, then save preferences.</div><div class="inline-buttons section-gap">${result.chats.map(chat=>btn(e(chat.name)+' · '+e(chat.id),'integration-telegram-chat','clients','sm',`data-id="${e(chat.id)}"`)).join('')}</div>`:'<p class="note">No recent chats found. Send a message to your bot in Telegram, then try again. You can also enter a Chat ID manually.</p>';
+ },'Find chats');
 }

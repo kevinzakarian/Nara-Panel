@@ -173,7 +173,7 @@ class API:
                 return 200,{'data':build_config(state,self.store.totals(),self.runtime.run_dir,self.runtime.stats_port),'revision':state['revision']}
             if path=='updates':return 200,{'data':self.updates.status(self.runtime.version())}
             if path=='panel/access':return 200,{'data':self.access.info()}
-            if re.fullmatch(r'operations/[a-f0-9]{32}',path):return 200,{'data':self.access.status(path.split('/')[-1])}
+            if re.fullmatch(r'operations/[A-Za-z0-9_-]{32}',path):return 200,{'data':self.access.status(path.split('/')[-1])}
             if path.startswith('core/options/') and path.split('/')[-1] in OPTIONS:
                 section=path.split('/')[-1]
                 return 200,{'data':visible(state.get('core_options',{}).get(section,{}),secret),'revision':state['revision'],**({'default_resolver':state['settings']['dns_final']} if section=='dns' else {})}

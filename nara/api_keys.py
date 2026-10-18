@@ -36,9 +36,11 @@ def authenticate(store,authorization):
     if not isinstance(authorization,str) or not authorization.startswith('Bearer nara_') or len(authorization)>128:return None
     raw=authorization[7:]
     with store.connect() as db:
-        row=db.execute('SELECT id,name,scopes,expires,revoked FROM api_keys WHERE hash=?',(hashlib.sha256(raw.encode()).hexdigest(),)).fetchone()
+        row=db.execute('SELECT id,name,scopes,expires,revoked,last_used FROM api_keys WHERE hash=?',(hashlib.sha256(raw.encode()).hexdigest(),)).fetchone()
         if not row or row[4] or row[3]<=time.time():return None
-        db.execute('UPDATE api_keys SET last_used=? WHERE id=?',(time.time(),row[0]))
+        now=time.time()
+        if not row[5] or now-row[5]>=60:
+            db.execute('UPDATE api_keys SET last_used=? WHERE id=?',(now,row[0]))
         return {'id':row[0],'name':row[1],'scopes':json.loads(row[2])}
 
 

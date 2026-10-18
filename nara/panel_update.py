@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 import traceback
 import urllib.request
+from .network import open_https
 from . import __version__
 from .updates import version
 
@@ -28,7 +29,7 @@ def target(value):
 
 def download(url, limit):
     request = urllib.request.Request(url, headers={"User-Agent":"NARA-panel-updater/" + __version__})
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with open_https(request, timeout=30) as response:
         if not response.url.startswith("https://"):
             raise ValueError("An HTTPS release is required")
         data = response.read(limit + 1)

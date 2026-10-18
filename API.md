@@ -35,7 +35,7 @@ Successful reads normally return `{"data": ..., "revision": 12}`. Lists also inc
 
 All configuration writes use the panel's validation and automatic core apply. A rejected change preserves previous saved settings and attempts to retain/restore the running core. A batch is one transaction and one apply. Runtime start/stop and maintenance operations have their own explicit behavior; software/entry operations return 202 and an operation ID where applicable.
 
-Errors use `{"error":{"code":"revision_conflict","message":"..."},"request_id":"..."}`. Responses include `X-Request-ID`. Codes include 400 invalid input/validation, 401 missing/expired/revoked key, 403 missing permission, 404 missing resource, 405 unsupported method, 409 stale revision/inactive private profile, 429 rate limit and 500 operation failure. Requests are limited to **120/minute/key**; 429 supplies `Retry-After: 60`. The existing JSON body limit is 1 MiB. Raw core logs and credentials are not returned in generic errors.
+Errors use `{"error":{"code":"revision_conflict","message":"..."},"request_id":"..."}`. Responses include `X-Request-ID`. Codes include 400 invalid input/validation, 401 missing/expired/revoked key, 403 missing permission, 404 missing resource, 405 unsupported method, 409 stale revision/inactive private profile, 429 rate limit and 500 operation failure. Requests are limited to **120/minute/key**; 429 supplies `Retry-After: 60`. The existing JSON body limit is 1 MiB. Raw core logs and credentials are not returned in generic errors. Public listeners cap concurrent handlers at 32 each and expire idle sockets after 15 seconds; handle temporary connection failures with bounded retries. API last-used metadata has up to one minute of timestamp precision.
 
 ## Resource CRUD
 
@@ -114,7 +114,7 @@ Select 1–1000 distinct existing IDs. Deletion removes accounts immediately; re
 | GET `/panel/access` | Entry values and their separate access revision; `read` |
 | PATCH `/panel/access` | `{"revision":ACCESS_REVISION,"values":{...}}`; `panel:manage`; use values from the current access response, not the model revision |
 | POST `/panel/update` | `{"version":"0.8.0"}` with a currently eligible stable version; `panel:manage`; no state revision required |
-| GET `/operations/{id}` | Access/update maintenance progress; `read` |
+| GET `/operations/{id}` | Access/update maintenance progress by the returned 32-character URL-safe operation ID; `read` |
 
 Entry changes can move the API address and disconnect the requester. Software updates require the managed Linux maintenance service, verified fixed-repository release assets and compatible dependencies; failures are reported in operation status. The API does not upload code or accept arbitrary commands.
 

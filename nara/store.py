@@ -5,6 +5,7 @@ import json
 import secrets
 import sqlite3
 import time
+import threading
 from pathlib import Path
 from .config import initial_state, normalize_dns_record
 
@@ -21,6 +22,7 @@ def password_matches(password, encoded):
 
 class Store:
     def __init__(self, directory):
+        self.notification_wakeup = threading.Event()
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.directory.chmod(0o700)
@@ -92,12 +94,16 @@ class Store:
             return {r[0]: {"upload": r[1], "download": r[2]} for r in db.execute("SELECT id,upload,download FROM traffic")}
 
     def add_traffic(self, deltas):
+        if not deltas:
+            return
         with self.connect() as db:
             for client_id, direction, value in deltas:
                 if direction not in ("upload", "download") or value < 0:
                     raise ValueError("Invalid traffic counter")
                 db.execute("INSERT OR IGNORE INTO traffic(id) VALUES(?)", (client_id,))
-                db.execute("UPDATE traffic SET " + direction + "=" + direction + "+? WHERE id=?", (value, client_id))
+                query={"upload":"UPDATE traffic SET upload=upload+? WHERE id=?",
+                       "download":"UPDATE traffic SET download=download+? WHERE id=?"}[direction]
+                db.execute(query, (value, client_id))
 
     def session(self, raw):
         with self.connect() as db:

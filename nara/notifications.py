@@ -3,7 +3,6 @@ import datetime as dt
 import json
 import re
 import sqlite3
-import threading
 import time
 from urllib import error, request
 
@@ -62,6 +61,7 @@ def enqueue(store, event, detail='', dedupe=None, window=900):
             db.execute('INSERT OR REPLACE INTO kv VALUES(?,?)',(key,json.dumps(now)))
         db.execute('INSERT INTO notifications(event,payload,created,available) VALUES(?,?,?,?)',(event,json.dumps(payload),now,now))
         db.execute('DELETE FROM notifications WHERE id NOT IN (SELECT id FROM notifications ORDER BY id DESC LIMIT 500)')
+    store.notification_wakeup.set()
     return True
 
 
@@ -105,6 +105,13 @@ def send(token,chat_id,message):
     call(token,'sendMessage',{'chat_id':chat_id,'text':message[:4000],'link_preview_options':{'is_disabled':True}})
 
 
+def bot_info(token):
+    value=call(token,'getMe',{})
+    if not isinstance(value,dict) or value.get('is_bot') is not True or not isinstance(value.get('username'),str):
+        raise DeliveryError('Telegram returned an unexpected bot identity')
+    return {'username':value['username'][:64], 'name':str(value.get('first_name',''))[:128]}
+
+
 def chats(token):
     value=call(token,'getUpdates',{'limit':20,'timeout':0})
     if not isinstance(value,list):raise DeliveryError('Telegram returned an unexpected chat list')
@@ -129,13 +136,12 @@ class Worker:
     def __init__(self,store,runtime):
         self.store,self.runtime=store,runtime
         self.last_poll=0;self.previous_core=None;self.resource_samples={};self.resource_alerts=set()
-        self.lock=threading.Lock()
         from .runtime import Metrics
         self.metrics=Metrics()
 
-    def poll(self,now=None):
+    def poll(self,now=None,config=None):
         now=time.time() if now is None else now
-        config=settings(self.store)
+        config=config or settings(self.store)
         if not config['enabled']:return
         running=self.runtime.running
         if self.previous_core is not None and self.previous_core!=running:
@@ -175,8 +181,8 @@ class Worker:
         with self.store.connect() as db:
             db.execute("DELETE FROM kv WHERE key LIKE 'notice:%' AND CAST(value AS REAL)<?",(now-7*86400,))
 
-    def deliver(self):
-        config=settings(self.store)
+    def deliver(self,config=None):
+        config=config or settings(self.store)
         if not config['enabled']:return
         now=time.time()
         if self.store.get('telegram_throttle',0)>now:return
@@ -200,12 +206,22 @@ class Worker:
 
     def run(self):
         from . import __version__
-        enqueue(self.store,'panel_started','Version '+__version__+' is ready. Your settings and client accounts are available.')
-        while not self.runtime.shutdown.wait(1):
+        emit(self.store,'panel_started','Version '+__version__+' is ready. Your settings and client accounts are available.')
+        while not self.runtime.shutdown.is_set():
+            self.store.notification_wakeup.clear()
+            delay=30
             try:
-                now=time.time()
-                if now-self.last_poll>=30:self.poll(now);self.last_poll=now
-                self.deliver()
+                now=time.time();config=settings(self.store)
+                if config['enabled']:
+                    if now-self.last_poll>=30:
+                        self.poll(now,config);self.last_poll=now
+                    self.deliver(config)
+                    with self.store.connect() as db:
+                        row=db.execute("SELECT MIN(available) FROM notifications WHERE status='queued'").fetchone()
+                    throttle=self.store.get('telegram_throttle',0)
+                    due=max(row[0],throttle) if row and row[0] is not None else now+30
+                    delay=max(1,min(30,due-time.time(),30-(time.time()-self.last_poll)))
             except Exception:
-                # No raw exceptions, request URLs, keys or client credentials in logs.
+                # Keep raw exceptions, request URLs, keys and credentials out of logs.
                 self.store.set('telegram_delivery',{'at':time.time(),'ok':False,'message':'Notification worker could not complete this check'})
+            self.store.notification_wakeup.wait(delay)

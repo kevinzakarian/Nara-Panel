@@ -5,6 +5,7 @@ import ipaddress
 import json
 import mimetypes
 import os
+import re
 import secrets
 import ssl
 import subprocess
@@ -13,7 +14,8 @@ import threading
 import time
 import uuid
 from http.cookies import SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
+from .http import BoundedHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 from . import __version__, options
@@ -132,9 +134,14 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
 
         def json_body(self):
             require(self.headers.get("Content-Type", "").split(";")[0] == "application/json", "Request must use application/json")
+            require(not self.headers.get("Transfer-Encoding") and len(self.headers.get_all("Content-Length", [])) == 1, "Use one Content-Length without Transfer-Encoding")
             length = int(self.headers.get("Content-Length", "0"))
             require(0 < length <= 1_048_576, "Request is too large or empty")
-            data = json.loads(self.rfile.read(length))
+            raw = self.rfile.read(length)
+            require(len(raw) == length, "Incomplete request body")
+            def invalid_constant(value):
+                raise ValueError("JSON numbers must be finite")
+            data = json.loads(raw, parse_constant=invalid_constant)
             require(isinstance(data, dict), "Invalid request structure")
             return data
 
@@ -151,7 +158,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if not session:
                 self.send(401, {"error": "Please sign in first"})
                 return None
-            if mutation and not hmac.compare_digest(self.headers.get("X-CSRF-Token", ""), session["csrf"]):
+            if mutation and not hmac.compare_digest(self.headers.get("X-CSRF-Token", "").encode(), session["csrf"].encode()):
                 self.send(403, {"error": "Invalid security token; refresh the page"})
                 return None
             return session
@@ -160,7 +167,10 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             origin = self.headers.get("Origin")
             require(self.headers.get("Sec-Fetch-Site") != "cross-site", "Request origin is not allowed")
             if origin:
-                require(urlsplit(origin).netloc == self.headers.get("Host"), "Request origin is not allowed")
+                parsed = urlsplit(origin)
+                require(parsed.scheme in ("http", "https") and parsed.netloc == self.headers.get("Host") and
+                        not (parsed.username or parsed.password or parsed.query or parsed.fragment) and parsed.path in ("", "/") and
+                        (not secure_cookie or parsed.scheme == "https"), "Request origin is not allowed")
 
         def do_GET(self):
             try:
@@ -199,14 +209,17 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 return self.send(200, {"ok": True, "version": __version__})
             if role == "subscription" and path.startswith("/") and path.count("/") == 1 and len(path) > 1:
                 token = path[1:]
+                if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+                    return self.send(404, {"error": "Subscription is unavailable"})
                 state = store.get("state")
                 client = next((c for c in state["clients"] if hmac.compare_digest(c["token"], token)), None)
                 active = runtime.active
                 live_client = next((c for c in active["clients"] if client and c["id"] == client["id"]), None) if active else None
-                if not client or not live_client or not eligible(client, store.totals()):
+                totals = store.totals() if client and live_client else {}
+                if not client or not live_client or not eligible(client, totals):
                     return self.send(404, {"error": "Subscription is unavailable"})
-                result = client_config(active, live_client, store.totals())
-                usage = store.totals().get(client["id"], {})
+                result = client_config(active, live_client, totals)
+                usage = totals.get(client["id"], {})
                 from .config import expiry
                 info = "upload={}; download={}; total={}; expire={}".format(usage.get("upload", 0), usage.get("download", 0), live_client["quota_bytes"], int(expiry(live_client.get("expires_at"))))
                 return self.send(200, result, headers={"Subscription-Userinfo": info, "Profile-Update-Interval": "6"})
@@ -363,13 +376,15 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 store.audit('API key created' if path.endswith('/create') else 'API key revoked')
                 notifications.emit(store, 'api_key', 'A machine-access key was created.' if path.endswith('/create') else 'A machine-access key was revoked.')
                 return self.send(200, result)
-            if path == '/api/telegram/chats':
+            if path in ('/api/telegram/chats', '/api/telegram/check'):
                 with account_lock:
                     admin = store.get('admin')
                     accounts.verify(store, admin, data, self.cookie_token())
                     value = notifications.validate_settings({'enabled': False, 'bot_token': data.get('bot_token', '')}, notifications.settings(store))
                     require(value.get('bot_token'), 'Enter a bot token first')
                     store.set('admin', admin)
+                if path.endswith('/check'):
+                    return self.send(200, {'bot': notifications.bot_info(value['bot_token'])})
                 return self.send(200, {'chats': notifications.chats(value['bot_token'])})
             if path in ('/api/telegram', '/api/telegram/test'):
                 with account_lock:
@@ -382,6 +397,7 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                         previous = notifications.settings(store)
                         value = notifications.validate_settings(data.get('settings'), previous)
                         store.set('telegram', value)
+                        store.notification_wakeup.set()
                         if any(value.get(key) != previous.get(key) for key in ('bot_token', 'chat_id', 'enabled')):
                             with store.connect() as db:db.execute("UPDATE notifications SET status='cancelled' WHERE status='queued'")
                     store.set('admin', admin)
@@ -581,9 +597,9 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
     from .access import Access
     access = Access(store.directory, access_config or {"NARA_WEB_PATH": web_path, "NARA_PORT": port, "NARA_SUB_PATH": sub_path, "NARA_SUB_PORT": sub_port})
     web_dir = Path(__file__).resolve().parent.parent / "web"
-    server = ThreadingHTTPServer((bind, port), make_handler(store, runtime, web_dir, secure_cookie, web_path, access=access))
+    server = BoundedHTTPServer((bind, port), make_handler(store, runtime, web_dir, secure_cookie, web_path, access=access))
     try:
-        subscription = ThreadingHTTPServer((bind, sub_port), make_handler(store, runtime, web_dir, False, sub_path, role="subscription", access=access))
+        subscription = BoundedHTTPServer((bind, sub_port), make_handler(store, runtime, web_dir, False, sub_path, role="subscription", access=access))
     except Exception:
         server.server_close()
         raise
@@ -602,6 +618,7 @@ def serve(store, runtime, bind="127.0.0.1", port=10000, secure_cookie=False, web
         subscription.shutdown()
         subscription.server_close()
         runtime.shutdown.set()
+        store.notification_wakeup.set()
         with runtime.lock:
             runtime.stop()
         server.server_close()

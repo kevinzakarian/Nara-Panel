@@ -7,6 +7,7 @@ import socket
 import subprocess
 import threading
 import time
+import tempfile
 from pathlib import Path
 from . import stats
 from .config import build_config, client_config, eligible, require, validate
@@ -14,12 +15,15 @@ from .config import build_config, client_config, eligible, require, validate
 
 def atomic_write(path, content):
     path = Path(path)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    with open(temporary, "w", encoding="utf-8", opener=lambda p, f: os.open(p, f, 0o600)) as f:
-        f.write(content)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(temporary, path)
+    descriptor, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as file:
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 class Runtime:
@@ -40,6 +44,7 @@ class Runtime:
         self.run_dir.mkdir(exist_ok=True, mode=0o700)
         self.generation = None
         self._build_cache = None
+        self._eligible_clients = None
 
     @property
     def running(self):
@@ -75,7 +80,8 @@ class Runtime:
                 continue
             previous = self.baseline.get(name, 0)
             require(value >= previous, "Traffic counter reset unexpectedly")
-            deltas.append((parts[1][7:], direction, value - previous))
+            if value > previous:
+                deltas.append((parts[1][7:], direction, value - previous))
         self.store.add_traffic(deltas)
         self.baseline = counters
         self.last_stats = time.time()
@@ -221,6 +227,7 @@ class Runtime:
                 self.store.audit("Configuration apply failed; previous settings retained")
                 raise ValueError(self.error)
             self.generation = generation
+            self._eligible_clients = frozenset(config["experimental"]["v2ray_api"]["stats"]["users"])
             self.active = copy.deepcopy(state)
             self.error = ""
             self.failures = 0
@@ -260,15 +267,29 @@ class Runtime:
                         self.error = "Core stopped because traffic accounting was unavailable; this prevents bypassing traffic limits"
                         self.store.audit(self.error)
                     continue
-                if self.active and self.generation:
-                    expected = build_config(self.active, self.store.totals(), self.generation, self.stats_port)
-                    actual = json.loads((self.generation / "config.json").read_text())
-                    if expected != actual:
-                        try:
-                            self.apply(self.active)
-                        except Exception as exc:
-                            self.stop(collect=False)
-                            self.error = str(exc)
+                try:
+                    self.enforce_limits()
+                except Exception:
+                    # A failed eligibility check must not leave an unmanaged live core.
+                    self.stop(collect=False)
+                    self.error="Core stopped because account limits could not be verified; check the private panel data and restart the core"
+                    self.store.audit(self.error)
+
+    def enforce_limits(self):
+        """Only rebuild when eligibility changes, not after every traffic sample."""
+        if not self.active or not self.generation:
+            return
+        if self._eligible_clients is None:
+            actual=json.loads((self.generation / 'config.json').read_text())
+            self._eligible_clients=frozenset(actual['experimental']['v2ray_api']['stats']['users'])
+        totals=self.store.totals()
+        expected=frozenset('client-'+client['id'] for client in self.active['clients'] if eligible(client,totals))
+        if expected != self._eligible_clients:
+            try:
+                self.apply(self.active)
+            except Exception as exc:
+                self.stop(collect=False)
+                self.error=str(exc)
 
 
 def cpu_model():

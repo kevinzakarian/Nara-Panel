@@ -99,6 +99,7 @@ install -d -m 755 /opt/nara-panel /opt/nara-panel/bin
 install -d -o nara-panel -g nara-panel -m 700 /var/lib/nara-panel
 chown -hR nara-panel:nara-panel /var/lib/nara-panel
 python3 -m venv /opt/nara-panel/.venv
+/opt/nara-panel/.venv/bin/python -m pip install --disable-pip-version-check --upgrade 'pip>=26.2,<27' </dev/null
 /opt/nara-panel/.venv/bin/python -m pip install --disable-pip-version-check -r "$source_dir/requirements.txt" </dev/null
 for item in nara web scripts; do
     rm -rf "/opt/nara-panel/$item"
