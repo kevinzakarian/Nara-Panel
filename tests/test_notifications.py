@@ -134,6 +134,11 @@ class TimeZoneTests(unittest.TestCase):
         self.configure_zone('Asia/Tehran',9)
         self.worker=notifications.Worker(self.store,self.runtime)
         self.poll_at('2026-10-18T10:01:00+00:00');self.assertEqual(len(self.rows()),1)
+        # Switching from UTC+14 to UTC-12 can revisit a date after 26 hours.
+        self.configure_zone('Pacific/Kiritimati',0)
+        self.poll_at('2026-12-19T10:00:00+00:00');self.assertEqual(len(self.rows()),2)
+        self.configure_zone('Etc/GMT+12',0)
+        self.poll_at('2026-12-20T12:00:00+00:00');self.assertEqual(len(self.rows()),2)
 
     def test_legacy_defaults_and_summary_time_validation(self):
         from nara import timezones

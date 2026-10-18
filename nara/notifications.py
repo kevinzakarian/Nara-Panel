@@ -178,7 +178,8 @@ class Worker:
         if (local.hour,local.minute)>=(config['summary_hour'],config.get('summary_minute',0)):
             active=sum(eligible(row,totals,now) for row in state['clients'])
             used=sum(x.get('upload',0)+x.get('download',0) for x in totals.values())
-            enqueue(self.store,'daily_summary',f'Core: {"Running 🟢" if running else "Stopped 🔴"}\nClients: {len(state["clients"])} · Active: {active}\nRecorded traffic: {used/1024**3:.2f} GiB\nYou’re in control. Have a great day!', 'daily:'+local.date().isoformat(),90000)
+            # UTC+14 to UTC-12 can revisit the same local date after 26 hours.
+            enqueue(self.store,'daily_summary',f'Core: {"Running 🟢" if running else "Stopped 🔴"}\nClients: {len(state["clients"])} · Active: {active}\nRecorded traffic: {used/1024**3:.2f} GiB\nYou’re in control. Have a great day!', 'daily:'+local.date().isoformat(),7*86400)
         # Deduplication keys are bounded independently of changing client IDs.
         with self.store.connect() as db:
             db.execute("DELETE FROM kv WHERE key LIKE 'notice:%' AND CAST(value AS REAL)<?",(now-7*86400,))
