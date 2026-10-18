@@ -26,7 +26,7 @@ function migrationWizard(){
    values.ssh_password='';values.ssh_key='';await showMigrationStatus(job);
   },'Start migration',`<div class="hint-box"><b>${e(pin.host)}:${pin.ssh_port}</b><p class="mono fingerprint">${e(pin.fingerprint)}</p><p>Panel: ${e(values.panel_domain||values.host)} · Subscription: ${e(values.subscription_domain||values.panel_domain||values.host)}</p><label class="check-field"><input type="checkbox" name="approve_host" required>I verified this fingerprint using a trusted server console.</label></div><p class="note">Administrator and 2FA, client credentials and quotas are copied over encrypted SSH. API keys and client/inbound chart history are copied; browser sessions and host billing counters are not. Changes and traffic on the source after the snapshot are not synchronized. Do not run both copies indefinitely with the same account allowances.</p>`);
  },'Check SSH host');
- const form=$('#modal-form');requireAdminInputs(form);form.elements.host.required=true;form.elements.ssh_password.autocomplete='off';
+ const form=$('#modal-form');requireAdminInputs(form);form.elements.host.required=true;form.elements.ssh_password.autocomplete='off';form.elements.ssh_key.autocomplete='off';form.elements.ssh_key.spellcheck=false;
  const sync=()=>{const key=form.elements.auth_mode.value==='key';form.elements.ssh_key.closest('label').hidden=!key;form.elements.ssh_key.required=key;form.elements.ssh_password.required=!key;};form.elements.auth_mode.onchange=sync;sync();
 }
 async function showMigrationStatus(initial=null){
