@@ -37,11 +37,14 @@ const CoreSchema=(()=>{
  function byName(name){return catalog.schema.$defs[name];}
  function protocolSchema(direction,type){return branches(byName(direction)).find(x=>x.properties?.type?.const===type);}
  function mount(container,raw,initial={},settings={}){
-  let value=clone(initial);let sequence=0;const nodes=new Map();
+  const fieldTitle=key=>settings.nativeNames?key:title(key);
+  function scalarSchemas(raw){const s=ref(raw);return s.anyOf?s.anyOf.flatMap(scalarSchemas):s.type==='array'?scalarSchemas(s.items):[s];}
+  function parseNative(text,raw,label){const choices=scalarSchemas(raw);for(const s of choices){if(s.type==='string'&&(!s.enum||s.enum.includes(text)))return text;if(['integer','number'].includes(s.type)&&text.trim()!==''&&Number.isFinite(Number(text))&&(s.type!=='integer'||Number.isInteger(Number(text)))&&(s.minimum===undefined||Number(text)>=s.minimum)&&(s.maximum===undefined||Number(text)<=s.maximum))return Number(text);}throw Error('Invalid value for '+label+': '+text.slice(0,80));}
+  let value=clone(initial);let sequence=0;const nodes=new Map(),unionDrafts=new Map();
   const dnsPorts={udp:53,tcp:53,tls:853,quic:853,https:443,h3:443};
   const guided=settings.layout==='dns';
   const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
-  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);if(settings.grouped)groupFields();for(const input of container.querySelectorAll('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
+  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);if(settings.grouped)groupFields();for(const input of container.querySelectorAll('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;for(const input of container.querySelectorAll('[data-core-native-lines]'))nodes.get(input.dataset.coreNativeLines).display=input.value;for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);}
   function groupFields(){
    const root=container.querySelector(':scope > .schema-fields');if(!root)return;
    const schema=choose(raw,value),basics=new Set([...(schema.required||[]),'tag','enabled','disabled','level','timestamp','output','server','server_port','interval','domain_resolver','system','name','mtu','address','private_key','public_key','listen','listen_port','peers','users','password','passwords','tls','domain','domains','email','api_token','api_key','token','auth_key','origin_ca_key','dns01_challenge','store','certificate','certificate_path','certificate_directory_path','providers','provider','cache_file','clash_api']);
@@ -74,15 +77,29 @@ const CoreSchema=(()=>{
    // Unknown future fields stay in the model and can be edited in JSON view.
    return `<div class="dns-field-grid ${root?'dns-root-fields':''}">${pinned.map(key=>field(key)+(key==='tag'?variant:'')).join('')}</div>${advanced}${!settings.simple&&unknown.length?'<p class="note">Additional stored fields are preserved. Use JSON view to edit them.</p>':''}`;
   }
-  function render(input,v,set,label,root=false,depth=0,scope=settings.scope||'',optional=false){
+  function render(input,v,set,label,root=false,depth=0,scope=settings.scope||'',optional=false,path='root'){
    if(depth>20)return '<p class="note">Nesting limit reached. Use the JSON view for this value.</p>';
    const id=String(sequence++);
+   const union=ref(input);
+   if(settings.nativeUnions&&union.anyOf){
+    const options=union.anyOf.map(ref),array=options.find(s=>s.type==='array'),scalars=scalarSchemas(input);
+    if(array&&scalars.every(s=>['string','integer','number'].includes(s.type))){
+     nodes.set(id,{input,value:v,set,label,nativeList:true,display:undefined});
+     const enums=[...new Set(scalars.flatMap(s=>s.enum||[]))];
+     return `<label>${e(label)}<textarea rows="2" data-core-native-lines="${id}" dir="ltr" autocomplete="off" spellcheck="false">${e((Array.isArray(v)?v:v===undefined?[]:[v]).join('\n'))}</textarea><small class="field-hint">One value per line.${enums.length?' Values: '+e(enums.join(', '))+'.':''}</small></label>`;
+    }
+    const types=[...new Set(options.map(s=>s.type))];
+    if(types.length>1&&options.every(s=>['string','integer','number','boolean'].includes(s.type))){
+     const index=v===undefined?(unionDrafts.get(path)??-1):options.findIndex(s=>compatible(s,v)),selected=options[index];nodes.set(id,{input,value:v,set,label,path,unionOptions:options});
+     return `<div class="native-union"><label>${e(label)} value type<select data-core-union="${id}"><option value="-1" ${index<0?'selected':''}>not set</option>${options.map((s,i)=>`<option value="${i}" ${index===i?'selected':''}>${e(s.type)}</option>`).join('')}</select></label>${selected?render(selected,v,set,label,false,depth+1,scope,optional,path+'?value'):''}</div>`;
+    }
+   }
    const all=branches(input).filter(branch=>!root||!settings.types||settings.types.includes(branch.properties?.type?.const)),s=choose(input,v),html=[];
    nodes.set(id,{input,value:v,set,label,variants:all,root});
    if(root&&settings.collection){const type=v?.type||s.properties?.type?.const||'';const base={inbounds:'inbound/',outbounds:'outbound/',dns_servers:'dns/server/',dns_rules:'dns/rule',route_rules:'route/rule',rule_sets:'rule-set/index',endpoints:'endpoint/',services:'service/',certificate_providers:'certificate-provider/',http_clients:'http-client/',network_namespaces:'network-namespace/'}[settings.collection];scope=base?.endsWith('/')?base+type:base||scope;}
    if(label==='TLS')scope='shared/tls';
    if(all.length>1){
-    html.push(`<label class="schema-variant">${e(guided&&root?'Resolver type':label+' type')}<select data-core-variant="${id}">${all.map((b,index)=>{const labels=Object.entries(b.properties||{}).filter(([k,p])=>'const'in p).map(([k,p])=>title(String(p.const)));if(!labels.length&&b.properties?.type?.enum?.[0])labels.push(title(b.properties.type.enum[0]));return `<option value="${index}" ${index===Math.max(0,all.findIndex(x=>compatible(x,v)))?'selected':''}>${e(labels.join(' / ')||'Default')}</option>`}).join('')}</select></label>`);
+    html.push(`<label class="schema-variant">${e(guided&&root?'Resolver type':settings.nativeNames?'type':label+' type')}<select data-core-variant="${id}">${all.map((b,index)=>{const labels=Object.entries(b.properties||{}).filter(([k,p])=>'const'in p).map(([k,p])=>settings.nativeNames?String(p.const):title(String(p.const)));if(!labels.length&&b.properties?.type?.enum?.[0])labels.push(settings.nativeNames?b.properties.type.enum[0]:title(b.properties.type.enum[0]));return `<option value="${index}" ${index===Math.max(0,all.findIndex(x=>compatible(x,v)))?'selected':''}>${e(labels.join(' / ')||'Default')}</option>`}).join('')}</select></label>`);
    }
    const common=`data-core-input="${id}"`;
    if(s.type==='object'||s.properties){
@@ -102,7 +119,7 @@ const CoreSchema=(()=>{
      if('const'in p){if(!has)obj[key]=p.const;continue;}
      const reference=choose(p,item)['x-tag-reference'];
      const help=settings.help?.[key]|| (reference?'Select a configured '+title(reference).toLowerCase()+'.':(catalog.help._documents?.[scope]?.[key]||catalog.help[key])?.description?.replace(/[`*_#]/g,'').slice(0,250)||'');
-     const control=render(p,item,x=>{if(x===undefined||settings.fixed&&!required.includes(key)&&x==='')delete obj[key];else Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)},Object.hasOwn(props,key)?settings.labels?.[key]||title(key):key,false,depth+1,scope,!required.includes(key));
+     const control=render(p,item,x=>{if(x===undefined||settings.fixed&&!required.includes(key)&&x==='')delete obj[key];else Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)},Object.hasOwn(props,key)?settings.labels?.[key]||fieldTitle(key):key,false,depth+1,scope,!required.includes(key),path+'.'+key);
      const remove=settings.fixed||required.includes(key)?'':`<button type="button" class="schema-remove" aria-label="Remove ${e(title(key))}" data-core-remove="${id}" data-key="${e(key)}">×</button>`;
      html.push(`<div class="schema-property" data-core-field="${e(key)}"><div class="schema-property-control">${control}${help?`<small class="field-hint">${e(help)}</small>`:''}</div>${remove}</div>`);
     }
@@ -117,12 +134,12 @@ const CoreSchema=(()=>{
    }else if(s.type==='array'){
     const array=Array.isArray(v)?v:v===undefined?[]:[v];
     html.push(`<fieldset class="schema-array"><legend>${e(label)}</legend>`);
-    array.forEach((item,index)=>html.push(`<div class="schema-array-item">${render(s.items||{},item,x=>{array[index]=x;set(array)},`${label} ${index+1}`,false,depth+1,scope)}<button type="button" class="schema-remove" aria-label="Remove item ${index+1}" data-core-item-remove="${id}" data-index="${index}">×</button></div>`));
+    array.forEach((item,index)=>html.push(`<div class="schema-array-item">${render(s.items||{},item,x=>{array[index]=x;set(array)},`${label} ${index+1}`,false,depth+1,scope,false,path+'['+index+']')}<button type="button" class="schema-remove" aria-label="Remove item ${index+1}" data-core-item-remove="${id}" data-index="${index}">×</button></div>`));
     html.push(`<button type="button" class="btn sm" data-core-item-add="${id}">Add ${e(label)} item</button></fieldset>`);
     if(!Array.isArray(v)&&(!settings.fixed||!optional))set(array);
    }else if(s['x-tag-reference']&&settings.references){const choices=[...new Set([...(settings.references[s['x-tag-reference']]||[]),...(v?[v]:[])])];html.push(`<label>${e(label)}<select ${common}><option value="">${guided?'None / default':'Choose…'}</option>${choices.map(tag=>`<option value="${e(tag)}" ${tag===v?'selected':''}>${e(tag)}</option>`).join('')}</select></label>`);
-   }else if(s.enum){html.push(`<label>${e(label)}<select ${common}>${settings.fixed&&optional?`<option value="" ${v===undefined?'selected':''}>Default / any</option>`:''}${s.enum.map(x=>`<option value="${e(x)}" ${x===v?'selected':''}>${e(settings.valueLabels?.[label]?.[String(x)]||catalog.labels?.[x]||String(x))}</option>`).join('')}</select></label>`);
-   }else if(settings.fixed&&optional&&s.type==='boolean')html.push(`<label>${e(label)}<select ${common}><option value="" ${v===undefined?'selected':''}>${settings.positiveFlags?'Any / not required':'Core default'}</option><option value="true" ${v===true?'selected':''}>${settings.positiveFlags?'Require this condition':'Yes'}</option><option value="false" ${v===false?'selected':''}>${settings.positiveFlags?'Off (explicit false)':'No'}</option></select></label>`);
+   }else if(s.enum){html.push(`<label>${e(label)}<select ${common}>${settings.fixed&&optional?`<option value="" ${v===undefined?'selected':''}>${settings.nativeNames?'not set':'Default / any'}</option>`:''}${s.enum.map(x=>`<option value="${e(x)}" ${x===v?'selected':''}>${e(settings.valueLabels?.[label]?.[String(x)]||(!settings.nativeNames&&catalog.labels?.[x])||String(x))}</option>`).join('')}</select></label>`);
+   }else if(settings.fixed&&optional&&s.type==='boolean')html.push(`<label>${e(label)}<select ${common}><option value="" ${v===undefined?'selected':''}>${settings.nativeNames?'not set':settings.positiveFlags?'Any / not required':'Core default'}</option><option value="true" ${v===true?'selected':''}>${settings.nativeNames?'true':settings.positiveFlags?'Require this condition':'Yes'}</option><option value="false" ${v===false?'selected':''}>${settings.nativeNames?'false':settings.positiveFlags?'Off (explicit false)':'No'}</option></select></label>`);
    else if(s.type==='boolean')html.push(`<label class="check-field"><input type="checkbox" ${common} ${v?'checked':''}><span>${e(label)}</span></label>`);
    else if(['integer','number'].includes(s.type))html.push(`<label>${e(label)}<input type="number" ${common} value="${e(v??'')}" step="${s.type==='integer'?'1':'any'}" ${s.minimum!==undefined?`min="${s.minimum}"`:''} ${s.maximum!==undefined?`max="${s.maximum}"`:''}></label>`);
    else if(s.type==='string'||'const'in s){const secret=/password|private.key|secret|^key$/i.test(label);html.push(`<label>${e(label)}<textarea rows="${String(v||'').includes('\n')?4:1}" ${common} class="${secret?'schema-secret':''}" dir="ltr" autocomplete="off">${e(v??'')}</textarea></label>`);}
@@ -141,17 +158,19 @@ const CoreSchema=(()=>{
   }
   // Autofill and some input methods can update controls without an input event.
   // Keep untouched values byte-for-byte; synchronize only changed controls.
-  function syncInputs(){for(const input of container.querySelectorAll('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);}for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
+  function syncInputs(){for(const input of container.querySelectorAll('[data-core-native-lines]')){const node=nodes.get(input.dataset.coreNativeLines);if(input.value!==node.display){const values=input.value.split('\n').filter(text=>text!=='').map(text=>parseNative(text,node.input,node.label));node.set(values.length?values:undefined);}}for(const input of container.querySelectorAll('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);}for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
   container.addEventListener('input',event=>readInput(event.target));
   function change(event){
    const el=event.target;
    syncInputs();
+   if(el.dataset.coreUnion!==undefined){const node=nodes.get(el.dataset.coreUnion),schema=node.unionOptions[Number(el.value)];unionDrafts.set(node.path,Number(el.value));node.set(schema?seed(schema):undefined);draw();}
    if(el.dataset.coreVariant!==undefined){const node=nodes.get(el.dataset.coreVariant),next=node.variants[Number(el.value)],old=node.value||{};let fresh=seed(next);for(const key of Object.keys(next.properties||{}))if(Object.hasOwn(old,key)&&!('const'in next.properties[key]))fresh[key]=old[key];if(guided&&node.root&&dnsPorts[fresh.type]&&old.server_port===dnsPorts[old.type])fresh.server_port=dnsPorts[fresh.type];if(node.root&&settings.transformType)fresh=settings.transformType(fresh,old);node.set(fresh);draw();}
    if(el.dataset.coreToggle!==undefined){const node=nodes.get(el.dataset.coreToggle),s=choose(node.input,node.value),obj=node.value||{};if(el.checked)Object.defineProperty(obj,el.dataset.key,{value:seed(s.properties[el.dataset.key]),writable:true,enumerable:true,configurable:true});else delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   }
-  container.addEventListener('change',change);
-  if(settings.typeContainer)settings.typeContainer.addEventListener('change',change);
+  const changeControl=event=>{try{change(event);}catch(error){if(!settings.nativeUnions)throw error;const output=container.closest('form')?.querySelector('.form-error');if(output)output.textContent=error.message;}};
+  container.addEventListener('change',changeControl);
+  if(settings.typeContainer)settings.typeContainer.addEventListener('change',changeControl);
   container.addEventListener('click',event=>{
    const el=event.target.closest('button');if(!el)return;
    syncInputs();
