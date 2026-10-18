@@ -6,4 +6,4 @@
 
 The real core confirmed that 1.14.3 route-action `fallback_delay` is numeric (not a duration string), that nested DNS response fields need `match_response` on the same child, and that logical `respond` cannot bind a response tag from its children. Forms keep the pinned vocabulary rather than importing newer documentation-only fields.
 
-Fresh native Linux validation will be recorded before publication.
+Fresh native Linux verification passed all four jobs on implementation commit `b033d9f64b70cc8a1e18db6e04930803d0d8dd76`: Linux amd64 and arm64 without Go/Git, a real systemd panel upgrade with a live WAL database, and SSH migration to a disposable destination. [GitHub Actions run](https://github.com/kevinzakarian/Nara-Panel/actions/runs/39147070012). The final documentation-only commit adds this evidence; implementation files are unchanged.
