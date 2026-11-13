@@ -368,11 +368,29 @@ function mountInboundTabs(form){
 function inboundFields(title,fields,values,prefix){
  return fields.length?`<section class="inbound-field-group"><h3>${e(title)}</h3><div class="form-grid">${optionFields(fields,values,prefix)}</div></section>`:'';
 }
+function inboundProtocols(standalone, current=''){
+ return coreCatalog.types.inbounds.filter(type=>standalone
+  ?type===current||!Object.hasOwn(optionSchema.server,type)
+  :Object.hasOwn(optionSchema.server,type));
+}
+function chooseStandaloneInbound(){
+ const choices=inboundProtocols(true).map(type=>[type,protocolLabel(type)]);
+ openModal('New standalone inbound','Configure a listener independently of panel accounts and subscriptions.',selectField('Protocol','type',[['','Choose a protocol'],...choices]),form=>{
+  const schema=CoreSchema.protocolSchema('Inbound',form.elements.type.value),config=CoreSchema.seed(schema);
+  if(schema.properties.listen)config.listen='::';
+  if(schema.properties.listen_port)config.listen_port=443;
+  editCoreRecord('inbounds',{},config);
+ },'Continue');
+ const form=$('#modal-form'),protocol=form.elements.type,submit=$('[type=submit]',form);
+ protocol.required=true;
+ submit.disabled=true;
+ protocol.onchange=()=>{submit.disabled=!protocol.value;};
+}
 function editInbound(item={}) {
- const protocol=item.type||'';
- openModal(item.id?'Edit inbound':'New inbound','Changes are checked and applied automatically when you save.',inboundTabs({basics:`<div class="form-grid">${field('Name / tag','tag',item.tag||'', 'text','Letters, numbers, hyphens, and underscores')}${selectField('Protocol','type',[['','Choose a protocol'],...coreCatalog.types.inbounds.map(x=>[x,protocolLabel(x)])],protocol)}${field('Port','port',item.port||443,'number')}${field('Public port (optional)','public_port',item.public_port||'','number','For port mappings; blank uses the listen port')}${field('Listen IP','listen',item.listen||'::','text',':: for both IPv4 and IPv6')}${selectField('TLS profile','tls_id',[['','No TLS'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||'')}<label class="check-field full"><input name="enabled" type="checkbox" ${checked(item.enabled!==false)}>Enable this inbound</label></div>`,protocol:'<div id="protocol-fields"></div>',connection:`<div class="form-grid">${selectField('Transport','transport',['tcp','ws','grpc','http','httpupgrade','quic'].map(t=>[t,transportLabel(t)]),item.transport||'tcp')}${field('Path / service name','path',item.path||'/','text','For WebSocket, HTTP, HTTPUpgrade, or gRPC')}</div><div id="transport-fields"></div><div id="multiplex-fields"></div>`,advanced:`${inboundFields('Listener settings',optionSchema.listen,item.listen_options||{},'listen')}<div id="advanced-inbound-options"></div>`}),async form=>{
+ const protocol=item.type||'',choices=inboundProtocols(false);
+ openModal(item.id?'Edit inbound':'New inbound','Use panel accounts, quotas and subscriptions with this inbound.',inboundTabs({basics:`<div class="form-grid">${field('Name / tag','tag',item.tag||'', 'text','Letters, numbers, hyphens, and underscores')}${selectField('Protocol','type',[['','Choose a protocol'],...choices.map(x=>[x,protocolLabel(x)])],protocol)}${field('Port','port',item.port||443,'number')}${field('Public port (optional)','public_port',item.public_port||'','number','For port mappings; blank uses the listen port')}${field('Listen IP','listen',item.listen||'::','text',':: for both IPv4 and IPv6')}${selectField('TLS profile','tls_id',[['','No TLS'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||'')}<label class="check-field full"><input name="enabled" type="checkbox" ${checked(item.enabled!==false)}>Enable this inbound</label></div>`,protocol:'<div id="protocol-fields"></div>',connection:`<div class="form-grid">${selectField('Transport','transport',['tcp','ws','grpc','http','httpupgrade','quic'].map(t=>[t,transportLabel(t)]),item.transport||'tcp')}${field('Path / service name','path',item.path||'/','text','For WebSocket, HTTP, HTTPUpgrade, or gRPC')}</div><div id="transport-fields"></div><div id="multiplex-fields"></div>`,advanced:`${inboundFields('Listener settings',optionSchema.listen,item.listen_options||{},'listen')}<div id="advanced-inbound-options"></div>`}),async form=>{
   const d=Object.fromEntries(new FormData(form)),p=d.type;
-  if(!p)throw new Error('Choose a protocol first.');
+  if(!choices.includes(p))throw new Error('Choose a protocol first.');
   const serverFields=[...optionSchema.server[p],...(['hysteria2','tuic'].includes(p)?optionSchema.quic:[])];
   await saveRecord('inbounds',{id:item.id,mode:'managed',tag:d.tag,type:p,extra_options:extraServer?.value()||{},extra_client_options:extraClient?.value()||{},port:Number(d.port),public_port:Number(d.public_port)||0,listen:d.listen,tls_id:d.tls_id,transport:d.transport||'tcp',path:d.path,enabled:form.elements.enabled.checked,
    server_options:readOptions(form,'server',serverFields),client_options:readOptions(form,'client',optionSchema.client[p]),listen_options:readOptions(form,'listen',optionSchema.listen),multiplex:readOptions(form,'multiplex',optionSchema.multiplex),transport_options:readOptions(form,'transport',optionSchema.transport[d.transport||'tcp'])});
@@ -396,7 +414,6 @@ function editInbound(item={}) {
   form.querySelector('[type=submit]').disabled=!p;
   for(const key of ['protocol','connection','advanced'])$(`[data-inbound-tab=${key}]`,form).hidden=!p;
   if(!p)return;
-  if(item.mode==='native'||!optionSchema.server[p]){const def=CoreSchema.protocolSchema('Inbound',p),config=CoreSchema.seed(def);if(p==='anytls')config.padding_scheme=optionSchema.server.anytls[0].default;config.tag=form.elements.tag.value;if(def.properties.listen)config.listen=form.elements.listen.value;if(def.properties.listen_port)config.listen_port=Number(form.elements.port.value);return editCoreRecord('inbounds',{...item,mode:'native'},config);}
   const values=p===item.type?item.server_options||{}:{},client=p===item.type?item.client_options||{}:{};
   const quic=['hysteria2','tuic'].includes(p),restricted=quic||p==='anytls';
   $('[data-inbound-tab=connection]',form).hidden=restricted;
@@ -546,18 +563,18 @@ function editCoreRecord(collection,item={},preset){
  if(inbound&&config.type==='anytls'&&!Object.hasOwn(config,'padding_scheme'))config.padding_scheme=structuredClone(optionSchema.server.anytls[0].default);
  const identity=`<div class="${dns?'dns-identity-grid':''}">${field('Display name (optional)','display_name',item.label||(dns?DNSPresets.providers[selected.provider]?.name:'')||'')}${inbound?selectField('TLS profile (optional)','native_tls_id',[['','Custom TLS / no profile'],...state.tls.map(t=>[t.id,t.name||t.server_name])],item.tls_id||''):''}${dns?'':`<label class="check-field"><input type="checkbox" name="native_enabled" ${checked(item.enabled!==false)}>Enable this item</label>`}</div>`;
  let editor;
- const inboundIntro='<div class="hint-box">Standalone listener: authentication is configured in the Protocol tab. Panel accounts, subscriptions and quotas do not apply.</div>';
+ const inboundIntro='<div class="hint-box">Configure authentication in the Protocol tab for listeners that support it.</div>';
  const jsonEditor='<p class="note">Import or copy the native settings. Existing private values are retained unless replaced.</p><div class="inline-buttons"><button type="button" class="btn sm" id="core-to-json">Form → JSON</button><button type="button" class="btn sm" id="core-from-json">JSON → Form</button></div><textarea class="schema-json" id="native-json" rows="10" spellcheck="false" aria-label="Inbound configuration JSON"></textarea>';
  const fields=`<div class="schema-editor ${dns?'dns-editor':''}" id="native-fields"></div>`;
  const content=inbound?inboundIntro+inboundTabs({
-  basics:identity+(optionSchema.server[config.type]&&!item.id?btn('Use panel clients instead','managed-inbound','clients','sm',`data-id="${e(config.type)}"`):'')+'<div id="inbound-type-slot"></div><div id="inbound-basic-fields" class="fixed-fields"></div>',
+  basics:identity+'<div id="inbound-type-slot"></div><div id="inbound-basic-fields" class="fixed-fields"></div>',
   protocol:fields+`<label class="check-field"><input type="checkbox" name="allow_unauthenticated" ${checked(item.allow_unauthenticated)}>Allow unauthenticated access when supported</label>`,
   advanced:'<div id="inbound-advanced-fields" class="fixed-fields"></div>',
   json:jsonEditor
  }):(coreFeatureHelp[collection]?'<p class="hint-box">'+e(coreFeatureHelp[collection])+'</p>':'')+
   (dns?dnsProviderControls(selected):'')+identity+fields+
   (dns?'':'<details class="option-section"><summary>JSON view</summary>'+jsonEditor+'</details>');
- openModal((item.id?'Edit ':'New ')+(dns?'DNS resolver':inbound?'inbound':coreLabels[collection]),dns?'Saving validates and applies your DNS settings automatically.':`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,content,async form=>{
+ openModal((item.id?'Edit ':'New ')+(dns?'DNS resolver':inbound?'standalone inbound':coreLabels[collection]),dns?'Saving validates and applies your DNS settings automatically.':`All options for Sing-box ${coreCatalog.version}. Saving validates and applies immediately.`,content,async form=>{
   if(dns&&selected.provider==='nextdns'){
    const id=form.elements.dns_profile_id.value.trim().toLowerCase();DNSPresets.validate(selected.provider,id);
    if(id!==activeProfile){activeProfile=id;editor.set(DNSPresets.apply(selected.provider,editor.value(),id));refreshEndpoint();}
@@ -576,6 +593,7 @@ function editCoreRecord(collection,item={},preset){
  });
  if(dns){editorSettings.typeContainer=$('#dns-type-slot');editorSettings.preserveNodes=[$('[name=display_name]').closest('label')];}
  if(inbound){
+  editorSettings.types=inboundProtocols(true,config.type);
   mountInboundTabs($('#modal-form'));
   Object.assign(editorSettings,{fixed:true,compactObjects:true,optionalObjects:true,typeContainer:$('#inbound-type-slot'),fieldContainers:[$('#inbound-basic-fields'),$('#inbound-advanced-fields')],afterDraw(root){
    for(const id of ['#inbound-basic-fields','#inbound-advanced-fields']){
@@ -624,7 +642,22 @@ function editCoreRecord(collection,item={},preset){
  if(!dns){
  $('#native-json').value=JSON.stringify(config,null,2);
  $('#core-to-json').addEventListener('click',()=>{$('#native-json').value=JSON.stringify(editor.value(),null,2)});
- $('#core-from-json').addEventListener('click',()=>{try{const next=JSON.parse($('#native-json').value);if(!next||Array.isArray(next)||typeof next!=='object')throw Error();editor.set(next);toast('JSON loaded into form. Save to apply.');}catch{toast('Enter a valid JSON object.',true);}});
+ $('#core-from-json').addEventListener('click',()=>{
+  let next;
+  try{
+   next=JSON.parse($('#native-json').value);
+   if(!next||Array.isArray(next)||typeof next!=='object')throw Error();
+  }catch{toast('Enter a valid JSON object.',true);return;}
+  if(inbound){
+   if(!coreCatalog.types.inbounds.includes(next.type)){
+    toast('Enter a valid Sing-box inbound type.',true);
+    return;
+   }
+   editorSettings.types=inboundProtocols(true,next.type);
+  }
+  editor.set(next);
+  toast('JSON loaded into form. Save to apply.');
+ });
  }
 }
 function editCoreOptions(key){
@@ -667,8 +700,9 @@ function subscriptionShare(client,format='sing-box') {
  let qr,qrReady=false;
  try { qr=`<div class="subscription-qr">${NaraQR.svg(sub)}</div>`;qrReady=true; }
  catch { qr='<p class="note">This link is too long for a QR code. Copy the subscription link below.</p>'; }
- const help=format==='portal'?'Give this private page to the account owner to view their usage, service time, all connection links and QR codes.':format.startsWith('config:')?'Individual proxy configuration. For settings that do not fit a connection URI, use the full JSON subscription.':format==='sing-box'?'Scan in the official Sing-box app to import a remote profile.':'For clients that accept a Sing-box JSON subscription URL. You can also paste this URL into a remote profile.';
- return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>Connection format<select class="subscription-format" aria-label="Connection format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option>${(clientShareData.get(client.id)?.links||[]).map((link,index)=>`<option value="config:${index}" ${format==='config:'+index?'selected':''}>Configuration Link${(clientShareData.get(client.id)?.links||[]).length>1?' · '+e(link.name):''}</option>`).join('')}${clientShareData.get(client.id)?.portal_url?`<option value="portal" ${format==='portal'?'selected':''}>Private service page · all links & usage</option>`:''}</select></label><p class="note">${help}</p><div class="subscription-url">${e(sub)}</div><div class="inline-buttons">${btn('Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
+ const source=format==='sing-box'?`<div class="subscription-source"><b>Profile URL</b><div class="subscription-url" dir="ltr">${e(subscriptionURL(client))}</div><b>Sing-box import link</b></div>`:'';
+ const help=format==='portal'?'Give this private page to the account owner to view their usage, service time, all connection links and QR codes.':format.startsWith('config:')?'Individual proxy configuration. For settings that do not fit a connection URI, use the full JSON subscription.':format==='sing-box'?'Scan in the official Sing-box app or copy the import link. The profile URL below is the readable source; the import link and QR encode it as required.':'For clients that accept a Sing-box JSON subscription URL. You can also paste this URL into a remote profile.';
+ return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>Connection format<select class="subscription-format" aria-label="Connection format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option>${(clientShareData.get(client.id)?.links||[]).map((link,index)=>`<option value="config:${index}" ${format==='config:'+index?'selected':''}>Configuration Link${(clientShareData.get(client.id)?.links||[]).length>1?' · '+e(link.name):''}</option>`).join('')}${clientShareData.get(client.id)?.portal_url?`<option value="portal" ${format==='portal'?'selected':''}>Private service page · all links & usage</option>`:''}</select></label><p class="note">${help}</p>${source}<div class="subscription-url" dir="ltr">${e(sub)}</div><div class="inline-buttons">${btn(format==='sing-box'?'Copy import link':'Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
 }
 function changeSubscriptionFormat(target) {
  const share=target.closest('.subscription-share'),client=state.clients.find(c=>c.id===share.dataset.clientId);
@@ -745,8 +779,7 @@ async function handle(action,target) {
  if(action==='core-options')return editCoreOptions(id);
  if(action==='core-tab'){if(collection==='dns')dnsTab=id;else if(collection==='routing')routingTab=id;else coreTab=id;return render();}
  if(action==='core-move'){await api('reorder-rules',{collection,id,revision:state.revision});await load();return;}
- if(action==='standalone-inbound')return editInbound({mode:'native'});
- if(action==='managed-inbound')return editInbound({type:id});
+ if(action==='standalone-inbound')return chooseStandaloneInbound();
  if(action==='dns-tab'){dnsTab=id;return render();}
  if(action==='page'){pageNumber=Number(id);return render();}
  if(action==='edit') {const item=state[collection].find(x=>x.id===id);return collection==='clients'?editClient(item):collection==='inbounds'?(item.mode==='native'?editCoreRecord(collection,item):editInbound(item)):collection==='tls'?editTLS(item):editCoreRecord(collection,item);}

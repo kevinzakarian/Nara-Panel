@@ -4,7 +4,8 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {JSDOM}=require('jsdom');
 const root=path.resolve(__dirname,'..');
-const schema=JSON.parse(fs.readFileSync(path.join(root,'nara/schema/sing-box-1.14.3.schema.json'),'utf8'));
+const {core_version}=require('../release.json');
+const schema=JSON.parse(fs.readFileSync(path.join(root,'nara/schema',`sing-box-${core_version}.schema.json`),'utf8'));
 const help=JSON.parse(fs.readFileSync(path.join(root,'nara/schema/field-help.json'),'utf8'));
 function fixture(definition,value,settings={}){
  const dom=new JSDOM('<div id="form"></div>',{runScripts:'outside-only'}),w=dom.window;

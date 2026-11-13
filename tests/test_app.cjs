@@ -10,7 +10,7 @@ function app(){
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
  w.HTMLDialogElement.prototype.close=function(){this.open=false};
  const source=fs.readFileSync('web/app.js','utf8');
- w.eval(['web/account.js','web/integrations.js','web/clients.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},tls(){return renderTLS()},settings(){return renderSettings()},updates(value,managed){dashboard={updates:{panel:value}};accessSettings={managed};return panelUpdateCard()},editInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
+ w.eval(['web/account.js','web/integrations.js','web/clients.js'].map(p=>fs.readFileSync(p,'utf8')).join('\n')+'\n'+fs.readFileSync('web/dns-presets.js','utf8')+'\n'+fs.readFileSync('web/core-editor.js','utf8')+'\n'+fs.readFileSync('web/options.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`\nconst originalMount=CoreSchema.mount;let activeEditor;CoreSchema.mount=(...args)=>activeEditor=originalMount(...args);globalThis.TestApp={editorValue(){return activeEditor.value()},setup(value){optionSchema=value.options;coreCatalog=value.catalog;state=value.state;CoreSchema.configure(coreCatalog)},dashboard(value){dashboard=value;return renderDashboard()},tls(){return renderTLS()},settings(){return renderSettings()},updates(value,managed){dashboard={updates:{panel:value}};accessSettings={managed};return panelUpdateCard()},editInbound,chooseStandaloneInbound,editCoreRecord,saveWith(handler){saveRecord=handler},submit(){return modalSubmit($('#modal-form'))},enterWith(handler){api=handler;load=async()=>{};return boot()}};`);
  w.TestApp.setup(JSON.parse(JSON.stringify(fixture)));
  return {w,dom,close(){w.close()}};
 }
@@ -217,12 +217,42 @@ test('editing AnyTLS preserves a deliberately customized padding scheme',()=>{
   assert.equal(f.w.document.querySelector('[name="server.padding_scheme"]').value,'stop=1\n0=20-20');
  }finally{f.close()}
 });
-test('standalone AnyTLS starts from the same official padding preset',()=>{
+test('new managed and standalone inbound pickers offer disjoint sets',async()=>{
  const f=app();try{
-  f.w.TestApp.editInbound({mode:'native'});
-  const select=f.w.document.querySelector('[name=type]');select.value='anytls';select.dispatchEvent(new f.w.Event('change'));
-  assert.ok(f.w.document.querySelector('#native-fields').textContent.includes('Padding Scheme'));
-  assert.ok([...f.w.document.querySelectorAll('#native-fields textarea')].some(input=>input.value.split('\n')[0]==='stop=8'));
+  const d=f.w.document,app=f.w.TestApp;
+  const select=()=>d.querySelector('[name=type]');
+  const types=()=>[...select().options].map(option=>option.value).filter(Boolean);
+  app.editInbound();
+  const managed=types();
+  assert.deepEqual([...managed].sort(),Object.keys(fixture.options.server).sort());
+  app.chooseStandaloneInbound();
+  assert.equal(d.querySelector('[type=submit]').disabled,true);
+  assert.deepEqual(types(),fixture.catalog.types.inbounds.filter(type=>!managed.includes(type)));
+  select().value='socks';select().dispatchEvent(new f.w.Event('change'));
+  assert.equal(d.querySelector('[type=submit]').disabled,false);
+  await app.submit();
+  assert.equal(app.editorValue().type,'socks');
+  const labels=[...d.querySelectorAll('#inbound-type-slot option')].map(option=>option.textContent);
+  assert.ok(labels.includes(fixture.catalog.labels.socks));
+  assert.ok(!labels.includes('Hysteria2'));
+  d.querySelector('#native-json').value=JSON.stringify({type:'anytls',tag:'from-json',listen:'::',listen_port:443});
+  d.querySelector('#core-from-json').click();
+  assert.equal(app.editorValue().type,'anytls');
+  assert.equal(d.querySelector('#inbound-type-slot select').selectedOptions[0].textContent,'AnyTLS');
+  assert.ok(![...d.querySelectorAll('#inbound-type-slot option')].some(option=>option.textContent==='Hysteria2'));
+ }finally{f.close()}
+});
+
+test('existing standalone AnyTLS remains editable and retains the official padding default',async()=>{
+ const f=app();try{
+  const d=f.w.document;let saved;
+  f.w.TestApp.saveWith(async(collection,row)=>{saved=JSON.parse(JSON.stringify(row));});
+  f.w.TestApp.editCoreRecord('inbounds',{mode:'native',id:'legacy'},{type:'anytls',tag:'legacy',listen:'::',listen_port:443});
+  assert.equal(d.querySelector('#inbound-type-slot select').selectedOptions[0].textContent,'AnyTLS');
+  assert.ok(d.querySelector('#native-fields').textContent.includes('Padding Scheme'));
+  await f.w.TestApp.submit();
+  assert.equal(saved.config.type,'anytls');
+  assert.equal(saved.config.padding_scheme[0],'stop=8');
  }finally{f.close()}
 });
 

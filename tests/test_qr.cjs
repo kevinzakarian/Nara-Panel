@@ -51,6 +51,9 @@ for (const [label, subscriptionURL, expectedBase] of [
  test(`official app QR preserves independent URL and profile name: ${label}`,()=>{
   context.publicURL=subscriptionURL;context.client={id:'demo-client',token,name:'کاربر A & B / + #? 你好'};
   const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com/PrivatePanel/',subscription_url:publicURL}};subscriptionShare(client)",context);
+  assert.ok(markup.includes('Profile URL'));
+  assert.ok(markup.includes('>'+expectedBase+'/'+token+'</div>'));
+  assert.ok(markup.includes('Copy import link'));
   const uri=new URL(decode(markup));
   assert.equal(uri.protocol,'sing-box:');assert.equal(uri.host,'import-remote-profile');
   assert.equal(uri.searchParams.get('url'),expectedBase+'/'+token);

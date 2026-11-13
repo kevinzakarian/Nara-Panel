@@ -12,6 +12,7 @@ h1{font-size:28px;letter-spacing:-1px}h2{letter-spacing:-.2px}.page-heading p{fo
 .subscription-access { min-width:0; }
 .subscription-access .note { margin-top:0; }
 .subscription-access .subscription-url { margin:10px 0 14px; }
+.subscription-source b { font-size:14px; }
 @media(max-width:600px) {
  .subscription-share { grid-template-columns:minmax(0,1fr); gap:18px; }
  .subscription-qr { width:230px; max-width:100%; justify-self:center; }
