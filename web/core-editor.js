@@ -43,11 +43,28 @@ const CoreSchema=(()=>{
   const fieldTitle=key=>settings.nativeNames?key:title(key);
   function scalarSchemas(raw){const s=ref(raw);return s.anyOf?s.anyOf.flatMap(scalarSchemas):s.type==='array'?scalarSchemas(s.items):[s];}
   function parseNative(text,raw,label){const choices=scalarSchemas(raw);for(const s of choices){if(s.type==='string'&&(!s.enum||s.enum.includes(text)))return text;if(['integer','number'].includes(s.type)&&text.trim()!==''&&Number.isFinite(Number(text))&&(s.type!=='integer'||Number.isInteger(Number(text)))&&(s.minimum===undefined||Number(text)>=s.minimum)&&(s.maximum===undefined||Number(text)<=s.maximum))return Number(text);}throw Error('Invalid value for '+label+': '+text.slice(0,80));}
+  const fieldRoots=[container,...(settings.fieldContainers||[])];
+  const fields=selector=>fieldRoots.flatMap(root=>[...root.querySelectorAll(selector)]);
+  const firstField=selector=>fieldRoots.map(root=>root.querySelector(selector)).find(Boolean);
   let value=clone(initial);let sequence=0;const nodes=new Map(),unionDrafts=new Map();
   const dnsPorts={udp:53,tcp:53,tls:853,quic:853,https:443,h3:443};
   const guided=settings.layout==='dns';
   const displayValue=input=>input.type==='checkbox'?input.checked:input.value;
-  function draw(){const panels=new Map([...container.querySelectorAll('[data-core-panel]')].map(el=>[el.dataset.corePanel,el.open]));for(const node of settings.preserveNodes||[])node.remove();sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}for(const input of container.querySelectorAll('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);if(settings.grouped)groupFields();for(const input of container.querySelectorAll('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;for(const input of container.querySelectorAll('[data-core-native-lines]'))nodes.get(input.dataset.coreNativeLines).display=input.value;for(const panel of container.querySelectorAll('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);settings.afterDraw?.(container,value);}
+  function draw(){
+   const panels=new Map(fields('[data-core-panel]').map(el=>[el.dataset.corePanel,el.open]));
+   for(const node of settings.preserveNodes||[])node.remove();
+   for(const root of settings.fieldContainers||[])root.replaceChildren();
+   sequence=0;nodes.clear();container.innerHTML=render(raw,value,v=>{value=v},'Configuration',true,0);
+   for(const node of settings.preserveNodes||[])container.querySelector('[data-dns-field=tag]')?.before(node);
+   if(settings.typeContainer){const type=container.querySelector('[data-core-variant="0"]')?.closest('label');settings.typeContainer.replaceChildren(...(type?[type]:[]));}
+   if(settings.grouped)groupFields();
+   settings.afterDraw?.(container,value);
+   for(const input of fields('[data-core-input]'))nodes.get(input.dataset.coreInput).display=displayValue(input);
+   for(const input of fields('[data-core-lines]'))nodes.get(input.dataset.coreLines).display=input.value;
+   for(const input of fields('[data-core-native-lines]'))nodes.get(input.dataset.coreNativeLines).display=input.value;
+   for(const panel of fields('[data-core-panel]'))if(panels.has(panel.dataset.corePanel))panel.open=panels.get(panel.dataset.corePanel);
+  }
+
   function groupFields(){
    const root=container.querySelector(':scope > .schema-fields');if(!root)return;
    const schema=choose(raw,value),basics=new Set([...(schema.required||[]),'tag','enabled','disabled','level','timestamp','output','server','server_port','interval','domain_resolver','system','name','mtu','address','private_key','public_key','listen','listen_port','peers','users','password','passwords','tls','domain','domains','email','api_token','api_key','token','auth_key','origin_ca_key','dns01_challenge','store','certificate','certificate_path','certificate_directory_path','providers','provider','cache_file','clash_api']);
@@ -131,9 +148,11 @@ const CoreSchema=(()=>{
      if('const'in p){if(!has)obj[key]=p.const;continue;}
      const reference=choose(p,item)['x-tag-reference'];
      const help=settings.help?.[key]|| (reference?'Select a configured '+title(reference).toLowerCase()+'.':(catalog.help._documents?.[scope]?.[key]||catalog.help[key])?.description?.replace(/[`*_#]/g,'').slice(0,250)||'');
-     const control=render(p,item,x=>{if(x===undefined||settings.fixed&&!required.includes(key)&&x==='')delete obj[key];else Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)},Object.hasOwn(props,key)?settings.labels?.[key]||fieldTitle(key):key,false,depth+1,scope,!required.includes(key),path+'.'+key);
+     const shape=choose(p,item), optionalObject=settings.optionalObjects&&!required.includes(key)&&(shape.type==='object'||shape.properties);
+     const toggle=optionalObject?`<label class="check-field schema-object-toggle"><input type="checkbox" ${checked(has)} data-core-toggle="${id}" data-key="${e(key)}"><span>Configure ${e(fieldTitle(key))}</span></label>`:'';
+     const control=optionalObject&&!has?'':render(p,item,x=>{if(x===undefined||settings.fixed&&!required.includes(key)&&x==='')delete obj[key];else Object.defineProperty(obj,key,{value:x,writable:true,enumerable:true,configurable:true});set(obj)},Object.hasOwn(props,key)?settings.labels?.[key]||fieldTitle(key):key,false,depth+1,scope,!required.includes(key),path+'.'+key);
      const remove=settings.fixed||required.includes(key)?'':`<button type="button" class="schema-remove" aria-label="Remove ${e(title(key))}" data-core-remove="${id}" data-key="${e(key)}">×</button>`;
-     html.push(`<div class="schema-property" data-core-field="${e(key)}"><div class="schema-property-control">${control}${help?`<small class="field-hint">${e(help)}</small>`:''}</div>${remove}</div>`);
+     html.push(`<div class="schema-property" data-core-field="${e(key)}"><div class="schema-property-control">${toggle}${control}${help?`<small class="field-hint">${e(help)}</small>`:''}</div>${remove}</div>`);
     }
     const missing=Object.keys(props).filter(k=>!shown.has(k)&&!settings.exclude?.includes(k));
     if(missing.length&&!settings.fixed)html.push(`<label class="schema-add-label">Add option<select data-core-add="${id}" aria-label="Add option to ${e(label)}"><option value="">Choose an option…</option>${missing.map(k=>`<option value="${e(k)}">${e(title(k))}</option>`).join('')}</select></label>`);
@@ -157,7 +176,7 @@ const CoreSchema=(()=>{
    else if(s.type==='string'||'const'in s){const secret=/password|private.key|secret|^key$/i.test(label);html.push(`<label>${e(label)}<textarea rows="${String(v||'').includes('\n')?4:1}" ${common} class="${secret?'schema-secret':''}" dir="ltr" autocomplete="off">${e(v??'')}</textarea></label>`);}
    else html.push(`<label>${e(label)} (JSON)<textarea rows="4" data-core-json="${id}" dir="ltr">${e(JSON.stringify(v??null,null,2))}</textarea></label>`);
    const content=html.join('');
-   return !root&&(s.type==='object'||s.properties)?`<details class="schema-object" ${!settings.fixed||v!==undefined?'open':''}><summary>${e(label)}</summary>${content}</details>`:content;
+   return !root&&(s.type==='object'||s.properties)?`<details class="schema-object" ${(!settings.fixed||v!==undefined)&&(!settings.compactObjects||depth>1)?'open':''}><summary>${e(label)}</summary>${content}</details>`:content;
   }
   function readInput(input){
    const node=nodes.get(input.dataset.coreInput);if(!node)return;
@@ -170,13 +189,13 @@ const CoreSchema=(()=>{
   }
   // Autofill and some input methods can update controls without an input event.
   // Keep untouched values byte-for-byte; synchronize only changed controls.
-  function syncInputs(){for(const input of container.querySelectorAll('[data-core-native-lines]')){const node=nodes.get(input.dataset.coreNativeLines);if(input.value!==node.display){const values=input.value.split('\n').filter(text=>text!=='').map(text=>parseNative(text,node.input,node.label));node.set(values.length?values:undefined);node.display=input.value;}}for(const input of container.querySelectorAll('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);node.display=input.value;}for(const input of container.querySelectorAll('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
-  listen(container,'input',event=>{readInput(event.target);if(event.target.dataset.coreFilter!==undefined){const term=event.target.value.toLowerCase();for(const row of event.target.closest('.combo-popover').querySelectorAll('[data-choice-label]'))row.hidden=!row.textContent.toLowerCase().includes(term);}});
+  function syncInputs(){for(const input of fields('[data-core-native-lines]')){const node=nodes.get(input.dataset.coreNativeLines);if(input.value!==node.display){const values=input.value.split('\n').filter(text=>text!=='').map(text=>parseNative(text,node.input,node.label));node.set(values.length?values:undefined);node.display=input.value;}}for(const input of fields('[data-core-lines]')){const node=nodes.get(input.dataset.coreLines);if(input.value===node.display)continue;const s=choose(choose(node.input,node.value).items,undefined);const list=input.value.split('\n').map(x=>x.trim()).filter(Boolean).map(x=>['integer','number'].includes(s.type)?Number(x):x);node.set(list.length?list:undefined);node.display=input.value;}for(const input of fields('[data-core-input]'))if(displayValue(input)!==nodes.get(input.dataset.coreInput).display)readInput(input);}
+  for(const root of fieldRoots)listen(root,'input',event=>{readInput(event.target);if(event.target.dataset.coreFilter!==undefined){const term=event.target.value.toLowerCase();for(const row of event.target.closest('.combo-popover').querySelectorAll('[data-choice-label]'))row.hidden=!row.textContent.toLowerCase().includes(term);}});
   function change(event){
    const el=event.target;
    syncInputs();
    if(el.dataset.coreChoice!==undefined){
-    const box=el.closest('[data-core-combo]'),id=el.dataset.coreChoice,source=container.querySelector('[data-core-native-lines="'+id+'"]');
+    const box=el.closest('[data-core-combo]'),id=el.dataset.coreChoice,source=firstField('[data-core-native-lines="'+id+'"]');
     const selected=[...box.querySelectorAll('[data-core-choice]:checked')];source.value=selected.map(input=>input.value).join('\n');syncInputs();box.querySelector('[data-combo-summary]').textContent=selected.map(input=>input.parentElement.textContent.trim()).join(', ')||'Any / not set';
    }
    if(el.dataset.coreUnion!==undefined){const node=nodes.get(el.dataset.coreUnion),schema=node.unionOptions[Number(el.value)];unionDrafts.set(node.path,Number(el.value));node.set(schema?seed(schema):undefined);draw();}
@@ -185,20 +204,20 @@ const CoreSchema=(()=>{
    if(el.dataset.coreAdd!==undefined&&el.value){const node=nodes.get(el.dataset.coreAdd),s=choose(node.input,node.value),obj=node.value||{};Object.defineProperty(obj,el.value,{value:seed(s.properties[el.value]),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   }
   const changeControl=event=>{try{change(event);}catch(error){if(!settings.nativeUnions)throw error;const output=container.closest('form')?.querySelector('.form-error');if(output)output.textContent=error.message;}};
-  listen(container,'change',changeControl);
+  for(const root of fieldRoots)listen(root,'change',changeControl);
   if(settings.typeContainer)listen(settings.typeContainer,'change',changeControl);
-  listen(container,'click',event=>{
+  for(const root of fieldRoots)listen(root,'click',event=>{
    const el=event.target.closest('button');if(!el)return;
    syncInputs();
-   if(el.dataset.coreChoiceClear!==undefined){const box=el.closest('[data-core-combo]');for(const input of box.querySelectorAll('[data-core-choice]'))input.checked=false;container.querySelector('[data-core-native-lines="'+el.dataset.coreChoiceClear+'"]').value='';box.querySelector('[data-combo-summary]').textContent='Any / not set';syncInputs();}
-   if(el.dataset.coreChoiceAdd!==undefined){const id=el.dataset.coreChoiceAdd,input=container.querySelector('[data-core-custom="'+id+'"]'),text=input.value.trim();if(!text)return;const box=el.closest('[data-core-combo]');let option=[...box.querySelectorAll('[data-core-choice]')].find(node=>node.value===text);if(!option){const label=document.createElement('label');label.dataset.choiceLabel='';option=document.createElement('input');option.type='checkbox';option.dataset.coreChoice=id;option.value=text;const caption=document.createElement('span');caption.textContent=text;label.append(option,caption);box.querySelector('.combo-options').append(label);}option.checked=true;change({target:option});input.value='';}
+   if(el.dataset.coreChoiceClear!==undefined){const box=el.closest('[data-core-combo]');for(const input of box.querySelectorAll('[data-core-choice]'))input.checked=false;firstField('[data-core-native-lines="'+el.dataset.coreChoiceClear+'"]').value='';box.querySelector('[data-combo-summary]').textContent='Any / not set';syncInputs();}
+   if(el.dataset.coreChoiceAdd!==undefined){const id=el.dataset.coreChoiceAdd,input=firstField('[data-core-custom="'+id+'"]'),text=input.value.trim();if(!text)return;const box=el.closest('[data-core-combo]');let option=[...box.querySelectorAll('[data-core-choice]')].find(node=>node.value===text);if(!option){const label=document.createElement('label');label.dataset.choiceLabel='';option=document.createElement('input');option.type='checkbox';option.dataset.coreChoice=id;option.value=text;const caption=document.createElement('span');caption.textContent=text;label.append(option,caption);box.querySelector('.combo-options').append(label);}option.checked=true;change({target:option});input.value='';}
    if(el.dataset.coreRemove!==undefined){const node=nodes.get(el.dataset.coreRemove),obj=node.value;delete obj[el.dataset.key];node.set(obj);draw();}
    if(el.dataset.coreItemRemove!==undefined){const node=nodes.get(el.dataset.coreItemRemove),array=node.value;array.splice(Number(el.dataset.index),1);node.set(array);draw();}
    if(el.dataset.coreItemAdd!==undefined){const node=nodes.get(el.dataset.coreItemAdd),s=choose(node.input,node.value),array=Array.isArray(node.value)?node.value:[];array.push(seed(s.items||{}));node.set(array);draw();}
-   if(el.dataset.coreMapAdd!==undefined){const node=nodes.get(el.dataset.coreMapAdd),key=container.querySelector(`[data-core-map-key="${el.dataset.coreMapAdd}"]`).value.trim();if(!key)return;const obj=node.value||{};Object.defineProperty(obj,key,{value:seed(choose(node.input,obj).additionalProperties===true?{}:choose(node.input,obj).additionalProperties),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
+   if(el.dataset.coreMapAdd!==undefined){const node=nodes.get(el.dataset.coreMapAdd),key=firstField(`[data-core-map-key="${el.dataset.coreMapAdd}"]`).value.trim();if(!key)return;const obj=node.value||{};Object.defineProperty(obj,key,{value:seed(choose(node.input,obj).additionalProperties===true?{}:choose(node.input,obj).additionalProperties),writable:true,enumerable:true,configurable:true});node.set(obj);draw();}
   });
   draw();
-  return {value(){syncInputs();for(const input of container.querySelectorAll('[data-core-json]')){try{nodes.get(input.dataset.coreJson).set(JSON.parse(input.value));}catch{throw new Error('Enter valid JSON for '+nodes.get(input.dataset.coreJson).label);}}return clone(value);},set(next){value=clone(next);draw();}};
+  return {value(){syncInputs();for(const input of fields('[data-core-json]')){try{nodes.get(input.dataset.coreJson).set(JSON.parse(input.value));}catch{throw new Error('Enter valid JSON for '+nodes.get(input.dataset.coreJson).label);}}return clone(value);},set(next){value=clone(next);draw();}};
  }
  return {configure(value){catalog=value},title,byName,protocolSchema,branches,choose,seed,mount};
 })();

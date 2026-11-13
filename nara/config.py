@@ -388,7 +388,10 @@ def build_config(state, totals, cert_dir, stats_port=10085, check_all=False):
         if key == "experimental":
             require("v2ray_api" not in value, "The panel manages the private traffic accounting API")
         config[key] = {**config.get(key, {}), **value}
-    config["route"]["rules"] += [native.record(r) for r in state.get("route_rules", []) if check_all or r.get("enabled", True)]
+    # 1.14.3 parsed the direct rule action but never selected it for a
+    # connection. Keep those records editable, without changing traffic.
+    config["route"]["rules"] += [native.record(r) for r in state.get("route_rules", [])
+                                  if (check_all or r.get("enabled", True)) and r["config"].get("action") != "direct"]
     custom_outbounds = [native.record(r) for r in state.get("outbounds", []) if check_all or r.get("enabled", True)]
     if any(o.get("tag") == "direct" for o in custom_outbounds):
         config["outbounds"] = custom_outbounds

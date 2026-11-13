@@ -103,9 +103,10 @@ DNS_RULE = [field("invert", "Invert this match", "checkbox"),
 
 def schema():
     from .timezones import names
+    from .native import VERSION
     return dict(server=SERVER, client=CLIENT, listen=LISTEN, multiplex=MULTIPLEX,
                 transport=TRANSPORT, tls=TLS, quic=QUIC, dns=DNS, dns_rule=DNS_RULE,
-                time_zones=names(), version="1.14.3")
+                time_zones=names(), version=VERSION)
 
 
 def get(obj, key, default=None):

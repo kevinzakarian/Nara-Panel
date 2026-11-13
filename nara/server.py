@@ -630,6 +630,12 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                         if row.get("mode") == "native" or collection in native.EXTRA_COLLECTIONS:
                             row["mode"] = "native"
                             require(isinstance(row.get("config"), dict), "Core configuration must be an object")
+                            if collection == "route_rules" and row["config"].get("action") == "direct":
+                                require(row["config"] == existing.get("config"),
+                                        "Sing-box removed the direct rule action. Use action route and choose a Direct destination.")
+                            if collection == "outbounds" and native.duplicate_group_members(row["config"]):
+                                require(row["config"] == existing.get("config"),
+                                        "Each destination can appear only once in an outbound group")
                             row["tag"] = row["config"].get("tag", "")
                             row["type"] = row["config"].get("type", "")
                             if collection == "inbounds":

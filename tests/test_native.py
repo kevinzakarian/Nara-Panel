@@ -15,6 +15,20 @@ def row(config, ident='native'):
 
 
 class NativeTests(unittest.TestCase):
+    def test_legacy_direct_action_and_duplicate_group_members_do_not_break_upgrade(self):
+        state = initial_state()
+        legacy = {'domain': ['example.test'], 'action': 'direct', 'bind_interface': 'old'}
+        state['route_rules'] = [row(legacy), row({'domain': ['example.test'], 'action': 'route', 'outbound': 'direct'}, 'next')]
+        group = {'type': 'selector', 'tag': 'group', 'outbounds': ['direct', 'direct']}
+        state['outbounds'] = [row(group)]
+        with tempfile.TemporaryDirectory() as directory:
+            config = build_config(state, {}, Path(directory), check_all=True)
+        self.assertEqual(config['outbounds'][-1]['outbounds'], ['direct'])
+        self.assertEqual(config['route']['rules'][-1]['action'], 'route')
+        self.assertFalse(any(r.get('action') == 'direct' for r in config['route']['rules']))
+        self.assertEqual(state['route_rules'][0]['config'], legacy)
+        self.assertEqual(group['outbounds'], ['direct', 'direct'])
+
     def test_wireguard_peer_pre_shared_keys_are_redacted_and_retained_on_edit(self):
         config={'type':'wireguard','private_key':'PRIVATE','peers':[{'public_key':'PUBLIC','pre_shared_key':'SHARED'}]}
         visible=native.redact(config)

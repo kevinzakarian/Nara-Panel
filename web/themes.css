@@ -31,10 +31,10 @@ main[data-page=dashboard] .stat-card{padding:10px 14px}
 main[data-page=dashboard] .stat-symbol{width:28px;height:28px}
 main[data-page=dashboard] .stat-number{font-size:23px;line-height:1.25;margin:4px 0}
 main[data-page=dashboard] .stat-foot{font-size:13px}
-.overview-health,.overview-traffic{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;margin-bottom:14px}
-.overview-health>.card,.overview-traffic>.card{min-width:0;margin:0}
-.overview-health .card-header,.overview-traffic .card-header{padding:12px 16px 8px}
-.overview-health .card-body,.overview-traffic .card-body{padding:0 16px 12px;gap:4px}
+.overview-health{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:14px}
+.overview-health>.card{min-width:0;margin:0}
+.overview-health .card-header{padding:12px 16px 8px}
+.overview-health .card-body{padding:0 16px 12px;gap:4px}
 .overview-health .resource{margin:0;padding:4px 0}
 .overview-health .resource progress{display:block;margin:4px 0;height:6px}
 .overview-health .resource small{font-size:13px}
@@ -42,10 +42,28 @@ main[data-page=dashboard] .stat-foot{font-size:13px}
 .overview-health .info-row{padding:3px 0;gap:10px;line-height:1.4}
 .overview-health .info-row>span{flex-shrink:1}
 .overview-health .info-row .mono{font-size:13px}
-.overview-traffic .chart-totals{padding:4px 16px}
-.overview-traffic .network-chart{padding:0 16px 10px}
-.overview-traffic .network-chart svg{height:80px}
-.overview-traffic .chart-empty{min-height:72px}
-.overview-traffic .allowance-card .note{margin-top:4px}
+.overview-health .chart-totals{padding:4px 16px}
+.overview-health .network-chart{padding:0 16px 10px}
+.overview-health .network-chart svg{height:80px}
+.overview-health .chart-empty{min-height:72px}
+.overview-health .allowance-card .note{margin-top:4px}
 main[data-page=dashboard]>.bottom-grid{grid-template-columns:minmax(0,1fr);margin-top:14px}
-@media(max-width:760px){.overview-health,.overview-traffic{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:1100px){.overview-health{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.overview-health{grid-template-columns:minmax(0,1fr)}}
+
+.overview-health .card-header{gap:6px}
+.overview-health .card-header p{font-size:13px;line-height:1.4}
+.overview-health .card-header h2{font-size:16px}
+.overview-health .info-row>span{display:flex;align-items:flex-start;gap:5px}
+.overview-health .info-row .icon{width:15px;height:15px;margin-top:2px;color:var(--accent-text,var(--accent))}
+.overview-health .info-row{font-size:13px}
+.overview-health .chart-totals{display:flex;flex-wrap:wrap;gap:8px 12px}
+.overview-health .chart-totals b{font-size:16px}
+.overview-health .allowance-card .allowance-value>b{font-size:22px}
+.overview-health .allowance-meta{display:flex;flex-wrap:wrap;gap:3px 10px}
+.inbound-tabs{margin:12px 0 18px;flex-wrap:wrap}
+.inbound-field-group{margin:0 0 16px}
+.inbound-field-group+.inbound-field-group{border-top:1px solid var(--border);padding-top:16px}
+.inbound-field-group h3{font-size:15px;margin-bottom:8px}
+.inbound-field-group .note{margin-bottom:8px}
+[data-inbound-panel] .schema-json{width:100%;margin-top:12px}

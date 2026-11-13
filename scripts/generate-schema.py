@@ -1,4 +1,4 @@
-"""Regenerate the pinned schema/help from an official 1.14.3 checkout and binary."""
+"""Regenerate the pinned schema/help from a pinned upstream checkout and binary."""
 import argparse
 import json
 import re
@@ -11,12 +11,16 @@ parser.add_argument('--binary',type=Path,default=Path('dist/sing-box'))
 args=parser.parse_args()
 root=Path(__file__).resolve().parent.parent
 output=root/'nara/schema'
-version=subprocess.check_output([str(args.binary.resolve()),'version'],text=True).splitlines()[0]
-if version!='sing-box version 1.14.3':
-    raise SystemExit('The generator requires exactly Sing-box 1.14.3')
-subprocess.run([str(args.binary.resolve()),'schema','-o',str(output/'sing-box-1.14.3.schema.json')],check=True)
-schema=json.loads((output/'sing-box-1.14.3.schema.json').read_text())
-(output/'sing-box-1.14.3.schema.json').write_text(json.dumps(schema,ensure_ascii=False,separators=(',',':'))+'\n')
+pin=json.loads((root/'core-build.json').read_text())
+version=pin['version']
+if subprocess.check_output(['git','-C',str(args.source),'rev-parse','HEAD'],text=True).strip()!=pin['upstream_commit']:
+    raise SystemExit('The documentation checkout does not match the pinned core.')
+if subprocess.check_output([str(args.binary.resolve()),'version'],text=True).splitlines()[0]!=f'sing-box version {version}':
+    raise SystemExit(f'The generator requires Sing-box {version}.')
+schema_path=output/f'sing-box-{version}.schema.json'
+subprocess.run([str(args.binary.resolve()),'schema','-o',str(schema_path)],check=True)
+schema=json.loads(schema_path.read_text())
+schema_path.write_text(json.dumps(schema,ensure_ascii=False,separators=(',',':'))+'\n')
 docroot=args.source/'docs/configuration'
 documents={}
 for file in docroot.rglob('*.md'):

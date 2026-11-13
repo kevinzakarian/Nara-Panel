@@ -9,10 +9,10 @@ An independent English web panel for running **Sing-box on your own Linux server
 The default language is English. Overview versions and update status share one horizontal strip; the client summary ranks the five largest consumers. Core features are visible by default on new installations; Settings can hide the advanced Core features menu while keeping its configured services active.
 
 - **Overview:** Linux CPU, RAM, disk, load, uptime, hostname, assigned IPv4/IPv6 addresses, CPU model in its own labeled row, sampled network traffic, client traffic totals, core status, and recent events. Unavailable measurements are shown as unavailable.
-- **Inbounds:** all 19 Sing-box 1.14.3 types, including Shadowsocks, ShadowTLS, Hysteria, Snell 5/6, Naive, HTTP/SOCKS, TUN, transparent listeners and Cloudflared. Complete versioned forms include nested protocol/TLS/transport/listen options. Existing VLESS, VMess, Trojan, Hysteria2, TUIC and AnyTLS account management remains available. Standalone listeners manage their own credentials. See the [feature review](FEATURE_REVIEW.md).
+- **Inbounds:** all 19 Sing-box 1.14.4 types, including Shadowsocks, ShadowTLS, Hysteria, Snell 5/6, Naive, HTTP/SOCKS, TUN, transparent listeners and Cloudflared. Complete versioned forms include nested protocol/TLS/transport/listen options. Existing VLESS, VMess, Trojan, Hysteria2, TUIC and AnyTLS account management remains available. Standalone listeners manage their own credentials. See the [feature review](FEATURE_REVIEW.md).
 - **TLS:** import PEM certificate/key pairs, validate their match and SAN hostname, generate ECDSA self-signed certificates with one action, show expiry, and download the public certificate. Each profile has explicit client **Allow insecure**, SNI suppression, ALPN, TLS versions and handshake timeout.
 - **DNS:** all 15 typed resolvers, complete logical/default rules and actions, races/speculation, predefined replies, optimistic/cache controls and local/remote/inline rule sets.
-- **Routing:** native sing-box `default` / `logical` rule forms, every supported 1.14.3 match field and all eight actions with their own fields, nested match-only rules, ordered cards, destination groups and shared lists. JSON editing round-trips the same native object.
+- **Routing:** native sing-box `default` / `logical` rule forms, every supported 1.14.4 match field and all seven actions with their own fields, nested match-only rules, ordered cards, destination groups and shared lists. JSON editing round-trips the same native object.
 - **Core features:** five endpoint types, ten service types, certificate providers, HTTP clients, namespaces, logging, NTP, certificate trust and experimental cache/Clash API settings.
 - **Updates:** read-only checks for panel and stable upstream core releases when an authenticated browser enters the panel. Installed/latest versions, check status and update actions share one compact Overview card. Results persist across restarts; there is no daily timer or background polling schedule.
 - **Clients:** random ten-letter mixed-case default names, groups/tags, search and filters, exact-name bulk previews, patterned creation of up to 500 accounts, selection across pages and atomic bulk quota/expiry/access/reset/link operations; multiple inbound assignments, generated UUID/password, enabled state, expiry, traffic allowance, durable upload/download totals, reset usage, rotate subscription links, JSON configuration download, private Sing-box JSON subscription URLs with usage headers, and locally generated QR codes in official Sing-box remote-profile and direct JSON URL formats, with PNG download.
@@ -410,6 +410,15 @@ NARA record metadata (display label and enabled state) is separate from native c
 
 ![Native DNS action form](screenshots/dns-rule-0.13.0.png)
 
+
+## 0.14.3 · Sing-box 1.14.4 and clearer Inbounds
+
+- This release targets the stable Sing-box 1.14.4 schema and compatible Linux builds for amd64 and arm64. The upstream patch fixes DNS caching and resolution, QUIC, outbound groups, and other runtime issues.
+- Sing-box removed the unimplemented `direct` traffic-rule action. Existing records remain visible and inactive, as they were at runtime. To turn one into an active rule, edit it, choose `route` and select a Direct destination. Existing duplicate outbound group members are deduplicated in the generated configuration in their original order.
+- Inbound forms separate basic setup, protocol settings, applicable transport controls, and advanced options. Standalone listeners also have a JSON tab.
+- Destinations has its own sidebar entry. On wider screens, Overview places Server resources, Server information, Server traffic, and Server allowance on one row.
+
+On managed Linux, update the panel first, then use **Overview → Update core** to install 1.14.4 after the configuration checks.
 
 ## 0.14.2 · Compatible core updates and compact Overview
 

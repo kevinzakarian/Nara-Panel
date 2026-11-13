@@ -211,7 +211,8 @@ class APITests(unittest.TestCase):
         self.login()
         status, data, _=self.request('/api/core-schema')
         self.assertEqual(status,200)
-        self.assertEqual(data['version'],'1.14.3')
+        from nara.native import VERSION
+        self.assertEqual(data['version'],VERSION)
         self.assertIn('snell',data['types']['inbounds'])
         self.assertIn('DNSRuleAction',data['schema']['$defs'])
         self.assertEqual(self.request('/core-editor.js')[0],200)

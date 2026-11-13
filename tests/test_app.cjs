@@ -180,8 +180,8 @@ test('silent overview refresh updates values and keeps focused links and reorder
   const document=w.document,nav=document.querySelector('#navigation a[href="#clients"]');
   const health=document.querySelector('.overview-health');
   assert.match(health.textContent,/Server resources/);
-  assert.match(health.textContent,/Service information/);
-  assert.equal(health.nextElementSibling.className,'overview-traffic');
+  assert.match(health.textContent,/Server information/);
+  assert.match(health.textContent,/Server traffic/);
   const chart=document.querySelector('.network-chart');
   const button=document.querySelector('[data-action="client-details"][data-id="one"]');
   nav.focus();
@@ -222,8 +222,28 @@ test('standalone AnyTLS starts from the same official padding preset',()=>{
   f.w.TestApp.editInbound({mode:'native'});
   const select=f.w.document.querySelector('[name=type]');select.value='anytls';select.dispatchEvent(new f.w.Event('change'));
   assert.ok(f.w.document.querySelector('#native-fields').textContent.includes('Padding Scheme'));
-  assert.ok([...f.w.document.querySelectorAll('#native-fields textarea')].some(input=>input.value==='stop=8'));
+  assert.ok([...f.w.document.querySelectorAll('#native-fields textarea')].some(input=>input.value.split('\n')[0]==='stop=8'));
  }finally{f.close()}
+});
+
+test('standalone inbound tabs retain listener and protocol fields across schema redraws',async()=>{
+ const f=app();try{
+  const d=f.w.document;let saved;
+  f.w.TestApp.saveWith(async(collection,row)=>{saved=JSON.parse(JSON.stringify(row));});
+  f.w.TestApp.editCoreRecord('inbounds',{mode:'native',id:'fixture'},{type:'socks',tag:'original',listen:'127.0.0.1',listen_port:8080,users:[{username:'fixture',password:'fixture-only'}],tcp_fast_open:true});
+  const basic=d.querySelector('#inbound-panel-basics'),advanced=d.querySelector('#inbound-panel-advanced');
+  assert.equal(basic.hidden,false);assert.equal(advanced.hidden,true);
+  const tag=basic.querySelector('[data-core-field=tag] input,[data-core-field=tag] textarea');
+  tag.value='renamed';
+  d.querySelector('[data-inbound-tab=advanced]').click();
+  assert.equal(advanced.hidden,false);assert.equal(basic.hidden,true);
+  const flag=advanced.querySelector('[data-core-field=tcp_fast_open] select');
+  flag.value='false';
+  await f.w.TestApp.submit();
+  assert.equal(saved.config.tag,'renamed');
+  assert.equal(saved.config.tcp_fast_open,false);
+  assert.equal(saved.config.users[0].username,'fixture');
+ }finally{f.close();}
 });
 
 test('overview keeps CPU model and each address family in its own escaped row',()=>{

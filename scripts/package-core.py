@@ -9,14 +9,27 @@ import tarfile
 import tempfile
 
 
-def package(root, binary, arch, output, source):
+def package(root, binary, arch, output, source, cross=False):
     config = json.loads((root / 'core-build.json').read_text())
     revision = subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'], text=True).strip()
     upstream = subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'], text=True).strip()
     if upstream != config['upstream_commit']:
         raise ValueError('Unexpected upstream source revision')
-    text = subprocess.check_output([str(binary),'version'], text=True)
-    if not text.startswith('sing-box version ' + config['version'] + '\n') or 'with_v2ray_api' not in text or 'with_quic' not in text:
+    if cross:
+        # Cross-built binaries cannot run here. Check embedded Go provenance;
+        # the Linux integration suite must still run the packaged executable.
+        info = json.loads(subprocess.check_output(['go', 'version', '-m', '-json', str(binary)], text=True))
+        settings = {item['Key']: item['Value'] for item in info['Settings']}
+        tags = settings.get('-tags', '').split(',')
+        expected = {'GOOS': 'linux', 'GOARCH': arch, 'vcs.revision': upstream, 'vcs.modified': 'false'}
+        if info['Path'] != 'github.com/sagernet/sing-box/cmd/sing-box' or any(settings.get(key) != value for key, value in expected.items()):
+            raise ValueError('Cross-built core provenance does not match')
+        text = info['GoVersion'] + ' linux/' + arch + '\nTags: ' + ','.join(tags) + '\n'
+    else:
+        text = subprocess.check_output([str(binary),'version'], text=True)
+        if not text.startswith('sing-box version ' + config['version'] + '\n'):
+            raise ValueError('The packaged core version does not match NARA')
+    if 'with_v2ray_api' not in text or 'with_quic' not in text:
         raise ValueError('The packaged core is incompatible with NARA')
     output.mkdir(parents=True, exist_ok=True)
     name = f"nara-sing-box-{config['version']}-linux-{arch}.tar.gz"
@@ -43,5 +56,6 @@ if __name__ == '__main__':
     parser.add_argument('--arch',required=True,choices=['amd64','arm64'])
     parser.add_argument('--source',required=True,type=Path)
     parser.add_argument('--output',default='dist/core-release',type=Path)
+    parser.add_argument('--cross',action='store_true',help='Check embedded provenance before native verification')
     args=parser.parse_args()
-    package(Path(__file__).resolve().parent.parent,args.binary.resolve(),args.arch,args.output,args.source)
+    package(Path(__file__).resolve().parent.parent,args.binary.resolve(),args.arch,args.output,args.source,args.cross)

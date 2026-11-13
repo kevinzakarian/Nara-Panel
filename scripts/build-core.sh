@@ -10,7 +10,9 @@ export GOMAXPROCS="${GOMAXPROCS:-2}"
 export GOGC="${GOGC:-50}"
 build_jobs=${NARA_BUILD_JOBS:-1}
 case "$build_jobs" in ""|*[!0-9]*|0) echo "NARA_BUILD_JOBS must be a positive integer" >&2; exit 1 ;; esac
-version=v1.14.3
+manifest="$script_dir/../core-build.json"
+version=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$manifest")
+expected_commit=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["upstream_commit"])' "$manifest")
 output=${1:-./dist/sing-box}
 case "$output" in /*) ;; *) output="$PWD/$output" ;; esac
 mkdir -p "$(dirname "$output")"
@@ -23,9 +25,9 @@ printf '[NARA] Build diagnostics: %s\n' "$log"
 printf '[NARA] Downloading dependencies before compilation; parallel build jobs: %s\n' "$build_jobs"
 build_dir=$(mktemp -d)
 trap 'rm -rf "$build_dir"' EXIT HUP INT TERM
-git clone --quiet --depth 1 --branch "$version" https://github.com/SagerNet/sing-box.git "$build_dir/core"
+git clone --quiet --depth 1 --branch "v$version" https://github.com/SagerNet/sing-box.git "$build_dir/core"
 cd "$build_dir/core"
-test "$(git rev-parse HEAD)" = 7054cac5124465ffdb145870d7c01885566711b1 || { echo "Unexpected upstream commit" >&2; exit 1; }
+test "$(git rev-parse HEAD)" = "$expected_commit" || { echo "Unexpected upstream commit" >&2; exit 1; }
 core_os=${GOOS:-$(go env GOOS)}
 core_arch=${GOARCH:-$(go env GOARCH)}
 core_tags=$(cat release/DEFAULT_BUILD_TAGS_OTHERS)
@@ -40,7 +42,7 @@ core_ldflags=$(cat release/LDFLAGS)
 python3 "$script_dir/build-step.py" --label 'Download core dependencies' --log "$log" --attempts 3 --timeout 900 --quiet-stdout -- go list -mod=readonly -deps -tags "$core_tags" ./cmd/sing-box
 printf '[NARA] Dependencies ready. Verifying module checksums...\n'
 python3 "$script_dir/build-step.py" --label 'Verify module cache' --log "$log" -- go mod verify
-python3 "$script_dir/build-step.py" --label 'Compile Sing-box' --log "$log" -- go build -mod=readonly -p "$build_jobs" -trimpath -tags "$core_tags" -ldflags "$core_ldflags -s -w -X github.com/sagernet/sing-box/constant.Version=1.14.3" -o "$output" ./cmd/sing-box
+python3 "$script_dir/build-step.py" --label 'Compile Sing-box' --log "$log" -- go build -mod=readonly -p "$build_jobs" -trimpath -tags "$core_tags" -ldflags "$core_ldflags -s -w -X github.com/sagernet/sing-box/constant.Version=$version" -o "$output" ./cmd/sing-box
 case "$core_os/$core_arch" in
     linux/amd64|linux/arm64)
         # The pinned Go module is verified by go.sum, including this shared library.

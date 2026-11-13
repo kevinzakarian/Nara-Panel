@@ -65,6 +65,8 @@ def ports():
 
 def controller(source):
     from nara import maintenance as m
+    pin=json.loads((source/'core-release.json').read_text())
+    target=pin['version']
     from nara.store import Store, password_hash
     if DATA.exists():raise RuntimeError('This runner already has panel data')
     run('useradd','--system','--home-dir',str(DATA),'--shell','/usr/sbin/nologin','nara-panel')
@@ -76,14 +78,14 @@ def controller(source):
     core=APP/'bin/sing-box'
     # Start with the same verified runtime and an older reported version.
     # This exercises the upgrade gate without depending on a legacy binary.
-    with contextlib.ExitStack() as stack:
-        import tempfile
-        work=Path(stack.enter_context(tempfile.TemporaryDirectory()))
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        work=Path(directory)
         run(sys.executable,str(source/'scripts/fetch-core.py'),'--output',str(work/'core'))
         for item in (work/'core').iterdir():
             shutil.copy2(item,APP/'bin'/item.name)
     core.rename(APP/'bin/sing-box-fixture')
-    core.write_text('#!/bin/sh\n[ "$1" = version ] && { echo "sing-box version 1.14.2"; exit 0; }\nexec /opt/nara-panel/bin/sing-box-fixture "$@"\n')
+    core.write_text('#!/bin/sh\n[ "$1" = version ] && { echo "sing-box version 1.14.3"; exit 0; }\nexec /opt/nara-panel/bin/sing-box-fixture "$@"\n')
     core.chmod(0o755);core_hash=hashlib.sha256(core.read_bytes()).hexdigest()
     DATA.mkdir(mode=0o700);os.chown(DATA,identity.pw_uid,identity.pw_gid)
     # Initialize and keep a WAL writer open under the real service identity.
@@ -120,7 +122,7 @@ def controller(source):
                 for file in sorted(path.rglob('*')) if path.is_dir() else [path]:
                     if not file.is_file() or '__pycache__' in file.parts:continue
                     payload=file.read_bytes();relative=file.relative_to(source).as_posix()
-                    if relative=='release.json':payload=json.dumps({'version':FUTURE,'core_version':'1.14.3'}).encode()
+                    if relative=='release.json':payload=json.dumps({'version':FUTURE,'core_version':target}).encode()
                     if relative=='nara/__init__.py':payload=('__version__ = "'+FUTURE+'"\n').encode()
                     info=tarfile.TarInfo('nara-panel/'+relative);info.size=len(payload);info.mode=0o644;archive.addfile(info,io.BytesIO(payload))
         panel,sub,stats=ports()
@@ -176,7 +178,7 @@ def controller(source):
             overview=request('dashboard')
             assert overview['updates']['compatible_core']['available']
             proof=request('backup/create',{'current':'fixture-only-password'},csrf)['proof']
-            job=request('update-core',{'version':'1.14.3','confirmed':True,'backup_proof':proof},csrf)
+            job=request('update-core',{'version':target,'confirmed':True,'backup_proof':proof},csrf)
             deadline=time.monotonic()+150
             while time.monotonic()<deadline:
                 time.sleep(.5)
@@ -195,7 +197,7 @@ def controller(source):
         assert completed['status']=='complete',completed
         assert request('health')['core_running']
         overview=request('dashboard')
-        assert overview['core']['version']=='sing-box version 1.14.3'
+        assert overview['core']['version']=='sing-box version '+target
         assert not overview['updates']['compatible_core']['available']
         assert request('state')['revision']==state['revision']
         print('Real systemd core update passed: checked live config, failed startup rollback, successful retry, unchanged settings and working traffic API.')

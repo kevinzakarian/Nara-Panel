@@ -1,11 +1,11 @@
-"""Exact, bundled 1.14.3 configuration vocabulary for complete core editors."""
+"""Exact, bundled 1.14.4 configuration vocabulary for complete core editors."""
 import copy
 import json
 from pathlib import Path
 
-VERSION = "1.14.3"
+VERSION = "1.14.4"
 DATA = Path(__file__).with_name("schema")
-SCHEMA = json.loads((DATA / "sing-box-1.14.3.schema.json").read_text())
+SCHEMA = json.loads((DATA / f"sing-box-{VERSION}.schema.json").read_text())
 HELP = json.loads((DATA / "field-help.json").read_text())
 COLLECTIONS = {
     "inbounds": "Inbound", "outbounds": "Outbound", "dns_servers": "DNSServer",
@@ -53,7 +53,18 @@ def payload():
 
 
 def record(row):
-    return copy.deepcopy(row["config"])
+    config = copy.deepcopy(row["config"])
+    # 1.14.4 rejects repeated group members. Preserve first-choice order
+    # without making an existing 1.14.3 installation fail to start.
+    if duplicate_group_members(config):
+        config["outbounds"] = list(dict.fromkeys(config["outbounds"]))
+    return config
+
+
+def duplicate_group_members(config):
+    members = config.get("outbounds")
+    return (config.get("type") in ("selector", "urltest") and isinstance(members, list)
+            and all(isinstance(tag, str) for tag in members) and len(set(members)) != len(members))
 
 
 def validate_record(collection, row):
