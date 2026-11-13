@@ -444,6 +444,7 @@ class InstallerRollbackTests(unittest.TestCase):
                 (source / item).mkdir()
                 (source / item / 'new-marker').write_text('new code')
             (source / 'requirements.txt').write_text('new dependencies')
+            (source / 'core-release.json').write_bytes(Path('core-release.json').read_bytes())
             (source / 'deploy/nara-panel.service').write_text('new service')
             (source / 'deploy/nara-panel-access.path').write_text('fixture path unit')
             (source / 'deploy/nara-panel-access.service').write_text('fixture oneshot unit')
