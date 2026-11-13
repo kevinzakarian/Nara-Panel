@@ -1,12 +1,14 @@
 """Create a source-only release. Never include databases or local credentials."""
 from pathlib import Path
 import hashlib
+import json
 import tarfile
 
 root = Path(__file__).resolve().parent.parent
 output = root / "dist"
 output.mkdir(exist_ok=True)
-archive = output / "nara-panel_0.14.0_source.tar.gz"
+version = json.loads((root / "release.json").read_text())["version"]
+archive = output / f"nara-panel_{version}_source.tar.gz"
 included = ["core-build.json", "core-release.json", ".github", "nara", "web", "tests", "scripts", "deploy", "screenshots", "README.md", "API.md", "SECURITY_REVIEW.md", "INSTALL.fa.md", "release.json",
             "package.json", "package-lock.json", "FEATURE_REVIEW.md", "VERIFICATION.md", "LICENSE", "requirements.txt", "Dockerfile", "compose.yaml", "install.sh", "update.sh", ".dockerignore", ".gitignore"]
 with tarfile.open(archive, "w:gz") as bundle:

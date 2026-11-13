@@ -411,6 +411,15 @@ NARA record metadata (display label and enabled state) is separate from native c
 ![Native DNS action form](screenshots/dns-rule-0.13.0.png)
 
 
+## 0.14.1 · Faster entry and clearer configuration errors
+
+- Overview and sidebar refreshes preserve keyboard focus while updating live values.
+- Panel entry checks for updates in the background without delaying sign-in.
+- Known Sing-box validation failures identify what to fix. Raw diagnostics stay in the private core log, and rejected changes keep the previous working configuration.
+- Selected text in Ember Light has better contrast. This panel-only update keeps the installed Sing-box core and Python dependencies.
+
+On a managed Linux installation, sign in again to check for the release, then use **Overview → Update panel** and follow the backup and confirmation steps.
+
 ## 0.14.0 · Ember, Volt and Lagoon
 
 Settings → Appearance offers **Ember**, **Volt** and **Lagoon**, each in Light, Dark or Follow device mode. Selection previews immediately; the single Save settings button saves it for the panel. A small local appearance cache avoids a light flash on reload. The skins share geometry and use local CSS/system fonts, with no external theme framework or remote assets. Settings has section shortcuts and a persistent save heading.
