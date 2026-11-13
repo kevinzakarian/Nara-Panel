@@ -29,7 +29,7 @@ The interface defaults to **English and left-to-right**, with a 16 px body/input
 ## Requirements
 
 - Linux with systemd for direct installation; Python 3.10+, Python venv, OpenSSL 1.1.1+, CA certificates and iproute2 for interface discovery. Minimal older Linux installs can fall back to `hostname -I`.
-- Sing-box **1.14.3** with upstream standard capabilities plus `with_v2ray_api`. The installer downloads a prebuilt NARA-compatible core for Linux amd64/arm64. **Go, Git and a compiler are not required on the server.** Default SagerNet binaries omit the accounting capability, so the NARA builds are published separately with upstream notices and source.
+- Sing-box **1.14.4** with upstream standard capabilities plus `with_v2ray_api`. The installer downloads a prebuilt NARA-compatible core for Linux amd64/arm64. **Go, Git and a compiler are not required on the server.** Default SagerNet binaries omit the accounting capability, so the NARA builds are published separately with upstream notices and source.
 - Public server address and open inbound TCP/UDP ports. Panel and subscription URLs support HTTP and HTTPS. The server manager can set up a dedicated HTTPS reverse proxy, or you can use an existing one.
 
 The panel owns its Sing-box child process and configuration. Give it separate ports from any existing installation. The installer leaves host firewall, routes, DNS and other Sing-box services untouched. Native TUN/transparent/network-namespace features can change networking when you explicitly configure them and provide the required capabilities; see [host requirements](FEATURE_REVIEW.md#builds-and-host-requirements).
@@ -196,7 +196,7 @@ Use **Add option** within any object to add a field, including nested TLS/QUIC s
 
 ![Native traffic rule form](screenshots/routing-rule-0.13.0.png)
 
-The routing model follows the official [route options](https://sing-box.sagernet.org/configuration/route/), [matching logic](https://sing-box.sagernet.org/configuration/route/rule/) and [rule actions](https://sing-box.sagernet.org/configuration/route/rule_action/); validation uses the bundled 1.14.3 schema and installed core.
+The routing model follows the official [route options](https://sing-box.sagernet.org/configuration/route/), [matching logic](https://sing-box.sagernet.org/configuration/route/rule/) and [rule actions](https://sing-box.sagernet.org/configuration/route/rule_action/); validation uses the bundled 1.14.4 schema and installed core.
 
 Each authenticated panel entry starts a one-shot version check using fixed public GitHub endpoints. Opening the panel with an existing session also checks again; concurrent entries share a check already in progress. Login does not wait for GitHub, dashboard refreshes only read cached results, and no scheduled check runs while the panel is closed. Results persist across restarts. Failed checks show “Update check unavailable”; they do not mean the installed version is current.
 
@@ -278,7 +278,7 @@ sudo -u nara-panel .venv/bin/python -m nara reset-password --data /var/lib/nara-
 - [Sing-box configuration](https://sing-box.sagernet.org/configuration/)
 - [V2Ray API and required build capability](https://sing-box.sagernet.org/configuration/experimental/v2ray-api/)
 - [DNS server configuration](https://sing-box.sagernet.org/configuration/dns/server/)
-- [Official source used for the core build](https://github.com/SagerNet/sing-box/tree/v1.14.3)
+- [Official source used for the core build](https://github.com/SagerNet/sing-box/tree/v1.14.4)
 
 NARA Panel is independent of SagerNet. Panel code is MIT licensed. Sing-box and third-party dependencies retain their respective licenses; the core is built separately from upstream GPL-licensed source.
 
