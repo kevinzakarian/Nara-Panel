@@ -1,15 +1,15 @@
 {
-  "version": "1.14.3",
-  "upstream_commit": "7054cac5124465ffdb145870d7c01885566711b1",
-  "release_tag": "core-v1.14.3-nara.1",
+  "version": "1.14.4",
+  "upstream_commit": "c005f35300ce76427dc285481ec5695f5b179cd2",
+  "release_tag": "core-v1.14.4-nara.1",
   "assets": {
     "linux-amd64": {
-      "name": "nara-sing-box-1.14.3-linux-amd64.tar.gz",
-      "sha256": "90d1ddde94d847ccc2eac6ac3550719c68165d1cb88ce00e0fb0cc9ceecef2d6"
+      "name": "nara-sing-box-1.14.4-linux-amd64.tar.gz",
+      "sha256": "213a9d4d13ccf8b6e1706104c1be5a18680afdce254be40d77214dfee957cc34"
     },
     "linux-arm64": {
-      "name": "nara-sing-box-1.14.3-linux-arm64.tar.gz",
-      "sha256": "39b8bb0650dad4f27e5b6a4b9f9c9b4978d8368117de5941ed546b26262c4b84"
+      "name": "nara-sing-box-1.14.4-linux-arm64.tar.gz",
+      "sha256": "86107593475a04828e4b739aac1971364d2f03b850ad15efaced85af26355eb7"
     }
   }
 }

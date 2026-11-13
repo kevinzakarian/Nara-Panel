@@ -23,11 +23,11 @@ input,select,textarea{background:var(--paper);border-color:var(--border);color:v
 .row-actions button,.resource-head>.icon,.info-row>span{color:var(--muted)}.route-warning{color:var(--warning)}.notification-event input,.notification-event span{accent-color:var(--accent)}
 
 /* Keep live health and identity in the first dashboard section. */
-main[data-page=dashboard] .page-heading{margin-bottom:14px}
-main[data-page=dashboard] .release-overview{margin-bottom:14px}
+main[data-page=dashboard] .page-heading{margin-bottom:10px}
+main[data-page=dashboard] .release-overview{margin-bottom:10px}
 main[data-page=dashboard] .release-component{padding:8px 12px}
-main[data-page=dashboard] .stats-grid{gap:12px;margin-bottom:14px}
-main[data-page=dashboard] .stat-card{padding:10px 14px}
+main[data-page=dashboard] .stats-grid{gap:12px;margin-bottom:10px}
+main[data-page=dashboard] .stat-card{padding:8px 14px}
 main[data-page=dashboard] .stat-symbol{width:28px;height:28px}
 main[data-page=dashboard] .stat-number{font-size:23px;line-height:1.25;margin:4px 0}
 main[data-page=dashboard] .stat-foot{font-size:13px}
@@ -35,10 +35,10 @@ main[data-page=dashboard] .stat-foot{font-size:13px}
 .overview-health>.card{min-width:0;margin:0}
 .overview-health .card-header{padding:12px 16px 8px}
 .overview-health .card-body{padding:0 16px 12px;gap:4px}
-.overview-health .resource{margin:0;padding:4px 0}
+.overview-health .resource{margin:0;padding:2px 0}
 .overview-health .resource progress{display:block;margin:4px 0;height:6px}
 .overview-health .resource small{font-size:13px}
-.overview-health .resource-footer{padding:8px 16px}
+.overview-health .resource-footer{padding:6px 16px}
 .overview-health .info-row{padding:3px 0;gap:10px;line-height:1.4}
 .overview-health .info-row>span{flex-shrink:1}
 .overview-health .info-row .mono{font-size:13px}
