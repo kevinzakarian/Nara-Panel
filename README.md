@@ -110,6 +110,14 @@ It performs the same initial system-package update, then offers:
 
 Start/restart follows the core’s saved start/stop state. Reinstalling retained data also recreates the dedicated HTTPS service; if its saved certificate cannot be verified, the manager reports that it needs repair through option 4.
 
+To remove NARA and its data directly from an interactive terminal, run:
+
+```sh
+sudo nara uninstall
+```
+
+Type `DELETE NARA DATA` at the prompt. The command skips the menu and package updates. Existing backup archives in `/var/backups/nara-panel` are retained.
+
 Uninstall requires typing an exact confirmation. From 0.4.2, optional services absent on an older installation are skipped quietly; real inspection/disable/stop errors still abort removal before application files are deleted. Both removal modes retain pre-existing backup archives, system packages and service users. They do not remove other Sing-box installations or another web server's configuration. Backups are mode 0600 in `/var/backups/nara-panel` (directory 0700), contain credentials/private keys, and are never uploaded. SQLite's online backup includes committed WAL data; runtime generations and logs are regenerated instead of archived. To restore a NARA-created data backup manually, stop `nara-panel` and `nara-panel-https`, restore the archive's `etc/` and `var/` contents to their original paths with ownership preserved, then reinstall/upgrade through the menu and start the services. App binaries and Python packages are reinstalled, not stored in the data archive.
 
 ### Panel HTTPS certificates
@@ -410,6 +418,14 @@ NARA record metadata (display label and enabled state) is separate from native c
 
 ![Native DNS action form](screenshots/dns-rule-0.13.0.png)
 
+
+## 1.14.4.1 · Core-aligned panel versions and direct uninstall
+
+The first three numbers identify the compatible Sing-box core. The fourth counts panel releases for that core. For example, panel `1.14.4.2` would still target Sing-box `1.14.4`.
+
+To move from panel `0.14.5` or earlier to the four-part version format on managed Linux, run `sudo nara` and choose **2 — Upgrade panel only (keep current core)**. After this one-time upgrade, **Overview → Update panel** supports four-part versions.
+
+Run `sudo nara uninstall` from an interactive terminal for direct removal. The command requires typing `DELETE NARA DATA` and retains existing backup archives.
 
 ## 0.14.3 · Sing-box 1.14.4 and clearer Inbounds
 

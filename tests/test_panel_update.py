@@ -25,13 +25,14 @@ class PanelUpdateTests(unittest.TestCase):
     def archive(self, requirements=b'fixture\n'):
         data = io.BytesIO()
         with tarfile.open(fileobj=data, mode='w:gz') as archive:
-            for name, payload in {'release.json':b'{"version":"9.0.0"}', 'requirements.txt':requirements, 'update.sh':b'#!/bin/bash\nexit 0\n'}.items():
+            for name, payload in {'release.json':json.dumps({'version': self.job['version']}).encode(), 'requirements.txt':requirements, 'update.sh':b'#!/bin/bash\nexit 0\n'}.items():
                 entry=tarfile.TarInfo('nara-panel/'+name);entry.size=len(payload);archive.addfile(entry,io.BytesIO(payload))
         return data.getvalue()
 
     def responses(self, payload):
-        return [b'{"tag_name":"v9.0.0","draft":false,"prerelease":false}',
-                (hashlib.sha256(payload).hexdigest()+'  nara-panel_9.0.0_source.tar.gz\n').encode(),payload]
+        version = self.job['version']
+        return [json.dumps({'tag_name':'v'+version,'draft':False,'prerelease':False}).encode(),
+                (hashlib.sha256(payload).hexdigest()+f'  nara-panel_{version}_source.tar.gz\n').encode(),payload]
 
     def test_verified_release_is_backed_up_then_installed_and_health_checked(self):
         with mock.patch.object(u,'download',side_effect=self.responses(self.archive())) as fetch, mock.patch('nara.maintenance.backup') as backup, mock.patch.object(u,'run_installer') as install, mock.patch('nara.maintenance.panel_health',return_value={'version':'9.0.0'}), mock.patch.object(a,'write_result') as progress:
@@ -51,6 +52,17 @@ class PanelUpdateTests(unittest.TestCase):
             with self.subTest(dependencies=dependencies), mock.patch.object(u,'download',side_effect=replies), mock.patch.object(u,'run_installer') as install, self.assertRaisesRegex(ValueError,'checksum|Dependencies'):
                 u.apply(self.paths,self.job)
             install.assert_not_called()
+
+    def test_four_part_release_uses_its_full_tag_and_asset_name(self):
+        self.job['version'] = '1.14.4.10'
+        with (mock.patch.object(u, '__version__', '1.14.4.9'),
+              mock.patch.object(u, 'download', side_effect=self.responses(self.archive())) as download,
+              mock.patch('nara.maintenance.backup'),
+              mock.patch.object(u, 'run_installer'),
+              mock.patch('nara.maintenance.panel_health', return_value={'version':self.job['version']})):
+            self.assertEqual(u.apply(self.paths, self.job)['version'], '1.14.4.10')
+            self.assertTrue(download.call_args_list[0].args[0].endswith('/tags/v1.14.4.10'))
+            self.assertTrue(download.call_args_list[2].args[0].endswith('/v1.14.4.10/nara-panel_1.14.4.10_source.tar.gz'))
 
     def test_commands_urls_downgrades_and_symlink_archives_are_rejected(self):
         for value in (u.__version__,'https://example.com','9.0.0;id','9.0.0/../../x','9.0.0-rc.1'):

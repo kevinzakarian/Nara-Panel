@@ -14,15 +14,16 @@ import traceback
 import urllib.request
 from .network import open_https
 from . import __version__
-from .updates import version
+from .updates import panel_version
 
 REPOSITORY = "kevinzakarian/Nara-Panel"
 
 
 def target(value):
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}", value):
+    requested = panel_version(value)
+    if requested is None:
         raise ValueError("Choose a published stable panel version")
-    if version(value) <= version(__version__):
+    if requested <= panel_version(__version__):
         raise ValueError("The panel is already at this version or newer")
     return value
 

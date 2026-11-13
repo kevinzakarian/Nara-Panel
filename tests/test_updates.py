@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 from nara import __version__
 from nara.store import Store
-from nara.updates import UpdateChecker, version, fetch, CORE_URL, PANEL_URL, MAX_RESPONSE
+from nara.updates import UpdateChecker, version, panel_version, fetch, CORE_URL, PANEL_URL, MAX_RESPONSE
 
 
 class UpdateTests(unittest.TestCase):
@@ -56,6 +56,21 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(version('v1.20.0'), (1,20,0))
         self.assertIsNone(version('1.15.0-rc.1'))
         self.assertIsNone(version('unknown'))
+        self.assertIsNone(version('1.14.4.1'))
+
+    def test_panel_revisions_compare_numerically_and_core_updates_stay_separate(self):
+        self.assertEqual(panel_version('1.14.4'), panel_version('1.14.4.0'))
+        self.assertGreater(panel_version('1.14.4.10'), panel_version('1.14.4.9'))
+        self.assertGreater(panel_version('1.14.5'), panel_version('1.14.4.99'))
+        for invalid in ('1.14.4.2-rc.1', '1.14.4.2.1', '1.14.4.2\n', '1.14.4.1234567'):
+            self.assertIsNone(panel_version(invalid))
+        with mock.patch('nara.updates.fetch', side_effect=[{'tag_name':'v1.14.4.2'}, {'tag_name':'v1.14.4'}]):
+            self.checker.check()
+        with mock.patch('nara.updates.__version__', '1.14.4.1'):
+            status = self.checker.status('sing-box version 1.14.4')
+        self.assertTrue(status['panel']['available'])
+        self.assertEqual(status['panel']['latest'], '1.14.4.2')
+        self.assertFalse(status['core']['available'])
 
     def test_release_payload_with_many_assets_is_accepted_but_response_is_bounded(self):
         response=mock.MagicMock()

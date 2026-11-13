@@ -373,48 +373,73 @@ class ShellManagerTests(unittest.TestCase):
         self.assertNotIn('install -y', result.stdout)
         self.assertNotIn('UNREACHABLE', result.stdout)
 
-    def test_menu_uses_controlling_tty_with_piped_stdin_and_recovers_bad_choice(self):
+    def shell_with_tty(self, script, terminal_input):
         import errno
         import pty
         import select
         import time
-        with tempfile.TemporaryDirectory() as directory:
-            script = "source scripts/manage.sh\nuname() { echo Linux; }\nid() { echo 0; }\napt-get() { printf 'APT %s\\n' \"$*\"; }\nsystemctl() { return 0; }\napp_dir=" + directory + "/not-installed\nmanager_main --lock-held"
-            pid, master = pty.fork()
-            if pid == 0:
-                os.environ['TERM'] = 'xterm-256color'
-                os.environ.pop('NO_COLOR', None)
-                descriptor = os.open(os.devnull, os.O_RDONLY)
-                os.dup2(descriptor, 0)
-                os.close(descriptor)
-                os.execvp('bash', ['bash', '-c', script])
-            output = b''
-            os.write(master, b'bad-choice\n\n0\n')
-            deadline = time.monotonic() + 10
-            try:
-                while time.monotonic() < deadline:
-                    ready, _, _ = select.select([master], [], [], .2)
-                    if ready:
-                        try:
-                            block = os.read(master, 65536)
-                        except OSError as exc:
-                            if exc.errno == errno.EIO:
-                                break
-                            raise
-                        if not block:
+        pid, master = pty.fork()
+        if pid == 0:
+            os.environ['TERM'] = 'xterm-256color'
+            os.environ.pop('NO_COLOR', None)
+            descriptor = os.open(os.devnull, os.O_RDONLY)
+            os.dup2(descriptor, 0)
+            os.close(descriptor)
+            os.execvp('bash', ['bash', '-c', 'source scripts/manage.sh\n' + script])
+        output = b''
+        os.write(master, terminal_input)
+        deadline = time.monotonic() + 10
+        try:
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([master], [], [], .2)
+                if ready:
+                    try:
+                        block = os.read(master, 65536)
+                    except OSError as exc:
+                        if exc.errno == errno.EIO:
                             break
-                        output += block
-                else:
-                    os.kill(pid, 15)
-                    self.fail('Menu did not exit: ' + repr(output))
-            finally:
-                os.close(master)
-                _, status = os.waitpid(pid, 0)
-            self.assertEqual(os.waitstatus_to_exitcode(status), 0, repr(output))
+                        raise
+                    if not block:
+                        break
+                    output += block
+            else:
+                os.kill(pid, 15)
+                self.fail('Manager did not exit: ' + repr(output))
+        finally:
+            os.close(master)
+            _, status = os.waitpid(pid, 0)
+        self.assertEqual(os.waitstatus_to_exitcode(status), 0, repr(output))
+        return output
+
+    def test_menu_uses_controlling_tty_with_piped_stdin_and_recovers_bad_choice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = "uname() { echo Linux; }\nid() { echo 0; }\napt-get() { printf 'APT %s\\n' \"$*\"; }\nsystemctl() { return 0; }\napp_dir=" + directory + "/not-installed\nmanager_main --lock-held"
+            output = self.shell_with_tty(script, b'bad-choice\n\n0\n')
             self.assertIn(b'\033[1m\033[36m  [INPUT]', output)
             self.assertIn(b'Choose a number from the menu', output)
             self.assertIn(b'Press Enter to return to the menu', output)
             self.assertLess(output.index(b'APT update'), output.index(b'Server manager'))
+
+    def test_direct_uninstall_uses_terminal_confirmation_and_skips_menu_and_apt(self):
+        script = """
+uname() { echo Linux; }
+id() { echo 0; }
+apt-get() { printf 'UNEXPECTED APT\n'; return 1; }
+systemctl() { return 0; }
+lock_manager() { printf 'MAINTENANCE LOCK\n'; }
+require_installed() { return 0; }
+manager_python() { printf 'REMOVAL %s\n' "$*"; }
+manager_main uninstall
+"""
+        for answer, removed in ((b'DELETE NARA DATA\n', True), (b'delete nara data\n', False), (b'\n', False)):
+            with self.subTest(answer=answer):
+                output = self.shell_with_tty(script, answer)
+                self.assertIn(b'Type DELETE NARA DATA to confirm:', output)
+                self.assertIn(b'/var/backups/nara-panel', output)
+                self.assertLess(output.index(b'MAINTENANCE LOCK'), output.index(b'Type DELETE NARA DATA to confirm:'))
+                self.assertNotIn(b'Choose an option', output)
+                self.assertNotIn(b'UNEXPECTED APT', output)
+                self.assertEqual(b'REMOVAL uninstall 2' in output, removed)
 
     def test_action_failure_does_not_fall_through_under_subshell_dispatch(self):
         # The manager deliberately does not use `if action` / `action || ...`,

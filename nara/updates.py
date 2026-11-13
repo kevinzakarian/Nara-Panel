@@ -10,11 +10,20 @@ from . import __version__
 PANEL_URL = "https://api.github.com/repos/kevinzakarian/Nara-Panel/releases/latest"
 CORE_URL = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 MAX_RESPONSE = 2_000_000  # Official releases can contain hundreds of assets.
+CORE_VERSION = r"[0-9]{1,6}(?:\.[0-9]{1,6}){2}"
+PANEL_VERSION = re.compile(CORE_VERSION + r"(?:\.[0-9]{1,6})?")
 
 
 def version(value):
-    match = re.search(r"(?:^|\s|v)(\d+)\.(\d+)\.(\d+)(?:$|\s)", str(value))
-    return tuple(map(int, match.groups())) if match else None
+    match = re.fullmatch(r"(?:sing-box version )?v?(" + CORE_VERSION + r")", str(value).strip())
+    return tuple(map(int, match[1].split("."))) if match else None
+
+
+def panel_version(value):
+    if not isinstance(value, str) or not PANEL_VERSION.fullmatch(value):
+        return None
+    parts = tuple(map(int, value.split(".")))
+    return parts if len(parts) == 4 else parts + (0,)
 
 
 def fetch(url):
@@ -66,10 +75,12 @@ class UpdateChecker:
                 previous = saved.get(key, {})
                 try:
                     data = fetch(url)
-                    latest = data.get("tag_name")
-                    if not version(latest) or data.get("prerelease") or data.get("draft"):
+                    tag = data.get("tag_name")
+                    latest = tag.removeprefix("v") if isinstance(tag, str) else ""
+                    parse = panel_version if key == "panel" else version
+                    if not parse(latest) or data.get("prerelease") or data.get("draft"):
                         raise ValueError("Invalid stable release")
-                    saved[key] = {"latest": latest.lstrip("v"), "checked_at": now, "error": ""}
+                    saved[key] = {"latest": latest, "checked_at": now, "error": ""}
                 except Exception:
                     # Keep last known version; network failure never means up to date.
                     saved[key] = {**previous, "error": "Could not check for updates. Sign in or reopen the panel to try again."}
@@ -84,7 +95,8 @@ class UpdateChecker:
         for key, installed, url in (("panel", __version__, "https://github.com/kevinzakarian/Nara-Panel"),
                                     ("core", installed_core, "https://github.com/SagerNet/sing-box/releases")):
             item = saved.get(key, {})
-            current, latest = version(installed), version(item.get("latest", ""))
+            parse = panel_version if key == "panel" else version
+            current, latest = parse(installed), parse(item.get("latest", ""))
             result[key] = {**item, "installed": installed, "available": bool(current and latest and latest > current),
                            "known": bool(current and latest), "url": url}
         return result

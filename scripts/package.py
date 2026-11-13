@@ -2,12 +2,18 @@
 from pathlib import Path
 import hashlib
 import json
+import re
 import tarfile
 
 root = Path(__file__).resolve().parent.parent
+release = json.loads((root / "release.json").read_text())
+version, core_version = release["version"], release["core_version"]
+if version != core_version and not re.fullmatch(re.escape(core_version) + r"\.[1-9][0-9]{0,5}", version):
+    raise SystemExit("Panel release version must match its core, optionally followed by a positive panel revision.")
+if json.loads((root / "core-release.json").read_text())["version"] != core_version:
+    raise SystemExit("The panel release and compatible core manifest must specify the same core version.")
 output = root / "dist"
 output.mkdir(exist_ok=True)
-version = json.loads((root / "release.json").read_text())["version"]
 archive = output / f"nara-panel_{version}_source.tar.gz"
 included = ["core-build.json", "core-release.json", ".github", "nara", "web", "tests", "scripts", "deploy", "screenshots", "README.md", "API.md", "SECURITY_REVIEW.md", "INSTALL.fa.md", "release.json",
             "package.json", "package-lock.json", "FEATURE_REVIEW.md", "VERIFICATION.md", "LICENSE", "requirements.txt", "Dockerfile", "compose.yaml", "install.sh", "update.sh", ".dockerignore", ".gitignore"]

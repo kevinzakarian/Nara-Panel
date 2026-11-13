@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interactive Linux lifecycle manager, also installed as /usr/local/bin/nara.
+# Linux lifecycle manager, available through /usr/local/bin/nara.
 set -euo pipefail
 manager_source=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "$manager_source/scripts/terminal.sh"
@@ -87,16 +87,22 @@ reset_two_factor() {
 }
 uninstall_panel() {
     require_installed
+    local mode=${1:-}
     ui_title 'Uninstall NARA'
     ui_warn 'This stops the panel, its core and its dedicated HTTPS proxy.'
-    printf '  1  Remove application; keep private data, entry settings and certificates\n  2  Remove application and permanently delete its data/settings/certificates\n  0  Cancel\n'
-    ui_warn 'Existing backup archives are retained in /var/backups/nara-panel for both options.'
-    ui_ask 'Choose an option [0]: ' || return
-    local mode=${REPLY:-0}
+    ui_warn 'Existing backup archives are retained in /var/backups/nara-panel.'
+    if [[ -z "$mode" ]]; then
+        printf '  1  Remove application; keep private data, entry settings and certificates\n  2  Remove application and permanently delete its data/settings/certificates\n  0  Cancel\n'
+        ui_ask 'Choose an option [0]:' || return
+        mode=${REPLY:-0}
+    fi
     [[ "$mode" != 0 ]] || return 0
     [[ "$mode" == 1 || "$mode" == 2 ]] || { ui_error 'Invalid choice.'; return 1; }
     local token=UNINSTALL
-    [[ "$mode" != 2 ]] || token='DELETE NARA DATA'
+    if [[ "$mode" == 2 ]]; then
+        ui_warn 'This permanently deletes the application, its data, entry settings and certificates.'
+        token='DELETE NARA DATA'
+    fi
     ui_ask "Type $token to confirm:" || return
     [[ "$REPLY" == "$token" ]] || { ui_warn 'Cancelled; nothing removed.'; return 0; }
     manager_python uninstall "$mode"
@@ -107,13 +113,24 @@ show_menu() {
     if [[ -f /var/run/reboot-required ]]; then ui_warn 'System updates require a reboot. Reboot manually when convenient.'; fi
     printf '\n  1   New installation\n  2   Upgrade panel only (keep current core)\n  3   Upgrade panel + download compatible core\n  4   Panel HTTPS / Certificate\n  5   Service status and entry URL\n  6   Restart panel service\n  7   Stop panel and core\n  8   Start panel service\n  9   Recent logs\n  10  Create a private backup\n  11  Change administrator password\n  12  Uninstall NARA\n  13  Reset administrator 2FA (server-local recovery)\n  0   Exit\n'
 }
+lock_manager() {
+    exec 9>/run/lock/nara-panel-manager.lock
+    flock -n 9 || { ui_error 'Another NARA maintenance session is running.'; return 1; }
+}
 manager_main() {
     [[ $(uname -s) == Linux && $(id -u) == 0 ]] || { ui_error 'Run as root on a Linux server.'; return 1; }
-    command -v apt-get >/dev/null && command -v systemctl >/dev/null || { ui_error 'Debian 12+ / Ubuntu 22.04+ with systemd is required.'; return 1; }
+    command -v systemctl >/dev/null || { ui_error 'systemd is required.'; return 1; }
     if ! { : </dev/tty; } 2>/dev/null; then ui_error 'An interactive SSH terminal is required.'; return 1; fi
+    if [[ ${1:-} == uninstall ]]; then
+        [[ "$#" == 1 ]] || { ui_error 'Usage: sudo nara uninstall'; return 1; }
+        lock_manager
+        uninstall_panel 2
+        return
+    fi
+    command -v apt-get >/dev/null || { ui_error 'Debian 12+ / Ubuntu 22.04+ with apt is required.'; return 1; }
     local prepared=0 locked=0 option
     for option in "$@"; do case "$option" in --system-prepared) prepared=1 ;; --lock-held) locked=1 ;; *) ui_error 'Unexpected argument.'; return 1 ;; esac; done
-    if [[ "$locked" == 0 ]]; then exec 9>/run/lock/nara-panel-manager.lock; flock -n 9 || { ui_error 'Another NARA maintenance session is running.'; return 1; }; fi
+    if [[ "$locked" == 0 ]]; then lock_manager; fi
     trap '[[ -z "$manager_work" ]] || rm -rf "$manager_work"' EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
