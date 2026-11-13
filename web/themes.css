@@ -67,3 +67,7 @@ main[data-page=dashboard]>.bottom-grid{grid-template-columns:minmax(0,1fr);margi
 .inbound-field-group h3{font-size:15px;margin-bottom:8px}
 .inbound-field-group .note{margin-bottom:8px}
 [data-inbound-panel] .schema-json{width:100%;margin-top:12px}
+
+.btn.danger{color:var(--red)}
+.btn.danger:hover{border-color:var(--red)}
+.subscription-import{display:block;color:var(--ink);text-decoration:underline;text-underline-offset:.15em}

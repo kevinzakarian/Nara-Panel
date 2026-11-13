@@ -273,22 +273,26 @@ class Worker:
 
     def run(self):
         from . import __version__
-        emit(self.store,'panel_started','Version '+__version__+' is ready. Your settings and client accounts are available.')
+        with self.store.workspace_activity() as allowed:
+            if allowed:
+                emit(self.store,'panel_started','Version '+__version__+' is ready. Your settings and client accounts are available.')
         while not self.runtime.shutdown.is_set():
             self.store.notification_wakeup.clear()
             delay=30
-            try:
-                now=time.time();config=settings(self.store)
-                if config['enabled']:
-                    if now-self.last_poll>=30:
-                        self.poll(now,config);self.last_poll=now
-                    self.deliver(config)
-                    with self.store.connect() as db:
-                        row=db.execute("SELECT MIN(available) FROM notifications WHERE status='queued'").fetchone()
-                    throttle=self.store.get('telegram_throttle',0)
-                    due=max(row[0],throttle) if row and row[0] is not None else now+30
-                    delay=max(1,min(30,due-time.time(),30-(time.time()-self.last_poll)))
-            except Exception:
-                # Keep raw exceptions, request URLs, keys and credentials out of logs.
-                self.store.set('telegram_delivery',{'at':time.time(),'ok':False,'message':'Notification worker could not complete this check'})
+            with self.store.workspace_activity() as allowed:
+                if allowed:
+                    try:
+                        now=time.time();config=settings(self.store)
+                        if config['enabled']:
+                            if now-self.last_poll>=30:
+                                self.poll(now,config);self.last_poll=now
+                            self.deliver(config)
+                            with self.store.connect() as db:
+                                row=db.execute("SELECT MIN(available) FROM notifications WHERE status='queued'").fetchone()
+                            throttle=self.store.get('telegram_throttle',0)
+                            due=max(row[0],throttle) if row and row[0] is not None else now+30
+                            delay=max(1,min(30,due-time.time(),30-(time.time()-self.last_poll)))
+                    except Exception:
+                        # Keep raw exceptions, request URLs, keys and credentials out of logs.
+                        self.store.set('telegram_delivery',{'at':time.time(),'ok':False,'message':'Notification worker could not complete this check'})
             self.store.notification_wakeup.wait(delay)

@@ -10,8 +10,8 @@ const fixture=JSON.parse(execFileSync(python,['-c','import json;from nara import
 function app(patch={}){
  const dom=new JSDOM('<div id="navigation"></div><div id="crumb"></div><div id="content"></div><dialog id="modal"><div id="modal-body"></div></dialog><div id="toasts"></div>',{runScripts:'outside-only',url:'http://localhost:10000/Test/#clients'}),w=dom.window;
  w.structuredClone=v=>JSON.parse(JSON.stringify(v));w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};w.HTMLDialogElement.prototype.close=function(){this.open=false;};
- const files=['vendor/qrcodegen.js','subscription-qr.js','dns-presets.js','core-editor.js','options.js','routing.js','dns-rules.js','account.js','integrations.js','clients.js','insights.js','transfer.js'];const main=fs.readFileSync('web/app.js','utf8');
- w.eval(files.map(file=>fs.readFileSync('web/'+file,'utf8')).join('\n')+'\n'+main.slice(0,main.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value,patch){state={...value.state,...patch};coreCatalog=value.catalog;optionSchema=value.options;CoreSchema.configure(coreCatalog);dashboard={panel_version:'0.10.0',core:{running:true,version:'sing-box version 1.14.3'},totals:{},events:[],metrics:{hostname:'fixture',platform:'Linux',uptime:null,cpu_percent:null,memory_total:null,memory_used:null,cpu_count:4,load:[0,0,0],disk_used:0,disk_total:1,samples:[]}};load=async()=>{};},editRouteRule,editDNSRule,editCoreRecord,editCoreOptions,renderSettings,renderNav,renderDashboard,renderClientTable,details,subscriptionPayload,subscriptionShare,importRouteDestination,editRouteDestination,renderEmail,renderClientBot,renderNotifications,renderAlertThresholds,routeMatchSummary,dnsMatchSummary,emailPreviewHTML,performPanelUpdate,saveSettings,saveEmailForm,editEmailTemplate,sendClientAccess,readRouteRule,readDNSRule,CoreSchema,loadReal:load,session(value){csrf=value},clearSession(){csrf='';state=null;dashboard=null},model(){return {state,dashboard}},telegram(value){telegramData=value},traffic(value){dashboard.traffic=value},access(value){accessSettings={...accessSettings,...value}},apiWith(fn){api=fn},delivery(value){clientDeliveryData=value},totals(value){dashboard.totals=value},saveWith(fn){saveRecord=fn},submit(){return modalSubmit(document.querySelector('#modal-form'))}};`);
+ const files=['themes.js','vendor/qrcodegen.js','subscription-qr.js','dns-presets.js','core-editor.js','options.js','routing.js','dns-rules.js','account.js','integrations.js','clients.js','insights.js','transfer.js'];const main=fs.readFileSync('web/app.js','utf8');
+ w.eval(files.map(file=>fs.readFileSync('web/'+file,'utf8')).join('\n')+'\n'+main.slice(0,main.indexOf("document.addEventListener('click'"))+`\nglobalThis.TestApp={setup(value,patch){state={...value.state,...patch};coreCatalog=value.catalog;optionSchema=value.options;CoreSchema.configure(coreCatalog);dashboard={panel_version:'0.10.0',core:{running:true,version:'sing-box version 1.14.3'},totals:{},events:[],metrics:{hostname:'fixture',platform:'Linux',uptime:null,cpu_percent:null,memory_total:null,memory_used:null,cpu_count:4,load:[0,0,0],disk_used:0,disk_total:1,samples:[]}};load=async()=>{};},editRouteRule,editDNSRule,editCoreRecord,editCoreOptions,renderSettings,handle,renderNav,renderDashboard,renderClientTable,details,subscriptionPayload,subscriptionShare,importRouteDestination,editRouteDestination,renderEmail,renderClientBot,renderNotifications,renderAlertThresholds,routeMatchSummary,dnsMatchSummary,emailPreviewHTML,performPanelUpdate,saveSettings,saveEmailForm,editEmailTemplate,sendClientAccess,readRouteRule,readDNSRule,CoreSchema,loadReal:load,session(value){csrf=value},clearSession(){csrf='';state=null;dashboard=null},model(){return {state,dashboard}},telegram(value){telegramData=value},traffic(value){dashboard.traffic=value},access(value){accessSettings={...accessSettings,...value}},apiWith(fn){api=fn},delivery(value){clientDeliveryData=value},totals(value){dashboard.totals=value},saveWith(fn){saveRecord=fn},submit(){return modalSubmit(document.querySelector('#modal-form'))}};`);
  w.TestApp.setup(JSON.parse(JSON.stringify(fixture)),patch);let saved;w.TestApp.saveWith(async(collection,record)=>saved=JSON.parse(JSON.stringify({collection,record})));
  const form=()=>w.document.querySelector('#modal-form');
  const choose=(name,value)=>{const element=w.document.querySelector(`input[name="${name}"][value="${value}"]`);element.checked=true;element.dispatchEvent(new w.Event('change',{bubbles:true}));};
@@ -52,3 +52,30 @@ test('private service page shows Connected and Configuration Link without exposi
 test('update progress follows real stage values and leaves a readable failure state',async()=>{const f=app();try{const old=f.w.setTimeout;f.w.setTimeout=(fn,ms)=>ms===1000?(queueMicrotask(fn),0):old(fn,ms);let step=0;f.w.TestApp.apiWith(async path=>path==='update-panel'?{id:'job'}:++step===1?{status:'running',progress:70,stage:'Installing the release and restarting the panel'}:{status:'failed',error:'Fixture install failure'});await f.w.TestApp.performPanelUpdate('9.0.0','proof');assert.equal(f.d.querySelector('#panel-update-bar').value,70);assert.equal(f.d.querySelector('#panel-update-progress').textContent,'Fixture install failure');}finally{f.close();}});
 
 test('source rule summaries show account names while stored matching keeps stable identities',()=>{const f=app({clients:[client]});try{const config={auth_user:['client-user1','standalone-name'],inbound:['proxy-in'],action:'route'};for(const text of [f.w.TestApp.routeMatchSummary(config),f.w.TestApp.dnsMatchSummary(config)]){assert.match(text,/Human display name/);assert.match(text,/standalone-name/);assert.doesNotMatch(text,/client-user1/);}f.w.TestApp.editRouteRule();assert.equal(f.d.querySelector('#match-client-search'),null);}finally{f.close();}});
+
+
+test('factory reset confirms explicitly, uses the current password and returns to sign-in',async()=>{
+ const f=app();try{
+  const {d,w}=f;
+  d.body.insertAdjacentHTML('beforeend','<main id="app"></main><div id="login" hidden><form id="login-form"><div id="login-2fa"><input name="code" required></div><p id="login-error"></p></form></div>');
+  d.querySelector('#content').innerHTML=w.TestApp.renderSettings();
+  const button=d.querySelector('[data-action=transfer-reset]');
+  assert.equal(button.type,'button');
+  let request;
+  w.TestApp.apiWith(async(path,body)=>{request={path,body};return {ok:true};});
+  await w.TestApp.handle(button.dataset.action,button);
+  assert.equal(request,undefined);
+  assert.match(f.form().textContent,/permanently deletes/);
+  assert.equal(f.form().elements.confirmation.required,true);
+  await assert.rejects(w.TestApp.submit(),/Type RESET NARA/);
+  f.form().elements.confirmation.value='RESET NARA';
+  f.form().elements.current.value='fixture-password';
+  await w.TestApp.submit();
+  assert.equal(request.path,'workspace/reset');
+  assert.equal(request.body.current,'fixture-password');
+  assert.equal(request.body.confirmation,'RESET NARA');
+  assert.equal(d.querySelector('#login').hidden,false);
+  assert.equal(d.querySelector('#login-2fa').hidden,true);
+  assert.equal(d.querySelector('#app').hidden,true);
+ }finally{f.close();}
+});

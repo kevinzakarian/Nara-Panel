@@ -44,17 +44,19 @@ for (const [label, subscriptionURL, expectedBase] of [
  test(`sharing UI encodes the independent subscription link: ${label}`, () => {
   context.publicURL=subscriptionURL;context.client={id:'demo-client',token};
   const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com/PrivatePanel/',subscription_url:publicURL}};subscriptionShare(client,'json')",context);
-  assert.equal(decode(markup),expectedBase+'/'+token);
+  assert.equal(decode(markup),expectedBase+'/'+token+'?format=json');
   assert.ok(!decode(markup).includes('PrivatePanel'));
   assert.ok(markup.includes('Download QR'));
  });
  test(`official app QR preserves independent URL and profile name: ${label}`,()=>{
   context.publicURL=subscriptionURL;context.client={id:'demo-client',token,name:'کاربر A & B / + #? 你好'};
   const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com/PrivatePanel/',subscription_url:publicURL}};subscriptionShare(client)",context);
-  assert.ok(markup.includes('Profile URL'));
-  assert.ok(markup.includes('>'+expectedBase+'/'+token+'</div>'));
+  assert.ok(!markup.includes('Profile URL'));
+  assert.ok(markup.includes('>sing-box://import-remote-profile?url='+expectedBase+'/'+token+'#'));
   assert.ok(markup.includes('Copy import link'));
-  const uri=new URL(decode(markup));
+  const payload=decode(markup);
+  assert.ok(markup.includes('href="'+payload+'"'));
+  const uri=new URL(payload);
   assert.equal(uri.protocol,'sing-box:');assert.equal(uri.host,'import-remote-profile');
   assert.equal(uri.searchParams.get('url'),expectedBase+'/'+token);
   assert.equal(decodeURIComponent(uri.hash.slice(1)),context.client.name);
@@ -66,7 +68,7 @@ test('panel root and rotated tokens never expose the panel URL in subscriptions'
  for(const suffix of ['old','rotated']){
   context.client={id:'demo-client',token:token+suffix};
   const markup=vm.runInContext("state={settings:{public_url:'https://panel.example.com'}};subscriptionShare(client,'json')",context);
-  assert.equal(decode(markup),'http://panel.example.com:10001/subscriptions/'+token+suffix);
+  assert.equal(decode(markup),'http://panel.example.com:10001/subscriptions/'+token+suffix+'?format=json');
  }
  context.location.href='https://panel.example.com/AbCdEfGh/#clients';
 });
@@ -75,7 +77,7 @@ for(const currentURL of ['http://203.0.113.42:10000/PrivatePanel/#clients','http
   context.location.href=currentURL;context.client={id:'demo-client',token};
   try{
    const markup=vm.runInContext("state={settings:{public_url:''}};subscriptionShare(client,'json')",context);
-   assert.equal(decode(markup),'http://'+new URL(currentURL).hostname+':10001/subscriptions/'+token);
+   assert.equal(decode(markup),'http://'+new URL(currentURL).hostname+':10001/subscriptions/'+token+'?format=json');
    assert.ok(!decode(markup).includes('PrivatePanel'));
   }finally{context.location.href='https://panel.example.com/AbCdEfGh/#clients';}
  });
@@ -112,7 +114,7 @@ for(const succeeds of [true,false]) {
    querySelector(){return {open:true,append(node){assert.equal(node,input);}};},
    execCommand(command){
     assert.equal(command,'copy');assert.ok(selected);
-    assert.equal(input.value,'http://203.0.113.42:10001/subscriptions/'+token);
+    assert.equal(input.value,'http://203.0.113.42:10001/subscriptions/'+token+'?format=json');
     return succeeds;
    }
   };
@@ -180,7 +182,7 @@ test('changing format replaces only the sharing section and restores selector fo
  context.document={querySelector(){return {querySelector(){return {focus(){focused=true;}};}};}};
  try {
   context.changeSubscriptionFormat(selector);
-  assert.equal(decode(markup),'http://panel.example.com:10001/subscriptions/'+token);
+  assert.equal(decode(markup),'http://panel.example.com:10001/subscriptions/'+token+'?format=json');
   assert.ok(markup.includes('value="json" selected'));
   assert.ok(focused);
  } finally {delete context.document;}

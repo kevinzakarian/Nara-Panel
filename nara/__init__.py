@@ -1,2 +1,2 @@
 """NARA server panel."""
-__version__ = "0.14.4"
+__version__ = "0.14.5"

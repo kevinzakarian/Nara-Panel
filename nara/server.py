@@ -177,7 +177,10 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
 
         def do_GET(self):
             try:
-                self.get()
+                with store.workspace_activity() as allowed:
+                    if not allowed:
+                        return self.send(503, {"error": "The panel is resetting. Try again shortly."})
+                    self.get()
             except (ValueError, KeyError, TypeError) as exc:
                 self.send(400, {"error": str(exc) if isinstance(exc, ValueError) else "Invalid data structure"})
             except (BrokenPipeError, ConnectionResetError):
@@ -195,7 +198,10 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                 path = self.route_path()
                 if role != 'panel' or not path or not path.startswith('/api/v1/'):
                     return self.send(404, {'error': 'Not found'})
-                return self.rest_api(self.command, path[len('/api/v1/'):])
+                with store.workspace_activity() as allowed:
+                    if not allowed:
+                        return self.send(503, {"error": "The panel is resetting. Try again shortly."})
+                    return self.rest_api(self.command, path[len('/api/v1/'):])
             except ValueError as exc:
                 return self.send(400, {'error': str(exc)})
 
@@ -342,6 +348,14 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             self.send(404, {"error": "Not found"})
 
         def do_POST(self):
+            if role == "panel" and self.route_path() == "/api/workspace/reset":
+                return self.post_request()
+            with store.workspace_activity() as allowed:
+                if not allowed:
+                    return self.send(503, {"error": "The workspace is busy. Wait a moment and try again."})
+                return self.post_request()
+
+        def post_request(self):
             if role != "panel":
                 try:
                     self.same_origin()
@@ -409,6 +423,26 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if not self.auth(mutation=True):
                 return
             data = self.json_body()
+            if path == "/api/workspace/reset":
+                require(data.get("confirmation") == "RESET NARA", "Type RESET NARA to confirm")
+                with store.workspace_activity(reset=True) as allowed:
+                    if not allowed:
+                        return self.send(503, {"error": "The workspace is busy. Wait a moment and try again."})
+                    if not self.auth(mutation=True):
+                        return
+                    require(not migrations.lock.locked() and not (store.directory / "access-request.json").exists(),
+                            "Wait for maintenance or migration to finish before resetting")
+                    with account_lock:
+                        admin = store.get("admin")
+                        accounts.verify(store, admin, data, self.cookie_token())
+                        revision = runtime.reset_workspace(admin)
+                    with throttle_lock:
+                        login_attempts.clear()
+                    with api_limit_lock:
+                        api_limits.clear()
+                cookie = "nara_session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=" + cookie_path
+                return self.send(200, {"ok": True, "revision": revision},
+                                 headers={"Set-Cookie": cookie + ("; Secure" if secure_cookie else "")})
             if path in ('/api/client-delivery','/api/client-delivery/test'):
                 with account_lock:accounts.verify(store,store.get('admin'),data,self.cookie_token())
                 return self.send(200,client_delivery.test_smtp(store) if path.endswith('/test') else client_delivery.save(store,data.get('settings')))

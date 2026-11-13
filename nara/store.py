@@ -24,6 +24,9 @@ class Store:
     def __init__(self, directory):
         self.notification_wakeup = threading.Event()
         self.client_delivery_wakeup = threading.Event()
+        self._workspace_lock = threading.Lock()
+        self._workspace_operations = 0
+        self._workspace_resetting = False
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.directory.chmod(0o700)
@@ -76,6 +79,35 @@ class Store:
     def set(self, key, value):
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO kv VALUES(?,?)", (key, json.dumps(value)))
+
+    @contextlib.contextmanager
+    def workspace_activity(self, reset=False):
+        """Allow concurrent normal operations and an exclusive workspace reset."""
+        with self._workspace_lock:
+            allowed = not self._workspace_resetting and (not reset or self._workspace_operations == 0)
+            if allowed:
+                self._workspace_operations += 1
+                self._workspace_resetting = reset
+        try:
+            yield allowed
+        finally:
+            if allowed:
+                with self._workspace_lock:
+                    self._workspace_operations -= 1
+                    if reset:
+                        self._workspace_resetting = False
+
+    def reset_workspace(self, state, admin):
+        with self.connect() as db:
+            db.execute("PRAGMA secure_delete=ON")
+            for table in ("kv", "traffic", "traffic_history", "sessions", "api_keys", "notifications",
+                          "client_messages", "client_bot_pairs", "client_bot_bindings", "audit"):
+                db.execute(f"DELETE FROM {table}")
+            db.executemany("INSERT INTO kv VALUES(?,?)", (
+                (key, json.dumps(value)) for key, value in
+                {"state": state, "admin": admin, "autostart": False, "managed_lifetime": 0}.items()
+            ))
+            db.execute("INSERT INTO audit(at,message) VALUES(?,?)", (time.time(), "Workspace reset to factory defaults"))
 
     def commit_configuration(self, state, save=False, reset_client=None):
         """Publish the active model, optional edits, and a usage reset together."""

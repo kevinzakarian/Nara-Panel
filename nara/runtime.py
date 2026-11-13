@@ -13,7 +13,7 @@ import time
 import tempfile
 from pathlib import Path
 from . import stats, presence
-from .config import build_config, client_config, eligible, require, validate
+from .config import build_config, client_config, eligible, initial_state, require, validate
 
 
 def atomic_write(path, content):
@@ -332,6 +332,45 @@ class Runtime:
             self.store.audit("Configuration applied and core started")
             return {"running": True, "inbounds": len(config["inbounds"]), "restarted": True}
 
+    def reset_workspace(self, admin):
+        with self.lock:
+            state = initial_state()
+            previous = self.store.get("state")
+            state["revision"] = previous["revision"] + 1
+            state["settings"]["public_url"] = previous["settings"]["public_url"]
+            identity = {key: admin[key] for key in ("username", "password")}
+            generation = self.generation
+            was_running = self.running
+            removed = Path(tempfile.mkdtemp(prefix=".reset-", dir=self.store.directory))
+            moved = []
+            created_run_dir = False
+            try:
+                self.stop(collect=False)
+                for path in (self.run_dir, self.store.directory / "core.log",
+                             self.store.directory / "backups", self.store.directory / "access-result.json"):
+                    if path.exists() or path.is_symlink():
+                        path.rename(removed / path.name)
+                        moved.append(path)
+                self.run_dir.mkdir(mode=0o700)
+                created_run_dir = True
+                self.store.reset_workspace(state, identity)
+            except Exception:
+                if created_run_dir:
+                    self.run_dir.rmdir()
+                for path in reversed(moved):
+                    (removed / path.name).rename(path)
+                removed.rmdir()
+                if was_running and generation and not self.running:
+                    self.launch(generation)
+                raise
+            self.active = self.generation = self._eligible_clients = None
+            self.started = self.last_stats = None
+            self.error = self.stats_error = self.presence_error = ""
+            self.failures = 0
+            self.baseline = {}
+            shutil.rmtree(removed, ignore_errors=True)
+            return state["revision"]
+
     def status(self):
         return {"running": self.running, "version": self.version(), "tags": self.build_info()["tags"], "started": self.started,
                 "active_revision": self.active.get("revision") if self.active else None,
@@ -339,18 +378,19 @@ class Runtime:
                 "error": self.error, "stats_port": self.stats_port}
 
     def worker(self):
-        if self.store.get("autostart") and self.active:
-            try:
-                self.apply(self.active)
-            except Exception as exc:
-                self.error = str(exc)
+        with self.lock:
+            if self.store.get("autostart") and self.active:
+                try:
+                    self.apply(self.active)
+                except Exception as exc:
+                    self.error = str(exc)
         while not self.shutdown.wait(5):
-            try:
-                from .traffic import sample_host
-                sample_host(self.store)
-            except (OSError, ValueError, sqlite3.Error):
-                pass
             with self.lock:
+                try:
+                    from .traffic import sample_host
+                    sample_host(self.store)
+                except (OSError, ValueError, sqlite3.Error):
+                    pass
                 if not self.running:
                     if self.process is not None:
                         self.error = "Core exited unexpectedly; review settings and start it again"

@@ -7,6 +7,25 @@ function createPortableBackup(title='Download private backup',after=null){
   if(after)await after(result);
  },'Download backup',`<div class="hint-box">Portable backup: <span class="mono">/var/lib/nara-panel/backups/</span><br>Full pre-update server backup: <span class="mono">/var/backups/nara-panel/</span>${after?'<br>Download the backup first, then confirm the update after saving it. Your browser may ask where to save the file.':''}</div>`);
 }
+function resetWorkspace(){
+ notificationVerification('Reset panel to defaults','This permanently deletes the panel’s current data and disconnects all clients.',async form=>{
+  const values=Object.fromEntries(new FormData(form));
+  if(values.confirmation!=='RESET NARA')throw Error('Type RESET NARA to confirm.');
+  try{await api('workspace/reset',values);}
+  catch(error){if(error.uncertain)throw Error('The reset result could not be confirmed. Reload the panel and sign in before trying again.');throw error;}
+  NaraTheme.apply({},true);
+  $('#login-2fa').hidden=true;
+  $('#login-form').elements.code.required=false;
+  $('#login-form').elements.code.value='';
+  $('#login-error').textContent='';
+  showLogin();
+  toast('Panel reset. Sign in again with your existing username and password.');
+ },'Reset panel',`<div class="hint-box error"><p><b>Kept</b> · Panel address, HTTPS, administrator username and password.</p><p><b>Deleted</b> · Clients, proxy settings, inbound certificates, traffic history, integrations, API keys, browser sessions and two-factor authentication. Private portable copies on this panel are also deleted.</p><p>Copies previously downloaded or saved as full server backups remain available.</p></div>${field('Type RESET NARA to confirm','confirmation','','text','','class="section-gap"')}`);
+ const form=$('#modal-form');
+ form.elements.confirmation.required=true;
+ form.elements.confirmation.autocomplete='off';
+ $('[type=submit]',form).classList.replace('primary','danger');
+}
 function restorePortableBackup(){
  openModal('Restore a portable backup','Your destination administrator and addresses are retained.',`<label>Private NARA backup (.json)<input type="file" name="backup_file" accept=".json,application/json" required></label><p class="note">Up to 12 MiB. Proxy settings and client quota counters are replaced after validation. A private rollback copy is saved first.</p>`,async form=>{
   const file=form.elements.backup_file.files[0];if(!file||file.size>12*1024*1024)throw Error('Choose a NARA JSON backup up to 12 MiB.');
@@ -42,4 +61,5 @@ async function handleTransfer(action){
  if(action==='transfer-restore')return restorePortableBackup();
  if(action==='transfer-migrate')return migrationWizard();
  if(action==='transfer-migration-status')return showMigrationStatus();
+ if(action==='transfer-reset')return resetWorkspace();
 }

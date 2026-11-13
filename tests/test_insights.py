@@ -91,7 +91,7 @@ class InsightsTests(unittest.TestCase):
         state=example_state();state['clients'][0]['name']='=BAD, "test"';state['settings']['server_address']='203.0.113.9';self.store.set('state',state)
         data=client_links.export(self.store,Access(self.store.directory,{'NARA_SUB_PATH':'/Links','NARA_SUB_PORT':'10001'}),'http://panel.example/Panel/')
         rows=list(csv.reader(io.StringIO(data)));self.assertEqual(len(rows),2);self.assertEqual(len(rows[1]),6)
-        self.assertTrue(rows[1][0].startswith("'="));self.assertIn('sing-box://import-remote-profile?',rows[1][1]);self.assertIn('http://panel.example:10001/Links/',rows[1][2]);self.assertIn('vless://',rows[1][3])
+        self.assertTrue(rows[1][0].startswith("'="));self.assertIn('sing-box://import-remote-profile?',rows[1][1]);self.assertIn('http://panel.example:10001/Links/',rows[1][2]);self.assertTrue(rows[1][2].endswith('?format=json'));self.assertIn('vless://',rows[1][3])
     def test_csv_includes_exhausted_disabled_and_unassigned_accounts(self):
         state=example_state();state['clients'][0].update(enabled=False,quota_bytes=1,expires_at='2020-01-01T00:00:00Z');self.store.set('state',state)
         self.store.add_traffic([('user1','upload',999)])

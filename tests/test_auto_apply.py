@@ -33,6 +33,29 @@ class AutoApplyTests(unittest.TestCase):
         self.runtime.apply(state, save=True)
         return state
 
+    def test_factory_reset_stops_listener_and_rolls_back_if_database_write_fails(self):
+        state = self.seed()
+        address = ("127.0.0.1", state["inbounds"][0]["port"])
+        generation = self.runtime.generation
+        request = {"confirmation": "RESET NARA", "current": "test-password-123"}
+        with mock.patch.object(self.store, "reset_workspace", side_effect=OSError("fixture storage failure")):
+            self.assertEqual(self.request("/api/workspace/reset", request)[0], 500)
+        self.assertEqual(self.store.get("state"), state)
+        self.assertTrue(self.runtime.running)
+        self.assertTrue(generation.exists())
+        with socket.create_connection(address, timeout=1):
+            pass
+        status, result, _ = self.request("/api/workspace/reset", request)
+        self.assertEqual(status, 200, result)
+        self.assertFalse(self.runtime.running)
+        self.assertIsNone(self.runtime.active)
+        self.assertFalse(generation.exists())
+        self.assertFalse(self.store.get("state")["tls"])
+        with self.assertRaises(ConnectionRefusedError):
+            socket.create_connection(address, timeout=1)
+        self.login()
+        self.assertEqual(self.request("/api/dashboard")[0], 200)
+
     def test_unified_settings_validate_traffic_before_saving_any_preferences(self):
         from nara import traffic
         state=self.seed();policy={**traffic.DEFAULTS,'monthly_bytes':2048*1024**3,'reset_day':18}

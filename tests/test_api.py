@@ -9,8 +9,9 @@ import ssl
 from unittest import mock
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from nara import api_keys, security
 from nara.runtime import Runtime
-from nara.config import validate
+from nara.config import initial_state, validate
 from nara.server import make_handler
 from nara.store import Store, password_hash
 from tests.helpers import example_state
@@ -79,6 +80,58 @@ class APITests(unittest.TestCase):
 
     def test_api_requires_login(self):
         self.assertEqual(self.request("/api/state")[0], 401)
+
+    def test_factory_reset_requires_reauthentication_and_preserves_panel_login(self):
+        prefix = self.web_path
+        path = "/api/workspace/reset"
+        request = {"confirmation": "RESET NARA", "current": "test-password-123"}
+        self.assertEqual(self.request(path, request)[0], 401)
+        self.login()
+        admin = self.store.get("admin")
+        codes, hashes = security.recovery_codes()
+        self.store.set("admin", {**admin, "totp_secret": security.totp_secret(), "recovery_hashes": hashes, "avatar": "volt"})
+        state = example_state()
+        state["settings"].update(public_url="https://panel.example.com" + prefix, subscription_url="https://sub.example.com/Old")
+        self.runtime.apply(state, save=True)
+        client = state["clients"][0]
+        self.assertEqual(self.subscription_request(client["token"] + "?format=json")[0], 200)
+        key = api_keys.create(self.store, {"name": "old", "scopes": ["read"]})["key"]
+        self.store.add_traffic([(client["id"], "upload", 123)])
+        self.store.set("telegram", {"bot_token": "fixture"})
+        self.store.set("client_delivery", {"smtp_password": "fixture"})
+        backups = self.store.directory / "backups"
+        backups.mkdir()
+        (backups / "nara-fixture.json").write_text("private")
+        (self.runtime.run_dir / "old.key").write_text("private")
+        other_session, _ = self.store.new_session()
+        self.assertEqual(self.request(path, request, {"X-CSRF-Token": "invalid"})[0], 403)
+        self.assertEqual(self.request(path, {**request, "confirmation": "cancel"})[0], 400)
+        self.assertEqual(self.request(path, request)[0], 400)
+        self.assertEqual(self.store.get("state"), state)
+        with self.store.workspace_activity() as allowed:
+            self.assertTrue(allowed)
+            self.assertEqual(self.request(path, {**request, "code": codes[0]})[0], 503)
+        status, result, headers = self.request(path, {**request, "code": codes[0]})
+        self.assertEqual(status, 200, result)
+        self.assertIn("Max-Age=0", headers["Set-Cookie"])
+        self.assertIn("Path=" + prefix + "/", headers["Set-Cookie"])
+        expected = initial_state()
+        expected["revision"] = state["revision"] + 1
+        expected["settings"]["public_url"] = state["settings"]["public_url"]
+        self.assertEqual(self.store.get("state"), expected)
+        self.assertEqual(self.store.get("admin"), admin)
+        self.assertFalse(self.store.get("autostart"))
+        self.assertEqual(self.store.totals(), {})
+        self.assertIsNone(self.store.session(other_session))
+        self.assertIsNone(api_keys.authenticate(self.store, "Bearer " + key))
+        self.assertIsNone(self.store.get("telegram"))
+        self.assertIsNone(self.store.get("client_delivery"))
+        self.assertFalse(backups.exists())
+        self.assertEqual(list(self.runtime.run_dir.iterdir()), [])
+        self.assertEqual(self.subscription_request(client["token"])[0], 404)
+        self.assertEqual(self.request("/api/state")[0], 401)
+        self.login()
+        self.assertEqual(self.request("/api/state")[0], 200)
         self.assertEqual(self.request("/api/health")[0], 200)
 
     def test_login_cookie_and_csrf(self):

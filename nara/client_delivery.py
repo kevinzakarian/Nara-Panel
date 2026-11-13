@@ -386,14 +386,16 @@ class Worker:
     def run(self):
         while not self.runtime.shutdown.is_set():
             self.store.client_delivery_wakeup.clear();active=False
-            try:
-                value=settings(self.store);active=value['smtp_enabled'] or value['bot_enabled']
-                if active:self.deliver()
-                if value['bot_enabled'] and time.monotonic()-self.last_poll>=self.poll_wait:
-                    self.last_poll=time.monotonic()
-                    try:self.poll();self.poll_wait=10
-                    except ValueError:self.bot_status(False);self.poll_wait=min(300,self.poll_wait*2)
-            except Exception:
-                # Never include SMTP credentials, connection URLs or message text in logs.
-                pass
+            with self.store.workspace_activity() as allowed:
+                if allowed:
+                    try:
+                        value=settings(self.store);active=value['smtp_enabled'] or value['bot_enabled']
+                        if active:self.deliver()
+                        if value['bot_enabled'] and time.monotonic()-self.last_poll>=self.poll_wait:
+                            self.last_poll=time.monotonic()
+                            try:self.poll();self.poll_wait=10
+                            except ValueError:self.bot_status(False);self.poll_wait=min(300,self.poll_wait*2)
+                    except Exception:
+                        # Never include SMTP credentials, connection URLs or message text in logs.
+                        pass
             self.store.client_delivery_wakeup.wait(3 if active else 60)

@@ -43,7 +43,9 @@ class UpdateChecker:
             self.running = True
         def run():
             try:
-                self.check()
+                with self.store.workspace_activity() as allowed:
+                    if allowed:
+                        self.check()
             finally:
                 with self.lock:
                     self.running = False

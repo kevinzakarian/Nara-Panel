@@ -28,9 +28,9 @@ def data(state, access, current, client, totals):
     used=upload+download;quota=client.get('quota_bytes',0);end=expiry(client.get('expires_at'))
     now=time.time()
     status='Disabled' if not client.get('enabled',True) else 'Expired' if end and end<=now else 'Traffic limit reached' if quota and used>=quota else 'Active'
-    json_url=client_links.subscription_base(state,access,current)+'/'+quote(client['token'],safe='')
-    links=[{'name':'Sing-box app · remote profile','protocol':'subscription','url':'sing-box://import-remote-profile?url='+quote(json_url,safe='')+'#'+quote(client['name'],safe='')},
-           {'name':'JSON subscription URL','protocol':'json','url':json_url},*client_links.links(state,client,totals)]
+    profile_url=client_links.subscription_base(state,access,current)+'/'+quote(client['token'],safe='')
+    links=[{'name':'Sing-box app · remote profile','protocol':'subscription','url':'sing-box://import-remote-profile?url='+quote(profile_url,safe='')+'#'+quote(client['name'],safe='')},
+           {'name':'JSON subscription URL','protocol':'json','url':profile_url+'?format=json'},*client_links.links(state,client,totals)]
     return {'name':client['name'],'status':status,'enabled':eligible(client,totals),'upload':upload,'download':download,'used':used,
             'quota':quota,'remaining':max(0,quota-used) if quota else None,'expires_at':end or None,
             'remaining_seconds':max(0,end-now) if end else None,'links':links,'portal_url':url(state,access,current,client)}

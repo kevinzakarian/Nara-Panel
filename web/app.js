@@ -288,6 +288,7 @@ function renderSettings() {
   <section class="card"><div class="card-header"><h2>Advanced workspace</h2></div><div class="card-body"><label class="check-field"><input type="checkbox" name="core_features_enabled" ${checked(state.settings.core_features_enabled!==false)}>Show Core features in navigation</label><p class="note">Access endpoints, system services, certificates and core diagnostics. Hiding the menu keeps existing configurations active.</p></div></section>
   <section class="card"><div class="card-header"><div><span class="section-kicker">SERVICE</span><h2>Sing-box core</h2></div>${badge(dashboard.core?.running?'Running':'Stopped',dashboard.core?.running?'green':'red')}</div><div class="card-body preference-fields"><p class="note">Validate your configuration or control the core process.</p><div class="service-buttons">${btn('Validate','check','tls')}${btn('Start core','apply','power','primary')}${btn('Stop core','stop','power','danger')}</div><p class="note">Start the core after an intentional stop or unexpected exit.</p></div></section>
   ${panelUpdateCard()}
+  <section class="card settings-section"><div class="card-header"><h2>Reset panel</h2></div><div class="card-body preference-fields"><p class="note">Restore factory defaults and erase workspace data. Keep your panel address and sign-in credentials.</p><div>${btn('Reset panel','transfer-reset','trash','danger')}</div></div></section>
   <section class="card"><div class="card-header"><h2>Workspace preferences</h2></div><div class="card-body shortcut-list"><a href="#account">${icon('account')}<span><b>Administrator</b><small>Profile, password and 2FA</small></span><span>→</span></a><a href="#notifications">${icon('notifications')}<span><b>Notifications</b><small>Telegram connection and schedule</small></span><span>→</span></a><a href="#about">${icon('about')}<span><b>About NARA</b><small>Installation details and help</small></span><span>→</span></a></div></section>
  </aside></div></form>`;
 }
@@ -689,7 +690,7 @@ function subscriptionURL(client) {
 const clientShareData=new Map();
 function subscriptionPayload(client,format='sing-box') {
  const url=subscriptionURL(client);
- if(format==='json')return url;
+ if(format==='json')return url+'?format=json';
  const access=clientShareData.get(client.id);if(format==='portal'&&access?.portal_url)return access.portal_url;
  if(format.startsWith('config:')){const link=access?.links?.[Number(format.slice(7))];if(link)return link.url;}
  if(format==='sing-box')return 'sing-box://import-remote-profile?url='+encodeURIComponent(url)+'#'+encodeURIComponent(client.name||'Nara');
@@ -700,9 +701,10 @@ function subscriptionShare(client,format='sing-box') {
  let qr,qrReady=false;
  try { qr=`<div class="subscription-qr">${NaraQR.svg(sub)}</div>`;qrReady=true; }
  catch { qr='<p class="note">This link is too long for a QR code. Copy the subscription link below.</p>'; }
- const source=format==='sing-box'?`<div class="subscription-source"><b>Profile URL</b><div class="subscription-url" dir="ltr">${e(subscriptionURL(client))}</div><b>Sing-box import link</b></div>`:'';
- const help=format==='portal'?'Give this private page to the account owner to view their usage, service time, all connection links and QR codes.':format.startsWith('config:')?'Individual proxy configuration. For settings that do not fit a connection URI, use the full JSON subscription.':format==='sing-box'?'Scan in the official Sing-box app or copy the import link. The profile URL below is the readable source; the import link and QR encode it as required.':'For clients that accept a Sing-box JSON subscription URL. You can also paste this URL into a remote profile.';
- return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>Connection format<select class="subscription-format" aria-label="Connection format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option>${(clientShareData.get(client.id)?.links||[]).map((link,index)=>`<option value="config:${index}" ${format==='config:'+index?'selected':''}>Configuration Link${(clientShareData.get(client.id)?.links||[]).length>1?' · '+e(link.name):''}</option>`).join('')}${clientShareData.get(client.id)?.portal_url?`<option value="portal" ${format==='portal'?'selected':''}>Private service page · all links & usage</option>`:''}</select></label><p class="note">${help}</p>${source}<div class="subscription-url" dir="ltr">${e(sub)}</div><div class="inline-buttons">${btn(format==='sing-box'?'Copy import link':'Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
+ const display=format==='sing-box'?'sing-box://import-remote-profile?url='+subscriptionURL(client)+'#'+(client.name||'Nara'):sub;
+ const link=format==='sing-box'?`<a class="subscription-url subscription-import" dir="ltr" href="${e(sub)}">${e(display)}</a>`:`<div class="subscription-url" dir="ltr">${e(display)}</div>`;
+ const help=format==='portal'?'Give this private page to the account owner to view their usage, service time, all connection links and QR codes.':format.startsWith('config:')?'Individual proxy configuration. For settings that do not fit a connection URI, use the full JSON subscription.':format==='sing-box'?'Scan with the official Sing-box app or use Copy import link to copy it in the app’s format.':'For clients that accept a Sing-box JSON subscription URL. You can also paste this URL into a remote profile.';
+ return `<div class="subscription-share" data-client-id="${e(client.id)}">${qr}<div class="subscription-access"><label>Connection format<select class="subscription-format" aria-label="Connection format"><option value="sing-box"${format==='sing-box'?' selected':''}>Sing-box app (recommended)</option><option value="json"${format==='json'?' selected':''}>JSON subscription URL</option>${(clientShareData.get(client.id)?.links||[]).map((link,index)=>`<option value="config:${index}" ${format==='config:'+index?'selected':''}>Configuration Link${(clientShareData.get(client.id)?.links||[]).length>1?' · '+e(link.name):''}</option>`).join('')}${clientShareData.get(client.id)?.portal_url?`<option value="portal" ${format==='portal'?'selected':''}>Private service page · all links & usage</option>`:''}</select></label><p class="note">${help}</p>${link}<div class="inline-buttons">${btn(format==='sing-box'?'Copy import link':'Copy link','copy-sub','code','sm',`data-id="${e(client.id)}"`)}${qrReady?btn('Download QR','download-qr','qr','sm',`data-id="${e(client.id)}"`):''}${btn('Download config','export','download','sm',`data-id="${e(client.id)}"`)}</div></div></div>`;
 }
 function changeSubscriptionFormat(target) {
  const share=target.closest('.subscription-share'),client=state.clients.find(c=>c.id===share.dataset.clientId);
@@ -725,7 +727,7 @@ async function copySubscription(client,format='sing-box') {
  let copied=false;
  try {input.select();copied=Boolean(document.execCommand?.('copy'));} catch {}
  finally {input.remove();previous?.focus();}
- if(!copied)throw new Error('Could not copy automatically. Select and copy the subscription link shown above.');
+ if(!copied)throw new Error(format==='sing-box'?'Could not copy automatically. Scan the QR code to import the profile.':'Could not copy automatically. Select and copy the subscription link shown above.');
  toast('Subscription link copied.');
 }
 function subscriptionQR(id) {

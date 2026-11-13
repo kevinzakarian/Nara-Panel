@@ -95,5 +95,5 @@ def export(store, access, current, ids=None):
         remote='sing-box://import-remote-profile?url='+quote(url,safe='')+'#'+quote(client['name'],safe='')
         remaining=round(max(0,expiry(client.get('expires_at'))-time.time())/(30*86400),3) if client.get('expires_at') else 'Unlimited'
         configs='\n'.join(item['url'] for item in links(state,client,totals))
-        writer.writerow([safe_cell(x) for x in (client['name'],remote,url,configs,remaining,client.get('quota_bytes',0)/1024**3)])
+        writer.writerow([safe_cell(x) for x in (client['name'],remote,url+'?format=json',configs,remaining,client.get('quota_bytes',0)/1024**3)])
     return output.getvalue()

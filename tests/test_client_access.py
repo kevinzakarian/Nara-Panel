@@ -42,6 +42,7 @@ class ClientAccessTests(unittest.TestCase):
         self.client.update(quota_bytes=25,email='private@example.com',telegram_id='@private')
         result=self.model();self.assertEqual(result['remaining'],0);self.assertEqual(result['status'],'Traffic limit reached');self.assertFalse(result['enabled'])
         self.assertTrue(result['links']);self.assertNotIn('email',result);self.assertNotIn('telegram_id',result)
+        self.assertTrue(result['links'][1]['url'].endswith('?format=json'))
         self.assertNotIn('private_key',json.dumps(result));self.assertNotIn('bot_token',json.dumps(result))
     def test_contact_validation_rejects_header_injection_and_invalid_telegram_identifiers(self):
         for value in ['a@example.com\r\nBcc: b@example.com','a@example.com\n','invalid','a..b@example.com']:
