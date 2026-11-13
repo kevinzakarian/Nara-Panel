@@ -20,6 +20,7 @@ from urllib.parse import urlsplit, parse_qs
 from . import __version__, options
 from .config import COLLECTIONS, build_config, client_config, eligible, host, normalize_dns_record, require, validate
 from . import native, warp, security, clients, notifications, accounts, api_keys, rest, traffic, portable, client_links, migration, destination_import, client_portal, client_delivery
+from . import core_update
 from .updates import UpdateChecker
 from .runtime import Metrics, atomic_write
 from .store import password_matches
@@ -313,7 +314,10 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
                     with runtime.lock:
                         status = runtime.status()
                         return self.send(200, {"metrics": metrics.read(store.directory), "core": status,
-                                               "panel_version": __version__, "updates": updates.status(status["version"]),
+                                               "panel_version": __version__, "updates": {
+                                                   **updates.status(status["version"]),
+                                                   "compatible_core": core_update.status(status["version"], access.info()["managed"], runtime.binary),
+                                               },
                                                "totals": store.totals(), "traffic": traffic.summary(store), "events": store.events()})
                 if path == "/api/config":
                     return self.send(200, build_config(store.get("state"), store.totals(), runtime.run_dir, runtime.stats_port))
@@ -460,13 +464,16 @@ def make_handler(store, runtime, web_dir, secure_cookie=False, web_path="", role
             if path == "/api/check-updates":
                 started = updates.start()
                 return self.send(200, {"started": started, "updates": updates.status(runtime.version())})
-            if path == "/api/update-panel":
+            if path in ("/api/update-panel", "/api/update-core"):
                 require(migrations.status().get("status")!="running","Wait for the server migration to finish before updating")
-                prepared=store.get('prepared_update_backup',{})
-                require(data.get('confirmed') is True and isinstance(data.get('backup_proof'),str) and hmac.compare_digest(prepared.get('proof',''),data['backup_proof']) and prepared.get('expires',0)>time.time() and prepared.get('session')==hashlib.sha256(self.cookie_token().encode()).hexdigest(),'Confirm the update and download a fresh private backup first')
-                result = access.request_update(data.get('version'))
-                store.set('prepared_update_backup',{})
-                store.audit('Panel update requested: ' + result['version'])
+                with account_lock:
+                    prepared=store.get('prepared_update_backup',{})
+                    require(data.get('confirmed') is True and isinstance(data.get('backup_proof'),str) and hmac.compare_digest(prepared.get('proof',''),data['backup_proof']) and prepared.get('expires',0)>time.time() and prepared.get('session')==hashlib.sha256(self.cookie_token().encode()).hexdigest(),'Confirm the update and download a fresh private backup first')
+                    is_core = path.endswith('update-core')
+                    result = (access.request_core_update(data.get('version'), runtime.version(), runtime.binary)
+                              if is_core else access.request_update(data.get('version')))
+                    store.set('prepared_update_backup',{})
+                    store.audit(('Core' if is_core else 'Panel') + ' update requested: ' + result['version'])
                 return self.send(200, result)
             if path == "/api/access":
                 require(isinstance(data.get("current_url"), str), "Panel address is required")

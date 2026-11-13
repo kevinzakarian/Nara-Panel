@@ -74,7 +74,16 @@ def controller(source):
     shutil.copyfile(source/'requirements.txt',APP/'requirements.txt')
     (APP/'bin').mkdir()
     core=APP/'bin/sing-box'
-    core.write_text('#!/bin/sh\n[ "$1" = version ] && { echo "sing-box version 1.14.3"; exit 0; }\nexit 1\n')
+    # Start with the same verified runtime and an older reported version.
+    # This exercises the upgrade gate without depending on a legacy binary.
+    with contextlib.ExitStack() as stack:
+        import tempfile
+        work=Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        run(sys.executable,str(source/'scripts/fetch-core.py'),'--output',str(work/'core'))
+        for item in (work/'core').iterdir():
+            shutil.copy2(item,APP/'bin'/item.name)
+    core.rename(APP/'bin/sing-box-fixture')
+    core.write_text('#!/bin/sh\n[ "$1" = version ] && { echo "sing-box version 1.14.2"; exit 0; }\nexec /opt/nara-panel/bin/sing-box-fixture "$@"\n')
     core.chmod(0o755);core_hash=hashlib.sha256(core.read_bytes()).hexdigest()
     DATA.mkdir(mode=0o700);os.chown(DATA,identity.pw_uid,identity.pw_gid)
     # Initialize and keep a WAL writer open under the real service identity.
@@ -106,7 +115,7 @@ def controller(source):
         (FIXTURE/'blocked').mkdir();shim=FIXTURE/'blocked/runuser'
         shim.write_text('#!/bin/sh\necho "runuser: cannot set user id: Operation not permitted" >&2\nexit 1\n');shim.chmod(0o755)
         with tarfile.open(FIXTURE/'release.tar.gz','w:gz') as archive:
-            for name in ('nara','web','scripts','deploy','update.sh','requirements.txt','release.json'):
+            for name in ('nara','web','scripts','deploy','update.sh','requirements.txt','release.json','core-release.json'):
                 path=source/name
                 for file in sorted(path.rglob('*')) if path.is_dir() else [path]:
                     if not file.is_file() or '__pycache__' in file.parts:continue
@@ -152,6 +161,44 @@ def controller(source):
         assert all(file.stat().st_uid==identity.pw_uid for file in DATA.glob('panel.sqlite3*'))
         os.write(control,b'w');expect(b'writable\n')
         print('Real systemd upgrade passed: blocked runuser, live owner WAL backup, API job, restart, version, account/core preservation and subsequent database writes.')
+        # Start a real core, then force only the post-switch startup to fail.
+        # The next retry uses the unmodified, publicly pinned download.
+        state=request('state')
+        request('apply',{'revision':state['revision']},csrf)
+        fetcher=APP/'scripts/fetch-core.py'
+        original=fetcher.read_text()
+        fetcher.write_text(original.replace('        fetch(manifest,args.arch or architecture(),args.output)',
+            '''        binary=fetch(manifest,args.arch or architecture(),args.output)
+        binary.rename(binary.with_name("sing-box-real"))
+        binary.write_text('#!/bin/sh\\n[ "$1" != run ] || exit 1\\nexec "$(dirname "$0")/sing-box-real" "$@"\\n')
+        binary.chmod(0o755)'''))
+        def upgrade_core():
+            overview=request('dashboard')
+            assert overview['updates']['compatible_core']['available']
+            proof=request('backup/create',{'current':'fixture-only-password'},csrf)['proof']
+            job=request('update-core',{'version':'1.14.3','confirmed':True,'backup_proof':proof},csrf)
+            deadline=time.monotonic()+150
+            while time.monotonic()<deadline:
+                time.sleep(.5)
+                try:result=request('access-status/'+job['id'])
+                except (OSError,ValueError):continue
+                if result['status'] in ('complete','failed'):return result
+            raise AssertionError('Core update did not finish')
+        try:
+            failed=upgrade_core()
+            assert failed['status']=='failed' and 'previous core was restored' in failed['error'],failed
+            assert hashlib.sha256(core.read_bytes()).hexdigest()==core_hash
+            assert request('health')['core_running']
+        finally:
+            fetcher.write_text(original)
+        completed=upgrade_core()
+        assert completed['status']=='complete',completed
+        assert request('health')['core_running']
+        overview=request('dashboard')
+        assert overview['core']['version']=='sing-box version 1.14.3'
+        assert not overview['updates']['compatible_core']['available']
+        assert request('state')['revision']==state['revision']
+        print('Real systemd core update passed: checked live config, failed startup rollback, successful retry, unchanged settings and working traffic API.')
     finally:
         os.close(control);os.close(responses);os.waitpid(writer,0)
         subprocess.run(['systemctl','stop','nara-panel-access.path','nara-panel-access.service','nara-panel.service'],check=False)

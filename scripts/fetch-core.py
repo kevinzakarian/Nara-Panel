@@ -103,7 +103,7 @@ def fetch(manifest, arch, destination):
     with tempfile.TemporaryDirectory(prefix='nara-download-') as directory:
         archive=Path(directory)/'core.tar.gz'
         print(f'[NARA] Downloading verified Sing-box {manifest["version"]} for Linux {arch}...',flush=True)
-        subprocess.run(['curl','--proto','=https','--proto-redir','=https','--tlsv1.2','--fail','--location','--retry','3','--retry-all-errors','--connect-timeout','15','--max-time','600','--max-filesize',str(MAX_ARCHIVE),url,'--output',str(archive)],check=True)
+        subprocess.run(['curl','--proto','=https','--proto-redir','=https','--tlsv1.2','--fail','--location','--retry','3','--retry-all-errors','--connect-timeout','15','--max-time','600','--max-filesize',str(MAX_ARCHIVE),url,'--output',str(archive)],check=True,timeout=630)
         binary=unpack(archive,destination,manifest,arch)
         print('[NARA] Core checksums and architecture verified. No Go toolchain is needed.',flush=True)
         return binary
@@ -113,9 +113,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',required=True,type=Path,help='New staging directory')
     parser.add_argument('--arch',choices=['amd64','arm64'])
+    parser.add_argument('--manifest', type=Path, default=Path(__file__).resolve().parent.parent/'core-release.json')
     args=parser.parse_args()
     try:
-        manifest=json.loads((Path(__file__).resolve().parent.parent/'core-release.json').read_text())
+        manifest=json.loads(args.manifest.read_text())
         fetch(manifest,args.arch or architecture(),args.output)
     except (OSError,ValueError,KeyError,TypeError,tarfile.TarError,subprocess.SubprocessError) as exc:
         parser.exit(1,'NARA core download failed: '+str(exc)+'\nThe existing installation was kept. Retry the download; compilation is never used as a fallback.\n')

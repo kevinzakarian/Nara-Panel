@@ -48,6 +48,16 @@ test('overview combines installed versions and update results in one escaped sur
  f.w.TestApp.keyData({});const root=f.w.document.querySelector('#content');root.innerHTML=f.w.TestApp.updateBanner();assert.equal(root.querySelectorAll('.release-overview').length,1);assert.equal(root.querySelectorAll('.release-component').length,2);assert.match(root.textContent,/0.8.0/);assert.match(root.textContent,/1.14.3/);assert.match(root.textContent,/Not checked yet/);assert.equal(root.querySelector('.version-strip'),null);
 }finally{f.close()}});
 
+test('Update core is enabled only for the panel-approved target, independently of upstream versions',()=>{const f=app();try{
+ const root=f.w.document.querySelector('#content');
+ const paint=value=>{f.w.TestApp.updateData(value);root.innerHTML=f.w.TestApp.updateBanner();return root.querySelector('[data-action="update-core"]');};
+ const upstream={available:true,latest:'99.0.0',url:'https://github.com/SagerNet/sing-box/releases'};
+ assert.equal(paint({core:upstream,compatible_core:{managed:true,available:false,version:'1.14.3'}}).disabled,true);
+ const button=paint({core:upstream,compatible_core:{managed:true,available:true,version:'1.14.3'}});
+ assert.equal(button.disabled,false);assert.equal(button.dataset.id,'1.14.3');
+ assert.equal(paint({compatible_core:{managed:false,available:false}}).disabled,true);
+}finally{f.close()}});
+
 
 test('silent refresh loads only metrics until the active revision changes',async()=>{const f=app();try{
  const dashboard=revision=>({panel_version:'0.8.1',core:{running:true,active_revision:revision},totals:{},events:[],metrics:{hostname:'fixture',platform:'Linux',cpu_count:1,cpu_percent:null,uptime:null,load:[0,0,0],disk_total:1,disk_used:0,samples:[]}});

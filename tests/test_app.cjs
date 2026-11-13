@@ -178,6 +178,10 @@ test('silent overview refresh updates values and keeps focused links and reorder
   const initial={metrics:{hostname:'demo',platform:'Linux',cpu_count:1,cpu_percent:15,uptime:null,load:[0,0,0],disk_total:1,disk_used:0,samples:[]},core:{running:true,active_revision:model.revision},panel_version:'0.14.0',totals:{one:{upload:10,download:0}},events:[]};
   w.RefreshFixture.setup(model,initial);
   const document=w.document,nav=document.querySelector('#navigation a[href="#clients"]');
+  const health=document.querySelector('.overview-health');
+  assert.match(health.textContent,/Server resources/);
+  assert.match(health.textContent,/Service information/);
+  assert.equal(health.nextElementSibling.className,'overview-traffic');
   const chart=document.querySelector('.network-chart');
   const button=document.querySelector('[data-action="client-details"][data-id="one"]');
   nav.focus();

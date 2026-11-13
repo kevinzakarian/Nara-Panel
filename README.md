@@ -166,7 +166,7 @@ Version **0.3.0** adds the complete 1.14.3 configuration workspace, routing, ful
 
 Version **0.3.1** adds the interactive server manager, highlighted terminal input, system-package preparation, protected backups/removal and panel HTTPS setup. The short app-only `update.sh` command remains available; it does not perform the system-package upgrade or open the menu.
 
-The panel reports available core updates; core upgrades use the installation manager. Panel updates can be installed explicitly with the one-click control on managed Linux installations. Forms target 1.14.3. Review compatibility before independently moving the core to another version.
+Overview reports upstream core releases for reference. On managed Linux installations, **Update core** is enabled only if the installed panel pins a verified compatible build newer than the currently installed core. The installation manager remains available for repairing or reinstalling the compatible build.
 
 ## Server information
 
@@ -410,6 +410,13 @@ NARA record metadata (display label and enabled state) is separate from native c
 
 ![Native DNS action form](screenshots/dns-rule-0.13.0.png)
 
+
+## 0.14.2 · Compatible core updates and compact Overview
+
+- **Update core** is separate from **Update panel**. Sign in to a managed Linux installation, open **Overview**, and follow the backup and confirmation steps when a compatible upgrade is offered.
+- The broker verifies the pinned core archive and checks both saved and active settings as the panel user before stopping anything. The core and its matching library are switched together. If startup fails, the previous bundle is restored and checked.
+- This release keeps Sing-box **1.14.3** as its compatible target. Installations already on 1.14.3 or newer cannot use this button to downgrade or reinstall. A newer upstream release alone does not enable it.
+- Server resources and Service information are now side by side above the traffic charts on wider screens and stack on narrow screens.
 
 ## 0.14.1 · Faster entry and clearer configuration errors
 

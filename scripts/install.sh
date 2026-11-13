@@ -108,6 +108,7 @@ for item in nara web scripts; do
     cp -R "$source_dir/$item" /opt/nara-panel/
 done
 chmod -R u=rwX,go=rX /opt/nara-panel/nara /opt/nara-panel/web /opt/nara-panel/scripts
+install -m 644 "$source_dir/core-release.json" /opt/nara-panel/nara/core-release.json
 install -m 755 "$source_dir/scripts/nara-command.sh" /usr/local/bin/nara
 cp "$source_dir/requirements.txt" /opt/nara-panel/
 install -m 755 "$core" /opt/nara-panel/bin/sing-box

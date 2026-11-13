@@ -97,6 +97,14 @@ class Access:
         self.queue(job)
         return {'id':job['id'], 'version':job['version']}
 
+    def request_core_update(self, version, installed, binary):
+        from . import core_update
+        status = core_update.status(installed, self.info()['managed'], binary)
+        target = core_update.require_target(version, installed, status['version'])
+        job = {'id': secrets.token_urlsafe(24), 'operation': 'update-core', 'version': target, 'created_at': time.time()}
+        self.queue(job)
+        return {'id': job['id'], 'version': target}
+
     def queue(self, job):
         descriptor, temporary = tempfile.mkstemp(prefix='.access-', dir=self.directory)
         try:
@@ -245,6 +253,9 @@ def process_request(paths, blocked_error=None):
         time.sleep(max(0, .5 - max(0, time.time() - job['created_at'])))
         if job.get('operation') == 'update-panel':
             from .panel_update import apply
+            values = apply(paths, job)
+        elif job.get('operation') == 'update-core':
+            from .core_update import apply
             values = apply(paths, job)
         else:
             values = apply_job(paths, job)

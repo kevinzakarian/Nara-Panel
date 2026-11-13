@@ -123,7 +123,7 @@ def backup(paths):
                     archive.add(staging / "panel.sqlite3", arcname="var/lib/nara-panel/panel.sqlite3")
                 if paths.data.exists():
                     for item in paths.data.iterdir():
-                        if item.name not in ("panel.sqlite3", "panel.sqlite3-wal", "panel.sqlite3-shm", "panel.lock", "core.log", "runtime", "access-request.json", "access-result.json") and not item.name.startswith((".access-", ".migration-")):
+                        if item.name not in ("panel.sqlite3", "panel.sqlite3-wal", "panel.sqlite3-shm", "panel.lock", "core.log", "runtime", "access-request.json", "access-result.json") and not item.name.startswith((".access-", ".migration-", "core-check-")):
                             archive.add(item, arcname="var/lib/nara-panel/" + item.name)
                 for item in (paths.env, paths.https, paths.https_data,
                              paths.unit,

@@ -88,6 +88,7 @@ for item in nara web scripts; do
     rm -rf "$app_dir/$item"
     cp -R "$source_dir/$item" "$app_dir/"
 done
+install -m 644 "$source_dir/core-release.json" "$app_dir/nara/core-release.json"
 install -m 755 "$source_dir/scripts/nara-command.sh" /usr/local/bin/nara
 chmod -R u=rwX,go=rX "$app_dir/nara" "$app_dir/web"
 (cd "$app_dir" && .venv/bin/python -m nara.access migrate)
