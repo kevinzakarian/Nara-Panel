@@ -269,6 +269,26 @@ class AutoApplyTests(unittest.TestCase):
         self.assertEqual(self.store.get("active"), state)
         self.assertTrue(self.runtime.running)
 
+    def test_real_core_rejection_explains_missing_certificate_and_keeps_listener(self):
+        state = self.seed()
+        pid = self.runtime.process.pid
+        generation = self.runtime.generation
+        config = {'type': 'trojan', 'tag': 'incomplete-tls', 'listen': '127.0.0.1',
+                  'listen_port': free_port(), 'users': [{'password': 'fixture-secret-value'}],
+                  'tls': {'enabled': True}}
+        status, result, _ = self.save(state, 'inbounds', {'mode': 'native', 'config': config})
+        self.assertEqual(status, 400, result)
+        self.assertIn('TLS Certificate is missing', result['error'])
+        self.assertIn('Previous settings were kept', result['error'])
+        self.assertNotIn('fixture-secret-value', result['error'])
+        self.assertIn('missing certificate', (self.store.directory / 'core.log').read_text())
+        self.assertEqual(self.runtime.process.pid, pid)
+        self.assertEqual(self.runtime.generation, generation)
+        self.assertEqual(self.runtime.active, state)
+        self.assertEqual(self.store.get('state'), state)
+        with socket.create_connection(('127.0.0.1', state['inbounds'][0]['port']), timeout=1):
+            pass
+
     def test_metadata_and_token_changes_do_not_restart_core(self):
         state = self.seed()
         process = self.runtime.process.pid

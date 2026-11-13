@@ -2,6 +2,7 @@ import copy
 import json
 import ipaddress
 import os
+import re
 import shutil
 import secrets
 import sqlite3
@@ -26,6 +27,47 @@ def atomic_write(path, content):
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+_CORE_SECTIONS = {
+    'dns server': 'DNS resolver', 'dns.servers': 'DNS resolver',
+    'dns rule': 'DNS rule', 'dns.rules': 'DNS rule',
+    'inbound': 'Inbound', 'inbounds': 'Inbound',
+    'outbound': 'Outbound', 'outbounds': 'Outbound',
+    'route rule': 'Traffic rule', 'route.rules': 'Traffic rule',
+}
+
+
+def core_validation_hint(stderr):
+    """Translate known core diagnostics without returning any logged values."""
+    for line in reversed(stderr[-16000:].splitlines()):
+        line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+        fatal = re.match(r'^FATAL\[\d+\]\s+(.+)', line)
+        if not fatal:
+            continue
+        detail = fatal[1]
+        initialized = re.fullmatch(r'initialize ([a-z. ]+)\[([0-9]{1,5})\]: (.+)', detail)
+        if initialized and initialized[1] in _CORE_SECTIONS:
+            section, index, reason = initialized.groups()
+            location = f'{_CORE_SECTIONS[section]} #{int(index) + 1}: '
+            if section == 'dns server' and reason == 'missing domain resolver for domain server address':
+                return location + 'Server is a hostname. Set Domain Resolver to a separate bootstrap resolver, or use an IP address in Server.'
+            if reason == 'TLS required':
+                return location + 'Enable TLS for this protocol. For an inbound, select or configure a TLS certificate.'
+            if reason == 'missing certificate':
+                return location + 'TLS Certificate is missing. Select a certificate profile or provide the certificate in the TLS settings.'
+            if reason == 'missing key':
+                return location + 'TLS Private key is missing. Provide the private key that belongs to the certificate.'
+            if reason.startswith('parse x509 key pair:'):
+                return location + 'TLS Certificate and Private key must be valid PEM and form a matching pair.'
+            if section == 'outbound' and reason.startswith('unknown socks version:'):
+                return location + 'Choose a supported SOCKS version in Version.'
+            if section in ('inbound', 'outbound') and reason.startswith('unknown method:'):
+                return location + 'Choose a supported encryption method in Method.'
+        if detail.startswith('decode config ') and ': json: unknown field ' in detail:
+            return 'A configuration field is unsupported by this Sing-box version. Review the advanced options or JSON for the record you edited.'
+        break
+    return ''
 
 
 class Runtime:
@@ -177,7 +219,11 @@ class Runtime:
             # Diagnostics may contain credentials. Keep them in the private directory.
             with open(self.store.directory / "core.log", "a", opener=lambda p, f: os.open(p, f, 0o600)) as log:
                 log.write("Validation failed (" + label + "):\n" + checked.stderr[-16000:] + "\n")
-            raise ValueError("Sing-box rejected the " + label + " settings. Previous settings were kept; details are in the private core.log.")
+            hint = core_validation_hint(checked.stderr)
+            message = "Sing-box rejected the " + label + " settings. "
+            if hint:
+                message += hint + " "
+            raise ValueError(message + "Previous settings were kept; details are in the private core.log.")
         path.unlink(missing_ok=True)
 
     def launch(self, generation):

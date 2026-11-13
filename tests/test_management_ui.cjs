@@ -50,8 +50,9 @@ test('overview combines installed versions and update results in one escaped sur
 
 
 test('silent refresh loads only metrics until the active revision changes',async()=>{const f=app();try{
- let calls=[];f.w.TestApp.apiWith(async path=>{calls.push(path);return {panel_version:'0.8.1',core:{running:true,active_revision:0}}});await f.w.TestApp.loadReal(true);assert.deepEqual(calls,['dashboard']);
- calls=[];f.w.TestApp.apiWith(async path=>{calls.push(path);return path==='dashboard'?{panel_version:'0.8.1',core:{running:true,active_revision:1}}:{...fixture.state,revision:1}});await f.w.TestApp.loadReal(true);assert.deepEqual(calls,['dashboard','state']);
+ const dashboard=revision=>({panel_version:'0.8.1',core:{running:true,active_revision:revision},totals:{},events:[],metrics:{hostname:'fixture',platform:'Linux',cpu_count:1,cpu_percent:null,uptime:null,load:[0,0,0],disk_total:1,disk_used:0,samples:[]}});
+ let calls=[];f.w.TestApp.apiWith(async path=>{calls.push(path);return dashboard(0)});await f.w.TestApp.loadReal(true);assert.deepEqual(calls,['dashboard']);
+ calls=[];f.w.TestApp.apiWith(async path=>{calls.push(path);return path==='dashboard'?dashboard(1):{...fixture.state,revision:1}});await f.w.TestApp.loadReal(true);assert.deepEqual(calls,['dashboard','state']);
 }finally{f.close()}});
 
 

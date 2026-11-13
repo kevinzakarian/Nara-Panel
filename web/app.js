@@ -89,7 +89,7 @@ async function api(path, body, options={}) {
 function toast(message, error=false) { const node=document.createElement('div');node.className='toast'+(error?' error':'');node.textContent=message;$('#toasts').append(node);setTimeout(()=>node.remove(),6500); }
 function showLogin() { state=null;dashboard=null;$('#login').hidden=false;$('#app').hidden=true;csrf='';if($('#modal')?.open)$('#modal').close();$('#modal-body')?.replaceChildren();modalSubmit=null;apiKeyData=null;telegramData=null;clientDeliveryData=null;clientShareData.clear();selectedClients.clear();updateAdminUI({username:'Administrator',avatar:'ember',two_factor:false,recovery_remaining:0}); }
 async function boot() {
- try { const session=await api('session');csrf=session.csrf;[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema'),api('check-updates',{}).catch(()=>null)]);CoreSchema.configure(coreCatalog);updateAdminUI(session);await load();$('#login').hidden=true;$('#app').hidden=false; }
+ try { const session=await api('session');csrf=session.csrf;[optionSchema,coreCatalog]=await Promise.all([api('options'),api('core-schema')]);CoreSchema.configure(coreCatalog);updateAdminUI(session);await load();if(csrf!==session.csrf)return;$('#login').hidden=true;$('#app').hidden=false;void api('check-updates',{}).catch(()=>{}); }
  catch(err) { showLogin();if (err.message !== 'Please sign in first') $('#login-error').textContent=err.message; }
 }
 async function load(silent=false) {
@@ -108,13 +108,31 @@ async function load(silent=false) {
   $('.core-label .status-dot').classList.toggle('on',dashboard.core.running);
   $('.core-label .status-dot').classList.toggle('off',!dashboard.core.running);
   $('#updated').textContent='Updated at '+time(Date.now()/1000)+' · '+panelTimeZone();
-  if (!silent || page==='dashboard') render(); else if(page==='clients'){renderNav();refreshClientConnections();}else renderNav();
+  if(!silent)render();
+  else{
+   renderNav();
+   if(page==='dashboard')refreshDashboard();
+   else if(page==='clients')refreshClientConnections();
+  }
  })();
  try{await refreshPending;}finally{refreshPending=null;}
 }
 
 function renderNav() {
- $('#navigation').innerHTML=Object.keys(titles).filter(key=>key!=='core'||state.settings.core_features_enabled!==false).map(key=>`<a href="#${key}" class="nav-item ${page===key?'active':''}" ${page===key?'aria-current="page"':''}>${icon(key)}<span>${titles[key]}</span>${['inbounds','clients','tls','dns'].includes(key)?`<span class="nav-count">${state[key==='dns'?'dns_servers':key].length}</span>`:''}</a>`).join('');
+ const nav=$('#navigation');
+ const linkFor=key=>`<a href="#${key}" class="nav-item" data-nav="${key}">${icon(key)}<span>${titles[key]}</span>${['inbounds','clients','tls','dns'].includes(key)?'<span class="nav-count"></span>':''}</a>`;
+ if(!nav.firstElementChild)nav.innerHTML=Object.keys(titles).filter(key=>key!=='core').map(linkFor).join('');
+ const core=$('[data-nav="core"]',nav);
+ if(state.settings.core_features_enabled===false)core?.remove();
+ else if(!core)$('[data-nav="settings"]',nav).insertAdjacentHTML('beforebegin',linkFor('core'));
+ for(const link of nav.children){
+  const key=link.dataset.nav,active=page===key;
+  link.classList.toggle('active',active);
+  if(active){if(!link.hasAttribute('aria-current'))link.setAttribute('aria-current','page');}
+  else if(link.hasAttribute('aria-current'))link.removeAttribute('aria-current');
+  const count=$('.nav-count',link);
+  if(count){const next=String(state[key==='dns'?'dns_servers':key].length);if(count.textContent!==next)count.textContent=next;}
+ }
 }
 function heading(actions='') {return `<div class="page-heading"><div><h1>${titles[page]}</h1><p>${descriptions[page]}</p></div><div class="heading-actions">${actions}</div></div>`;}
 function pendingBanner() {return `<div class="auto-apply-note">${icon('check')}<span>Auto apply is on. Saving validates and activates changes. Connection changes may briefly reconnect clients.</span></div>`;}
@@ -128,6 +146,41 @@ function render() {
  $('#content').dataset.page=page;renderNav();$('#crumb').textContent=titles[page];document.title=titles[page]+' · NARA';
  $('#content').innerHTML=({dashboard:renderDashboard,inbounds:renderInbounds,tls:renderTLS,dns:renderDNS,routing:renderRouting,core:renderCore,clients:renderClients,settings:renderSettings,account:renderAccount,notifications:renderNotifications,email:renderEmail,api:renderAPI,about:renderAbout}[page])();
 }
+// The overview is read-only except for links and buttons. Reuse its nodes so
+// refreshes keep keyboard focus, text selection and horizontal scroll positions.
+function refreshDashboard(){
+ const root=$('#content'),template=document.createElement('template'),focused=document.activeElement;
+ template.innerHTML=renderDashboard();
+ syncOverviewChildren(root,template.content);
+ if(focused&&root.contains(focused)&&document.activeElement!==focused)focused.focus({preventScroll:true});
+}
+function overviewKey(node){
+ if(node.nodeType!==1)return '';
+ return node.getAttribute('data-overview')||node.getAttribute('data-overview-client')||node.getAttribute('data-action')||node.getAttribute('href')||'';
+}
+function syncOverviewChildren(parent,next){
+ const keyed=new Map([...parent.childNodes].filter(node=>overviewKey(node)).map(node=>[overviewKey(node),node]));
+ if(keyed.size){
+  const wantedKeys=new Set([...next.childNodes].map(overviewKey));
+  for(const [key,node] of keyed)if(!wantedKeys.has(key)){node.remove();keyed.delete(key);}
+ }
+ let cursor=parent.firstChild;
+ for(const wanted of next.childNodes){
+  const key=overviewKey(wanted),current=key?keyed.get(key):cursor;
+  if(!current||current.nodeName!==wanted.nodeName||current.namespaceURI!==wanted.namespaceURI||overviewKey(current)!==key){
+   parent.insertBefore(wanted.cloneNode(true),cursor);
+   continue;
+  }
+  if(current!==cursor)parent.insertBefore(current,cursor);
+  cursor=current.nextSibling;
+  if(current.isEqualNode(wanted))continue;
+  if(current.nodeType!==1){current.nodeValue=wanted.nodeValue;continue;}
+  for(const {name} of current.attributes)if(!wanted.hasAttribute(name))current.removeAttribute(name);
+  for(const {name,value} of wanted.attributes)if(current.getAttribute(name)!==value)current.setAttribute(name,value);
+  syncOverviewChildren(current,wanted);
+ }
+ while(cursor){const stale=cursor;cursor=cursor.nextSibling;stale.remove();}
+}
 function metric(label,value,symbol,color,foot) {return `<article class="stat-card"><div class="stat-head">${label}<span class="stat-symbol ${color}">${icon(symbol)}</span></div><div class="stat-number">${value}</div><div class="stat-foot">${foot}</div></article>`;}
 function renderDashboard() {
  const m=dashboard.metrics,c=dashboard.core,active=state.clients.filter(x=>status(x)[0]==='Active').length;
@@ -135,14 +188,14 @@ function renderDashboard() {
  const runningInbounds=state.inbounds.filter(i=>i.enabled&&(i.mode==='native'||state.clients.some(x=>status(x)[0]==='Active'&&x.inbound_ids.includes(i.id)))).length;
  return heading(btn('Server config','config','code')+(dashboard.core.running?'':btn('Start core','apply','power','primary')))+
  updateBanner()+(typeof trafficAllowanceCard==='function'?trafficAllowanceCard(true):'')+
- (c.error?`<div class="hint-box error">${e(c.error)}</div>`:'')+
- (c.stats_error?`<div class="hint-box error">${e(c.stats_error)}</div>`:'')+
- `<div class="stats-grid">${metric('Active clients',num(active)+` <small>/ ${num(state.clients.length)}</small>`,'clients','green',`<b>${num(state.clients.length-active)}</b> disabled or limited accounts`)}${metric('Managed client traffic',e(size(allUsage)),'traffic','blue',c.last_stats?'Last collected: '+time(c.last_stats):'Waiting for core traffic statistics')}${metric('Ready inbounds',num(runningInbounds)+` <small>/ ${num(state.inbounds.length)}</small>`,'inbounds','purple',c.running?'Enabled with eligible clients':'Save settings or start the core')}${metric('Server uptime',m.uptime===null?'—':`${Math.floor(m.uptime/86400)} <small>days</small> ${Math.floor(m.uptime%86400/3600)} <small>hours</small>`,'clock','',e(m.hostname))}</div>`+
- `<div class="grid-2"><section class="card"><div class="card-header"><div><h2>Server traffic</h2><p>All network interfaces, excluding loopback</p></div>${badge('Last 10 minutes')}</div><div class="chart-totals"><div><span><i class="legend-dot"></i>Download</span><b>${e(size(m.rx_rate))}<small> /s</small></b></div><div><span><i class="legend-dot green"></i>Upload</span><b>${e(size(m.tx_rate))}<small> /s</small></b></div></div><div class="network-chart">${chart(m.samples)}</div></section>
+ (c.error?`<div class="hint-box error" data-overview="core-error">${e(c.error)}</div>`:'')+
+ (c.stats_error?`<div class="hint-box error" data-overview="stats-error">${e(c.stats_error)}</div>`:'')+
+ `<div class="stats-grid" data-overview="metrics">${metric('Active clients',num(active)+` <small>/ ${num(state.clients.length)}</small>`,'clients','green',`<b>${num(state.clients.length-active)}</b> disabled or limited accounts`)}${metric('Managed client traffic',e(size(allUsage)),'traffic','blue',c.last_stats?'Last collected: '+time(c.last_stats):'Waiting for core traffic statistics')}${metric('Ready inbounds',num(runningInbounds)+` <small>/ ${num(state.inbounds.length)}</small>`,'inbounds','purple',c.running?'Enabled with eligible clients':'Save settings or start the core')}${metric('Server uptime',m.uptime===null?'—':`${Math.floor(m.uptime/86400)} <small>days</small> ${Math.floor(m.uptime%86400/3600)} <small>hours</small>`,'clock','',e(m.hostname))}</div>`+
+ `<div class="grid-2" data-overview="resources"><section class="card"><div class="card-header"><div><h2>Server traffic</h2><p>All network interfaces, excluding loopback</p></div>${badge('Last 10 minutes')}</div><div class="chart-totals"><div><span><i class="legend-dot"></i>Download</span><b>${e(size(m.rx_rate))}<small> /s</small></b></div><div><span><i class="legend-dot green"></i>Upload</span><b>${e(size(m.tx_rate))}<small> /s</small></b></div></div><div class="network-chart">${chart(m.samples)}</div></section>
  <section class="card"><div class="card-header"><div><h2>Server resources</h2><p>Live hardware utilization</p></div>${icon('cpu')}</div><div class="card-body">${resource('CPU',m.cpu_percent,'cpu',`${num(m.cpu_count)} cores · Load ${m.load.map(x=>x.toFixed(2)).join(' / ')}`)}${resource('Memory',m.memory_total?100*m.memory_used/m.memory_total:null,'memory',size(m.memory_used)+' of '+size(m.memory_total))}${resource('Disk storage',100*m.disk_used/m.disk_total,'disk',size(m.disk_used)+' of '+size(m.disk_total))}</div><div class="resource-footer"><span>Operating system</span><b>${e(m.platform)}</b></div></section></div>`+
- (!state.clients.length?`<section class="card section-gap"><div class="card-header"><div><h2>Your first connection in three steps</h2><p>Set up your server</p></div>${badge('Get started','orange')}</div><div class="steps">${[['01','TLS certificate','Generate in one click','tls'],['02','New Inbound','Choose protocol and port','inbounds'],['03','Create client','Set traffic and expiry','clients']].map(s=>`<a class="step" href="#${s[3]}"><span>${s[0]}</span><div><b>${s[1]}</b><small>${s[2]}</small></div></a>`).join('')}</div></section>`:'')+
- `<section class="card"><div class="card-header"><div><h2>Your clients</h2><p>Five clients with the highest traffic usage</p></div><a class="text-link" href="#clients">View all →</a></div>${clientTable([...state.clients].sort((a,b)=>total(b)-total(a)||a.name.localeCompare(b.name)).slice(0,5),true)}</section>`+
- `<div class="bottom-grid"><section class="card"><div class="card-header"><h2>Recent activity</h2>${icon('clock')}</div><div class="card-body">${dashboard.events.length?dashboard.events.slice(0,5).map(x=>`<div class="event"><span class="event-dot"></span><span>${e(x.message)}</span><time>${date(x.at)} · ${time(x.at)}</time></div>`).join(''):'<p class="note">No events recorded yet.</p>'}</div></section><section class="card"><div class="card-header"><h2>Service information</h2>${badge(c.running?'Running':'Stopped',c.running?'green':'')}</div><div class="card-body">${info('Hostname',e(m.hostname))}${info('IPv4',addressList(m.ipv4))}${info('IPv6',addressList(m.ipv6))}${info('CPU model',e(m.cpu_model||'Unavailable'))}${info('Core version',e(c.version||'Not installed'))}${info('Active configuration revision',c.active_revision===null?'Not applied yet':num(c.active_revision))}${info('Saved revision',num(state.revision))}</div></section></div>`;
+ (!state.clients.length?`<section class="card section-gap" data-overview="onboarding"><div class="card-header"><div><h2>Your first connection in three steps</h2><p>Set up your server</p></div>${badge('Get started','orange')}</div><div class="steps">${[['01','TLS certificate','Generate in one click','tls'],['02','New Inbound','Choose protocol and port','inbounds'],['03','Create client','Set traffic and expiry','clients']].map(s=>`<a class="step" href="#${s[3]}"><span>${s[0]}</span><div><b>${s[1]}</b><small>${s[2]}</small></div></a>`).join('')}</div></section>`:'')+
+ `<section class="card" data-overview="clients"><div class="card-header"><div><h2>Your clients</h2><p>Five clients with the highest traffic usage</p></div><a class="text-link" href="#clients">View all →</a></div>${clientTable([...state.clients].sort((a,b)=>total(b)-total(a)||a.name.localeCompare(b.name)).slice(0,5),true)}</section>`+
+ `<div class="bottom-grid" data-overview="activity"><section class="card"><div class="card-header"><h2>Recent activity</h2>${icon('clock')}</div><div class="card-body">${dashboard.events.length?dashboard.events.slice(0,5).map(x=>`<div class="event"><span class="event-dot"></span><span>${e(x.message)}</span><time>${date(x.at)} · ${time(x.at)}</time></div>`).join(''):'<p class="note">No events recorded yet.</p>'}</div></section><section class="card"><div class="card-header"><h2>Service information</h2>${badge(c.running?'Running':'Stopped',c.running?'green':'')}</div><div class="card-body">${info('Hostname',e(m.hostname))}${info('IPv4',addressList(m.ipv4))}${info('IPv6',addressList(m.ipv6))}${info('CPU model',e(m.cpu_model||'Unavailable'))}${info('Core version',e(c.version||'Not installed'))}${info('Active configuration revision',c.active_revision===null?'Not applied yet':num(c.active_revision))}${info('Saved revision',num(state.revision))}</div></section></div>`;
 }
 function addressList(values){return values===null||values===undefined?'Unavailable':values.length?values.map(value=>`<span class="mono">${e(value)}</span>`).join('<br>'):'Not assigned';}
 function info(label,value){return `<div class="info-row"><span>${label}</span><b>${value}</b></div>`;}
@@ -382,7 +435,7 @@ const coreFeatureHelp={
 const coreLabels={dns_servers:'Resolvers',dns_rules:'DNS rules',rule_sets:'Rule sets',dns_options:'DNS settings',route_rules:'Routing rules',outbounds:'Outbounds',route_options:'Routing settings',endpoints:'Endpoints',services:'Services',certificate_providers:'Certificate providers',http_clients:'HTTP clients',network_namespaces:'Network namespaces',log:'Logging',ntp:'NTP',certificate:'Certificate trust',experimental:'Cache and APIs'};
 function updateBanner(){
  const updates=dashboard.updates||{},core=dashboard.core||{};
- return `<section class="release-overview" aria-label="Versions and updates"><div class="release-components">${['panel','core'].map(key=>{
+ return `<section class="release-overview" data-overview="versions" aria-label="Versions and updates"><div class="release-components">${['panel','core'].map(key=>{
   const item=updates[key]||{},name=key==='panel'?'NARA':'Sing-box';
   const installed=key==='panel'?'v'+dashboard.panel_version:(core.version||'Not installed').replace('sing-box version ','');
   const message=updates.checking?'Checking for updates…':item.error?'Update check unavailable':item.available?'New version '+item.latest:item.known?'Up to date':'Not checked yet';

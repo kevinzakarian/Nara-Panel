@@ -147,6 +147,55 @@ test('authenticated panel entry triggers both-version checks once per entry and 
   assert.equal(f.w.document.querySelector('#app').hidden,false);assert.equal(f.w.document.querySelector('#login').hidden,true);
  }finally{f.close()}
 });
+test('entry opens the workspace while the update check is still pending',async()=>{
+ const f=app();let rejectUpdate;
+ try{
+  const document=f.w.document;
+  document.body.insertAdjacentHTML('beforeend','<div id="login"></div><div id="app" hidden></div><div id="admin-name"></div><div id="login-error"></div>');
+  const update=new Promise((_,reject)=>{rejectUpdate=reject;});
+  const entry=f.w.TestApp.enterWith(async path=>{
+   if(path==='session')return {csrf:'entry-csrf',username:'admin'};
+   if(path==='options')return fixture.options;
+   if(path==='core-schema')return fixture.catalog;
+   if(path==='check-updates')return update;
+  });
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(document.querySelector('#app').hidden,false);
+  assert.equal(document.querySelector('#login').hidden,true);
+  rejectUpdate(new Error('Update check unavailable'));
+  await entry;
+  assert.equal(document.querySelector('#app').hidden,false);
+ }finally{f.close();}
+});
+test('silent overview refresh updates values and keeps focused links and reordered client actions',async()=>{
+ const w=new JSDOM(fs.readFileSync('web/index.html','utf8'),{runScripts:'outside-only',url:'http://localhost/#dashboard'}).window;
+ try{
+  const source=fs.readFileSync('web/app.js','utf8');
+  w.eval(fs.readFileSync('web/clients.js','utf8')+'\n'+source.slice(0,source.indexOf("document.addEventListener('click'"))+`
+   globalThis.RefreshFixture={setup(model,data){state=model;dashboard=data;csrf='fixture';renderNav();$('#content').innerHTML=renderDashboard();},tick(data){api=async()=>data;return load(true);}};
+  `);
+  const model={...fixture.state,clients:['one','two'].map(id=>({id,name:id,enabled:true,inbound_ids:[]}))};
+  const initial={metrics:{hostname:'demo',platform:'Linux',cpu_count:1,cpu_percent:15,uptime:null,load:[0,0,0],disk_total:1,disk_used:0,samples:[]},core:{running:true,active_revision:model.revision},panel_version:'0.14.0',totals:{one:{upload:10,download:0}},events:[]};
+  w.RefreshFixture.setup(model,initial);
+  const document=w.document,nav=document.querySelector('#navigation a[href="#clients"]');
+  const chart=document.querySelector('.network-chart');
+  const button=document.querySelector('[data-action="client-details"][data-id="one"]');
+  nav.focus();
+  const updated={...initial,core:{...initial.core,error:'An example service notice'},metrics:{...initial.metrics,cpu_percent:42},totals:{two:{upload:25,download:0}}};
+  await w.RefreshFixture.tick(updated);
+  assert.equal(document.activeElement,nav);
+  assert.equal(document.querySelector('.network-chart'),chart);
+  assert.match(document.querySelector('[data-overview="resources"]').textContent,/42\.0%/);
+  assert.equal(document.querySelector('[data-overview-client]').dataset.overviewClient,'two');
+  assert.equal(document.querySelector('[data-action="client-details"][data-id="one"]'),button);
+  button.focus();
+  await w.RefreshFixture.tick(initial);
+  assert.equal(document.activeElement,button);
+  assert.equal(document.querySelector('[data-overview-client]').dataset.overviewClient,'one');
+  assert.equal(document.querySelector('[data-overview="core-error"]'),null);
+  assert.equal(document.querySelectorAll('[data-overview="resources"]').length,1);
+ }finally{w.close();}
+});
 test('new inbound requires choosing a protocol before saving',()=>{
  const f=app();try{
   f.w.TestApp.editInbound();const document=f.w.document,select=document.querySelector('[name=type]');
